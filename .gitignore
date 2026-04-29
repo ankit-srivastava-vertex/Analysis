@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Generated reports & charts (re-created on each run)
+market_analysis_report.xlsx
+pct_down_report.xlsx
+*_chart.html
+
+# Cache files (re-created by scripts)
+fii_equity_cache.csv
+fii_oi_cache.csv
+
+# Excel lock files
+~$*.xlsx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Forensic reports
+forensic_report_*.pdf
+
+# Environment file
+.env
+
+# Test files
+test_*.py
