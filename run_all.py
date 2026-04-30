@@ -7,7 +7,8 @@ sends a single email with all reports + charts attached.
 Outputs:
   - market_analysis_report.xlsx   (sheets from: sector index, FII flows,
                                    FII sector flows, sector momentum)
-  - pct_down_report.xlsx          (percentage down screener — separate)
+  - pct_down_report.xlsx          (multi-universe pct-down screener
+                                   NSE / NSE-SME / BSE-SME — separate)
   - *_chart.html                  (one interactive chart per scenario)
 
 Usage:
@@ -37,7 +38,7 @@ ALL_SCENARIOS = ["sector_index", "fii_flows", "fii_sector_flows",
 def run_sector_index():
     """Run Custom Sector Index Builder. Returns sheets dict + chart path."""
     from custom_sector_index import run as csi_run
-    prefix = os.path.join(SCRIPT_DIR, "_tmp_csi_%s" % TIMESTAMP)
+    prefix = os.path.join(SCRIPT_DIR, "custom_sector_index")
     result = csi_run(output_prefix=prefix)
     if result is None or result[0] is None:
         return {}, None
@@ -60,7 +61,7 @@ def run_sector_index():
 def run_fii_flows():
     """Run FII Equity Cash Market Tracker. Returns sheets dict + chart path."""
     from fii_flows import run as fii_run
-    prefix = os.path.join(SCRIPT_DIR, "_tmp_fii_%s" % TIMESTAMP)
+    prefix = os.path.join(SCRIPT_DIR, "fii_flows")
     result = fii_run(output_prefix=prefix)
     if result is None:
         return {}, None
@@ -108,7 +109,7 @@ def run_fii_flows():
 def run_fii_sector_flows():
     """Run FII Sector-wise Flows. Returns sheets dict + chart path."""
     from fii_sector_flows import run as fsf_run
-    prefix = os.path.join(SCRIPT_DIR, "_tmp_fsf_%s" % TIMESTAMP)
+    prefix = os.path.join(SCRIPT_DIR, "fii_sector_flows")
     result = fsf_run(output_prefix=prefix)
     if result is None:
         return {}, None
@@ -130,7 +131,7 @@ def run_fii_sector_flows():
 def run_sector_momentum():
     """Run Sector Momentum & RS Analyzer. Returns sheets dict + chart path."""
     from sector_momentum import run as sm_run
-    prefix = os.path.join(SCRIPT_DIR, "_tmp_sm_%s" % TIMESTAMP)
+    prefix = os.path.join(SCRIPT_DIR, "sector_momentum")
     result = sm_run(output_prefix=prefix)
     if result is None:
         return {}, None
@@ -151,21 +152,26 @@ def run_sector_momentum():
 
 
 def run_pct_down():
-    """Run Percentage Down Screener. Returns Excel path (separate workbook)."""
-    from percentage_down import run as pd_run
-    prefix = os.path.join(SCRIPT_DIR, "pct_down_report")
-    result = pd_run(output_prefix=prefix)
-    if result is None:
-        return None
-
-    tables, common, all4, excel_path = result
+    """Run Multi-Universe Pct-Down Screener (NSE / NSE-SME / BSE-SME).
+    Returns Excel path (separate workbook)."""
+    from multi_pct_down import run as mpd_run, DEFAULT_WORKERS
+    prefix = os.path.join(SCRIPT_DIR, "multi_pct_down_report")
+    excel_path = mpd_run(
+        out_dir=SCRIPT_DIR,
+        skip=set(),
+        min_pct=2.0,
+        max_pct=30.0,
+        max_symbols=0,
+        workers=DEFAULT_WORKERS,
+        output_prefix=prefix,
+    )
     return excel_path
 
 
 def run_rrg():
     """Run RRG Chart. Returns sheets dict + chart path."""
     from rrg_chart import run as rrg_run
-    prefix = os.path.join(SCRIPT_DIR, "_tmp_rrg_%s" % TIMESTAMP)
+    prefix = os.path.join(SCRIPT_DIR, "rrg_chart")
     result = rrg_run(output_prefix=prefix)
     if result is None:
         return {}, None
@@ -311,18 +317,18 @@ def main():
     # ── 5. Percentage Down Screener ──────────────────────────────────────
     if "pct_down" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 5/6: Percentage Down Screener")
+        print("  SCENARIO 5/6: Multi-Universe Pct-Down Screener")
         print("=" * 70)
         try:
             pct_down_excel = run_pct_down()
             if pct_down_excel:
-                print("  ✓ Percentage Down complete")
+                print("  ✓ Multi Pct-Down complete")
             else:
                 errors.append("pct_down: returned no data")
-                print("  ✗ Percentage Down returned no data")
+                print("  ✗ Multi Pct-Down returned no data")
         except Exception as e:
             errors.append("pct_down: %s" % e)
-            print("  ✗ Percentage Down FAILED: %s" % e)
+            print("  ✗ Multi Pct-Down FAILED: %s" % e)
             traceback.print_exc()
 
     # ── 6. RRG Chart ─────────────────────────────────────────────────────
@@ -381,7 +387,8 @@ def main():
             body_lines.append("  • Market Analysis Report (Excel) — %d sheets" %
                               len(unified_sheets))
         if pct_down_excel:
-            body_lines.append("  • Percentage Down Screener (Excel)")
+            body_lines.append(
+                "  • Multi-Universe Pct-Down Screener (Excel)")
         for cf in chart_files:
             body_lines.append("  • %s (Interactive Chart)" % os.path.basename(cf))
 

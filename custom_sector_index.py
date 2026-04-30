@@ -206,8 +206,8 @@ def create_chart(all_indices, title="Custom Sector Indices"):
                 ],
             ),
         ),
-        yaxis=dict(title="Index Value (Base=%d)" % BASE_VALUE),
-        hovermode="x unified",
+        yaxis=dict(title="Index Value (Base=%d)" % BASE_VALUE, rangemode="tozero"),
+        hovermode="closest",
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -220,6 +220,68 @@ def create_chart(all_indices, title="Custom Sector Indices"):
     )
 
     return fig
+
+
+def create_individual_charts(all_indices):
+    """Create individual Plotly charts for each sector index with duration sliders.
+
+    Args:
+        all_indices: dict of {index_name: Series(Date -> value)}
+
+    Returns:
+        list of plotly Figure objects (one per sector)
+    """
+    colors = [
+        "#2196F3", "#FF5722", "#4CAF50", "#9C27B0", "#FF9800",
+        "#00BCD4", "#E91E63", "#8BC34A", "#673AB7", "#CDDC39",
+    ]
+
+    figures = []
+    for i, (name, series) in enumerate(all_indices.items()):
+        fig = go.Figure()
+        color = colors[i % len(colors)]
+        current = series.iloc[-1]
+        change_pct = ((current / BASE_VALUE) - 1) * 100
+
+        hover_tpl = (
+            "<b>" + name + "</b><br>"
+            "Date: %{x|%d-%b-%Y}<br>"
+            "Value: %{y:.2f}<br>"
+            "<extra></extra>"
+        )
+
+        fig.add_trace(go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="lines",
+            name="%s (%.1f%%)" % (name, change_pct),
+            line=dict(width=2, color=color),
+            hovertemplate=hover_tpl,
+        ))
+
+        fig.update_layout(
+            title=dict(text="%s — %.2f (%+.1f%%)" % (name, current, change_pct), font=dict(size=16)),
+            xaxis=dict(
+                title="Date",
+                rangeslider=dict(visible=True),
+                rangeselector=dict(
+                    buttons=[
+                        dict(count=1, label="1M", step="month", stepmode="backward"),
+                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=9, label="9M", step="month", stepmode="backward"),
+                        dict(step="all", label="ALL"),
+                    ],
+                ),
+            ),
+            yaxis=dict(title="Index Value (Base=%d)" % BASE_VALUE, rangemode="tozero"),
+            hovermode="x",
+            template="plotly_white",
+            height=400,
+        )
+        figures.append(fig)
+
+    return figures
 
 
 # ─── Output ──────────────────────────────────────────────────────────────────
@@ -250,11 +312,26 @@ def save_to_excel(all_indices, all_prices, summary, output_file):
     print("\nExcel saved: %s" % output_file)
 
 
-def save_chart_html(fig, output_file):
-    """Save Plotly chart as standalone HTML (suitable for email embedding)."""
-    html = fig.to_html(full_html=True, include_plotlyjs="cdn")
+def save_chart_html(fig, output_file, individual_figs=None):
+    """Save Plotly chart as standalone HTML with optional individual sector charts."""
+    combined_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+
+    individual_html = ""
+    if individual_figs:
+        individual_html = '<hr style="margin:40px 0;"><h2 style="text-align:center;font-family:sans-serif;">Individual Sector Charts</h2>'
+        for ifig in individual_figs:
+            individual_html += ifig.to_html(full_html=False, include_plotlyjs=False)
+
+    full_html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Custom Sector Indices</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head><body style="margin:20px;">
+%s
+%s
+</body></html>""" % (combined_html, individual_html)
+
     with open(output_file, "w") as f:
-        f.write(html)
+        f.write(full_html)
     print("HTML chart saved: %s" % output_file)
 
 
@@ -339,18 +416,18 @@ def run(constituents_file=None, output_prefix=None):
 
     # Generate output filenames
     if output_prefix is None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_prefix = "Custom_Index_%s" % timestamp
+        output_prefix = os.path.join(SCRIPT_DIR, "custom_sector_index")
 
     excel_path = output_prefix + ".xlsx"
     html_path = output_prefix + "_chart.html"
 
     # Plot
     fig = create_chart(all_indices)
+    individual_figs = create_individual_charts(all_indices)
 
     # Save outputs
     save_to_excel(all_indices, all_prices, summary_df, excel_path)
-    save_chart_html(fig, html_path)
+    save_chart_html(fig, html_path, individual_figs=individual_figs)
 
     print("\nDone! %d indices built." % len(all_indices))
     return all_indices, all_prices, summary_df, fig, excel_path, html_path

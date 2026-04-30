@@ -618,11 +618,10 @@ def run(output_prefix=None, force_refresh=False):
 
     # Output files
     if output_prefix is None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_prefix = os.path.join(SCRIPT_DIR, "FII_Equity_%s" % timestamp)
+        output_prefix = os.path.join(SCRIPT_DIR, "fii_flows")
 
     excel_path = output_prefix + ".xlsx"
-    html_path = os.path.join(os.path.dirname(output_prefix), "fii_flows_chart.html")
+    html_path = output_prefix + "_chart.html"
 
     # Chart
     fig = create_chart(equity_df, oi_df=oi_df)

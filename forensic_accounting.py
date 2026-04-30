@@ -49,7 +49,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION — Change this symbol each time you run the analysis
 # ══════════════════════════════════════════════════════════════════════════════
-COMPANY_SYMBOL = "TGL"       # NSE symbol (e.g. RELIANCE, TCS, INFY, HDFCBANK)
+COMPANY_SYMBOL = "POWERMECH"       # NSE symbol (e.g. RELIANCE, TCS, INFY, HDFCBANK)
 # ══════════════════════════════════════════════════════════════════════════════
 
 

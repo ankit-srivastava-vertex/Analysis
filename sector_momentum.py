@@ -332,11 +332,10 @@ def run(constituents_file=None, output_prefix=None):
 
     # Output files
     if output_prefix is None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_prefix = os.path.join(SCRIPT_DIR, "Sector_Momentum_%s" % timestamp)
+        output_prefix = os.path.join(SCRIPT_DIR, "sector_momentum")
 
     excel_path = output_prefix + ".xlsx"
-    html_path = os.path.join(os.path.dirname(output_prefix), "sector_momentum_chart.html")
+    html_path = output_prefix + "_chart.html"
 
     fig = create_rs_chart(all_rs, all_indices)
 

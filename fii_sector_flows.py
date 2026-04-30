@@ -410,10 +410,9 @@ def run(output_prefix=None):
 
     # 6. Save
     if output_prefix is None:
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_prefix = os.path.join(SCRIPT_DIR, "fii_sector_flows_%s" % ts)
+        output_prefix = os.path.join(SCRIPT_DIR, "fii_sector_flows")
 
-    chart_path = os.path.join(SCRIPT_DIR, "fii_sector_flows_chart.html")
+    chart_path = output_prefix + "_chart.html"
 
     print("\n[5] Saving output ...")
     save_outputs(sector_totals, data, fig, output_prefix, chart_path=chart_path)

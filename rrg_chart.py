@@ -671,11 +671,10 @@ def run(output_prefix=None):
 
     # 4. Save outputs
     if output_prefix is None:
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_prefix = os.path.join(SCRIPT_DIR, "RRG_%s" % ts)
+        output_prefix = os.path.join(SCRIPT_DIR, "rrg_chart")
 
     excel_path = output_prefix + ".xlsx"
-    html_path = os.path.join(os.path.dirname(output_prefix), "rrg_chart_chart.html")
+    html_path = output_prefix + "_chart.html"
 
     print("\n[4] Saving outputs ...")
     save_excel(all_timeframe_data, excel_path)
