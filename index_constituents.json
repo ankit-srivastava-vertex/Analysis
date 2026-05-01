@@ -73,5 +73,112 @@
             "BIOCON",
             "LAURUSLABS"
         ]
+    },
+    "Water": {
+        "description": "Water Treatment & Infrastructure",
+        "constituents": [
+            "EMSLIMITED",
+            "VPRPL",
+            "WABAG",
+            "IONEXCHANG",
+            "EIEL"
+        ]
+    },
+    "PlantMachines": {
+        "description": "Plant & Industrial Machinery",
+        "constituents": [
+            "JASH",
+            "KIRLOSBROS",
+            "ROTO",
+            "SHAKTIPUMP",
+            "TRITURBINE",
+            "PRAJIND",
+            "ELECON"
+        ]
+    },
+    "NicheDefence": {
+        "description": "Niche Defence & Aerospace",
+        "constituents": [
+            "AVANTEL",
+            "APOLLO",
+            "ASTRAMICRO",
+            "AZAD",
+            "BDL",
+            "DATAPATTNS",
+            "GRSE",
+            "PREMEXPLN",
+            "MAZDOCK",
+            "ZENTEC"
+        ]
+    },
+    "Solar": {
+        "description": "Solar Energy & Renewables",
+        "constituents": [
+            "INOXWIND",
+            "KPEL",
+            "KPIGREEN",
+            "SWSOLAR",
+            "WAAREEENER",
+            "PREMIERENE",
+            "ORIANA",
+            "ADVAIT",
+            "VIVIANA"
+        ]
+    },
+    "Transformer&Equipments": {
+        "description": "Transformers & Electrical Equipment",
+        "constituents": [
+            "HBLENGINE",
+            "HPL",
+            "SALZERELEC",
+            "TARIL",
+            "VOLTAMP",
+            "CGPOWER",
+            "SHILCTECH",
+            "RMC",
+            "QPOWER",
+            "DANISH"
+        ]
+    },
+    "Electronics": {
+        "description": "Electronics Manufacturing Services",
+        "constituents": [
+            "AIMTRON",
+            "AVALON",
+            "CYIENTDLM",
+            "EPACK",
+            "KAYNES",
+            "MOSCHIP",
+            "PGEL",
+            "SAHASRA",
+            "SYRMA",
+            "VOEPL"
+        ]
+    },
+    "Infra": {
+        "description": "Infrastructure & Construction",
+        "constituents": [
+            "ANANTRAJ",
+            "AHLUCONT",
+            "ASHOKA",
+            "CHAVDA",
+            "CEMPRO",
+            "JKIL",
+            "EFFWA",
+            "VVIPIL"
+        ]
+    },
+    "Wires&Cables": {
+        "description": "Wires & Cables",
+        "constituents": [
+            "POLYCAB",
+            "KEI",
+            "APARINDS",
+            "UNIVCABLES",
+            "DYCL",
+            "BIRLACABLE",
+            "RRKABEL",
+            "FINCABLES"
+        ]
     }
 }
