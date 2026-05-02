@@ -1,20 +1,52 @@
 """
-Master Report Runner
-====================
-Runs all analysis scenarios, creates consolidated outputs, and
-sends a single email with all reports + charts attached.
+Master Report Runner (Orchestrator)
+====================================
 
-Outputs:
-  - market_analysis_report.xlsx   (sheets from: sector index, FII flows,
-                                   FII sector flows, sector momentum)
-  - pct_down_report.xlsx          (multi-universe pct-down screener
-                                   NSE / NSE-SME / BSE-SME — separate)
-  - *_chart.html                  (one interactive chart per scenario)
+SUMMARY
+-------
+Command-centre script that runs all market analysis scenarios in sequence,
+consolidates their outputs into unified Excel workbooks, and sends a single
+email with all reports + interactive HTML charts attached.
 
-Usage:
-  python run_all.py               # Run all, save files + send email
-  python run_all.py --no-email    # Run all, save files only
-  python run_all.py --skip fii_flows pct_down   # Skip specific scenarios
+WORKFLOW
+--------
+1. Parse CLI args (--no-email, --skip <scenarios>).
+2. Run 6 scenarios in order:
+   a. sector_index      → custom_sector_index.run()   — custom equal-weighted sector indices
+   b. fii_flows          → fii_flows.run()             — daily FII equity cash flows
+   c. fii_sector_flows   → fii_sector_flows.run()      — fortnightly FII sector-wise flows
+   d. sector_momentum    → sector_momentum.run()       — Mansfield RS per sector
+   e. pct_down           → multi_pct_down.run()        — pct-down screener (NSE/NSE-SME/BSE-SME)
+   f. rrg                → rrg_chart.run()             — Relative Rotation Graph
+3. Merge all scenario sheets into a unified Excel workbook
+   (market_analysis_report.xlsx).
+4. Collect all HTML chart files.
+5. Send consolidated email with Excel + HTML attachments (unless --no-email).
+
+DATA SOURCES
+------------
+All data is fetched by individual sub-modules (see each file's header).
+This script only orchestrates and consolidates.
+
+OUTPUT
+------
+- market_analysis_report.xlsx    — Unified workbook (6+ sheets)
+- multi_pct_down_report.xlsx     — Separate screener workbook
+- *_chart.html                   — 5 interactive Plotly charts
+
+USAGE
+-----
+Individual run:
+    python3 run_all.py                              # run all + send email
+    python3 run_all.py --no-email                   # run all, skip email
+    python3 run_all.py --skip fii_flows pct_down    # skip specific scenarios
+
+Available scenario names for --skip:
+    sector_index, fii_flows, fii_sector_flows, sector_momentum, pct_down, rrg
+
+DEPENDENCIES
+------------
+pandas, openpyxl, email_sender, and all sub-module dependencies.
 """
 
 import os

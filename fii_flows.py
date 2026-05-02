@@ -1,26 +1,55 @@
 """
 FII Equity Cash Market Tracker
 ===============================
-Tracks daily FII buying/selling in the Indian equity cash market.
 
-Charts:
-  - FII Daily Net Inflow (₹ Cr) — bar chart
-  - FII Cumulative Net Inflow (₹ Cr) — running total
-  - FII Daily Change in Net Inflow (₹ Cr)
+SUMMARY
+-------
+Tracks daily FII (Foreign Institutional Investor) buying/selling in the
+Indian equity cash market.  Produces a 3-panel interactive chart and
+Excel export with daily + cumulative flows.
 
-Data Source:
-  - NSDL FPI Monitor: https://www.fpi.nsdl.co.in/web/Reports/Archive.aspx
-    (historical data, month by month, from Jan 2024)
-  - NSE API: https://www.nseindia.com/api/fiidiiTradeReact
-    (today's provisional data)
+WORKFLOW
+--------
+1. Check local cache file (fii_equity_cache.csv).
+2. If cache is empty or --refresh: fetch full history from NSDL FPI Monitor
+   (monthly archives from Jan 2024 onward).  Also fetch OI data.
+3. Fetch today's provisional data from NSE API and append to cache.
+4. Build 3-panel Plotly chart:
+   a. FII Daily Net Inflow (₹ Cr) — bar chart
+   b. FII Cumulative Net Inflow (₹ Cr) — running total line
+   c. FII Daily Change in Net Inflow (₹ Cr) — diff bar chart
+5. Export to Excel (summary + daily data sheets) + standalone HTML chart.
 
-The script caches daily data in fii_equity_cache.csv. First run fetches
-the full history from NSDL. Subsequent runs add today's data from NSE.
+DATA SOURCES
+------------
+- NSDL FPI Monitor   — https://www.fpi.nsdl.co.in/web/Reports/Archive.aspx
+                       Historical daily equity + derivatives OI flows
+                       (month-by-month archives, scraped via requests)
+- NSE API            — https://www.nseindia.com/api/fiidiiTradeReact
+                       Today's provisional FII/DII data
+- Local cache        — fii_equity_cache.csv, fii_oi_cache.csv
+                       (persisted between runs to avoid re-fetching history)
 
-Usage:
-  python fii_flows.py                 # Fetch history + today & plot
-  python fii_flows.py -o my_report    # Custom output prefix
-  python fii_flows.py --refresh       # Force re-fetch all NSDL data
+OUTPUT
+------
+- fii_flows.xlsx         — Excel with Summary + Daily Data sheets
+- fii_flows_chart.html   — Interactive 3-panel Plotly chart
+
+USAGE
+-----
+Individual run:
+    python3 fii_flows.py                  # fetch history + today & plot
+    python3 fii_flows.py -o my_report     # custom output prefix
+    python3 fii_flows.py --refresh        # force re-fetch all NSDL data
+
+Group run (via run_all.py):
+    Scenario name: fii_flows
+    Called as: fii_flows.run()  →  returns (equity_df, oi_df, fig, excel_path, html_path)
+    Skip with: python3 run_all.py --skip fii_flows
+
+DEPENDENCIES
+------------
+requests, pandas, plotly, BeautifulSoup (bs4)
 """
 
 import os

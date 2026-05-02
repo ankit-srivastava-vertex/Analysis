@@ -1,17 +1,74 @@
 """
-Forensic Accounting Analysis Tool
-===================================
-Deep-dive financial forensic analysis of any listed Indian company.
-Pulls 3+ years of financial data (Balance Sheet, P&L, Cash Flow) from
-BSE/NSE via yfinance, computes forensic scores (Beneish M-Score,
-Altman Z-Score, Piotroski F-Score, DuPont decomposition), detects
-red/green flags, and generates a professional PDF report with
-investment recommendation.
+Forensic Accounting & Deep Fundamental Analysis Tool
+=====================================================
 
-Usage:
-    1. Set COMPANY_SYMBOL below to the NSE symbol (e.g. "RELIANCE")
-    2. Run:  python forensic_accounting.py
-    3. PDF report is saved in the same directory.
+SUMMARY
+-------
+Comprehensive single-stock forensic + deep fundamental analysis for any
+listed Indian company.  Generates a professional PDF report (40+ pages)
+with investment recommendation (BUY / HOLD / SELL / AVOID).
+
+WORKFLOW
+--------
+1. Fetch 3+ years of financials (Balance Sheet, P&L, Cash Flow) via yfinance
+   (.NS primary, .BO BSE fallback if NSE data is sparse).
+2. Compute forensic scores:
+   - Beneish M-Score (earnings manipulation detection)
+   - Altman Z-Score  (bankruptcy risk)
+   - Piotroski F-Score (financial strength, 0-9)
+   - DuPont decomposition (ROE breakdown)
+   - Springate S-Score, Ohlson O-Score, Montier C-Score
+   - Benford's Law digit distribution analysis
+3. Fetch extended data from NSE APIs (with retry + 18-hour cache):
+   - Credit ratings, promoter holding, ESM status
+   - Concall transcripts, investor presentations (auto-downloaded PDFs)
+   - Shareholding history (quarterly), SAST / insider disclosures
+   - Delivery / volume data, sector peers
+   - Corporate actions, related-party filings, MF / institutional holders
+4. Run deep fundamental analysis:
+   - Shareholding trend, insider trading signals
+   - Peer comparison, relative strength vs Nifty 50
+   - Technical structure, Graham / Magic Formula valuation
+   - Capex cycle, tax sustainability, institutional holding trends
+   - Credit rating intelligence
+5. Score: Forensic Score (0-100) + Deep Fundamental Score (0-100).
+6. Generate PDF report with all sections and save to script directory.
+
+DATA SOURCES
+------------
+- yfinance          — Financial statements, historical prices, MF holders
+                      (.NS = NSE, .BO = BSE fallback)
+- NSE APIs          — Credit ratings, shareholding, SAST, delivery data,
+                      sector peers, concalls, investor presentations,
+                      related-party filings, ESM status, promoter holding
+- Local PDF parsing  — Concall transcripts & investor presentations
+                      (auto-downloaded from NSE, parsed via PyPDF2)
+
+RESILIENCE
+----------
+- Retry:  All NSE API calls retry 3× with exponential backoff.
+          Auto-refreshes cookies on HTTP 401; backs off on 429.
+- Cache:  JSON responses cached in .cache/ directory (18-hour TTL).
+          Same-day re-runs are dramatically faster.
+- BSE fallback: If yfinance .NS returns < 2 years of data, tries .BO.
+
+OUTPUT
+------
+- forensic_report_<SYMBOL>_<timestamp>.pdf
+
+USAGE
+-----
+Individual run:
+    python3 forensic_accounting.py                     # uses COMPANY_SYMBOL set below
+    python3 -c "from forensic_accounting import run; run('RELIANCE')"  # any symbol
+
+Group run (via run_all.py):
+    Not part of run_all.py — run independently.
+
+DEPENDENCIES
+------------
+yfinance, pandas, fpdf2 (FPDF), PyPDF2, requests
+(fpdf2 and PyPDF2 are auto-installed if missing)
 """
 
 import os
@@ -32,6 +89,9 @@ except ImportError:
 
 import re
 import io
+import json
+import time
+import hashlib
 
 import pandas as pd
 import yfinance as yf
@@ -45,6 +105,127 @@ except ImportError:
     import PyPDF2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESILIENCE: Same-day cache + Retry logic with backoff
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache")
+_CACHE_TTL_HOURS = 18  # cache valid for 18 hours (re-run same day = instant)
+
+
+def _cache_path(key):
+    """Get cache file path for a given key."""
+    safe_key = hashlib.md5(key.encode()).hexdigest()
+    return os.path.join(_CACHE_DIR, safe_key + ".json")
+
+
+def _cache_get(key):
+    """Retrieve cached data if fresh (within TTL)."""
+    path = _cache_path(key)
+    if not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        age_hours = (time.time() - mtime) / 3600
+        if age_hours > _CACHE_TTL_HOURS:
+            return None
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _cache_set(key, data):
+    """Store data in cache."""
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        path = _cache_path(key)
+        with open(path, "w") as f:
+            json.dump(data, f, default=str)
+    except Exception:
+        pass  # caching is best-effort
+
+
+def _nse_get(session, url, params=None, max_retries=3, timeout=15):
+    """
+    NSE API GET with retry + exponential backoff.
+    Returns response object or None on failure.
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = session.get(url, params=params, timeout=timeout)
+            if resp.status_code == 200:
+                return resp
+            if resp.status_code == 401:
+                # Cookie expired — refresh session
+                try:
+                    session.get("https://www.nseindia.com/", timeout=10)
+                except Exception:
+                    pass
+            if resp.status_code == 429:
+                # Rate limited — wait longer
+                time.sleep(2 ** (attempt + 1))
+                continue
+            if resp.status_code >= 500:
+                # Server error — retry
+                time.sleep(1.5 ** attempt)
+                continue
+            # 4xx other than 401/429 — don't retry
+            return resp
+        except requests.exceptions.Timeout:
+            time.sleep(1.5 ** attempt)
+        except requests.exceptions.ConnectionError:
+            time.sleep(2 ** attempt)
+        except Exception:
+            time.sleep(1)
+    return None
+
+
+def _nse_get_json(session, url, params=None, cache_key=None, max_retries=3):
+    """
+    NSE API GET returning parsed JSON, with cache support.
+    """
+    # Check cache first
+    if cache_key:
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+    resp = _nse_get(session, url, params=params, max_retries=max_retries)
+    if resp is None or resp.status_code != 200:
+        return None
+
+    try:
+        data = resp.json()
+    except Exception:
+        return None
+
+    # Store in cache
+    if cache_key and data:
+        _cache_set(cache_key, data)
+
+    return data
+
+
+def _nse_download_pdf(session, pdf_url, max_retries=2):
+    """Download a PDF from NSE with retry. Returns bytes or None."""
+    for attempt in range(max_retries):
+        try:
+            resp = session.get(pdf_url, timeout=25)
+            if resp.status_code == 200 and resp.content[:5] == b'%PDF-':
+                return resp.content
+            if resp.status_code == 403 or resp.status_code == 401:
+                # Refresh cookies and retry
+                try:
+                    session.get("https://www.nseindia.com/", timeout=10)
+                except Exception:
+                    pass
+                time.sleep(1)
+                continue
+        except Exception:
+            time.sleep(1.5 ** attempt)
+    return None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION — Change this symbol each time you run the analysis
@@ -248,10 +429,25 @@ class FinancialData:
         self.credit_ratings = []     # list of dicts from NSE filings
         self.esm_status = None           # dict with ESM stage info
         self.promoter_holding = None     # dict with promoter holding info
+        # ── Deep Fundamental Analysis Data ──
+        self.historical_prices = None    # DataFrame of daily OHLCV (5+ years)
+        self.peer_symbols = []           # list of peer NSE symbols
+        self.concall_texts = []          # list of dicts: {quarter, text}
+        self.annual_report_texts = []    # list of dicts: {year, text}
+        self.shareholding_history = []   # list of dicts per quarter
+        self.deep_results = {}           # results from DeepFundamentalAnalyzer
+        # ── Extended Data (Auto-Fetched) ──
+        self.shareholding_quarterly = [] # quarterly promoter/public % history
+        self.sast_disclosures = []       # insider buy/sell disclosures
+        self.delivery_data = {}          # current delivery %
+        self.sector_peers = {}           # sector info + peer list
+        self.corporate_actions = {}      # dividends, splits, bonus
+        self.related_party_filings = []  # RPT disclosures
+        self.mf_institutional_data = {}  # MF + institutional holder data
 
 
 def fetch_financial_data(symbol):
-    """Fetch all financial data from yfinance (sources from BSE/NSE filings)."""
+    """Fetch all financial data from yfinance with BSE fallback."""
     data = FinancialData()
     data.symbol = symbol
     yf_symbol = symbol + ".NS"
@@ -335,6 +531,68 @@ def fetch_financial_data(symbol):
         print("  Cash Flow (Qtr)      : FAILED (%s)" % e)
 
     if data.years < 2:
+        # ── BSE FALLBACK: Try .BO suffix if .NS failed ──
+        print("\n  NSE data insufficient — trying BSE fallback (.BO)...")
+        try:
+            bse_ticker = yf.Ticker(symbol + ".BO")
+            bse_info = bse_ticker.info or {}
+            if bse_info.get("longName") or bse_info.get("shortName"):
+                # BSE ticker valid — fetch financials
+                if not data.info or not data.info.get("longName"):
+                    data.info = bse_info
+                    print("  Company (BSE): %s" % bse_info.get("longName", symbol))
+
+                bse_inc = bse_ticker.financials
+                if bse_inc is not None and not bse_inc.empty and bse_inc.shape[1] > data.years:
+                    data.income_annual = bse_inc
+                    data.years = bse_inc.shape[1]
+                    data.fy_labels = [_fy_label(c) for c in bse_inc.columns]
+                    print("  Income Stmt (BSE)    : %d years" % data.years)
+
+                bse_bal = bse_ticker.balance_sheet
+                if bse_bal is not None and not bse_bal.empty:
+                    if data.balance_annual is None or data.balance_annual.empty:
+                        data.balance_annual = bse_bal
+                        print("  Balance Sheet (BSE)  : %d years" % bse_bal.shape[1])
+
+                bse_cf = bse_ticker.cashflow
+                if bse_cf is not None and not bse_cf.empty:
+                    if data.cashflow_annual is None or data.cashflow_annual.empty:
+                        data.cashflow_annual = bse_cf
+                        print("  Cash Flow (BSE)      : %d years" % bse_cf.shape[1])
+
+                # Quarterly from BSE
+                bse_qinc = bse_ticker.quarterly_financials
+                if bse_qinc is not None and not bse_qinc.empty:
+                    if data.income_quarterly is None or data.income_quarterly.empty:
+                        data.income_quarterly = bse_qinc
+                        data.quarters = bse_qinc.shape[1]
+                        data.q_labels = [c.strftime("%b-%Y") for c in bse_qinc.columns]
+                        print("  Income Stmt Qtr (BSE): %d quarters" % data.quarters)
+
+                bse_qbal = bse_ticker.quarterly_balance_sheet
+                if bse_qbal is not None and not bse_qbal.empty:
+                    if data.balance_quarterly is None or data.balance_quarterly.empty:
+                        data.balance_quarterly = bse_qbal
+
+                bse_qcf = bse_ticker.quarterly_cashflow
+                if bse_qcf is not None and not bse_qcf.empty:
+                    if data.cashflow_quarterly is None or data.cashflow_quarterly.empty:
+                        data.cashflow_quarterly = bse_qcf
+
+                # Historical prices from BSE as fallback
+                if data.historical_prices is None or (data.historical_prices is not None and len(data.historical_prices) < 100):
+                    bse_hist = bse_ticker.history(period="10y")
+                    if bse_hist is not None and not bse_hist.empty:
+                        data.historical_prices = bse_hist
+                        print("  Prices (BSE)         : %d days" % len(bse_hist))
+
+                ticker = bse_ticker  # Use BSE ticker for remaining fetches
+                print("  BSE fallback: OK (%d years of data)" % data.years)
+        except Exception as e:
+            print("  BSE fallback failed: %s" % e)
+
+    if data.years < 2:
         print("\n  ERROR: Need at least 2 years of annual data for forensic analysis.")
         print("  Only %d year(s) available. Check if the symbol is correct." % data.years)
 
@@ -352,6 +610,26 @@ def fetch_financial_data(symbol):
         if data.promoter_holding:
             pp = data.promoter_holding["data"][0]["promoter_pct"]
             print("  Promoter holding from yfinance: %.1f%%" % pp)
+
+    # ── Historical price data (10 years for valuation band) ──
+    try:
+        hist = ticker.history(period="10y")
+        if hist is not None and not hist.empty:
+            data.historical_prices = hist
+            print("  Historical Prices    : %d days (%.1f years)" % (
+                len(hist), len(hist) / 252))
+    except Exception as e:
+        print("  Historical Prices    : FAILED (%s)" % e)
+
+    # ── Shareholding pattern history ──
+    try:
+        holders = ticker.major_holders
+        inst = ticker.institutional_holders
+        if inst is not None and not inst.empty:
+            data.shareholding_history = [{"institutional_holders": inst}]
+            print("  Institutional Holders: %d entries" % len(inst))
+    except Exception as e:
+        print("  Shareholding data    : FAILED (%s)" % e)
 
     return data
 
@@ -424,25 +702,14 @@ def fetch_credit_ratings(symbol):
     print("\n[2/5] Fetching credit ratings from NSE filings...")
     results = []
     try:
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "application/json, application/pdf",
-            "Referer": "https://www.nseindia.com/",
-        })
-        session.get("https://www.nseindia.com/", timeout=10)
-
+        session = _nse_session()
         url = "https://www.nseindia.com/api/corporate-announcements"
-        resp = session.get(url, params={
+        cache_key = "credit_ratings_%s" % symbol
+        filings = _nse_get_json(session, url, params={
             "index": "equities", "symbol": symbol, "subject": "Credit Rating",
-        }, timeout=15)
+        }, cache_key=cache_key)
 
-        if resp.status_code != 200:
-            print("  NSE API returned %d — skipping credit ratings" % resp.status_code)
-            return results
-
-        filings = resp.json()
-        if not isinstance(filings, list) or not filings:
+        if not filings or not isinstance(filings, list):
             print("  No credit rating filings found on NSE")
             return results
 
@@ -461,23 +728,23 @@ def fetch_credit_ratings(symbol):
             # Download and parse PDF for actual ratings
             extracted_ratings = []
             outlook = None
+            pdf_content = None
             try:
-                pdf_resp = session.get(pdf_url, timeout=20)
-                if pdf_resp.status_code == 200:
-                    extracted_ratings, outlook = _extract_ratings_from_pdf(pdf_resp.content)
+                pdf_content = _nse_download_pdf(session, pdf_url)
+                if pdf_content:
+                    extracted_ratings, outlook = _extract_ratings_from_pdf(pdf_content)
             except Exception:
                 pass
 
             # If agency unknown, try to detect from PDF text
-            if agency == "Unknown" and extracted_ratings:
+            if agency == "Unknown" and extracted_ratings and pdf_content:
                 try:
-                    reader = PyPDF2.PdfReader(io.BytesIO(pdf_resp.content))
+                    reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
                     page_text = (reader.pages[0].extract_text() or "").lower()
                     for key, name in _AGENCY_PATTERNS:
                         if key in page_text:
                             agency = name
                             break
-                    # Also check for S&P
                     if agency == "Unknown" and "s&p" in page_text:
                         agency = "S&P Global"
                 except Exception:
@@ -681,6 +948,645 @@ def _promoter_from_yfinance(info):
         except (TypeError, ValueError):
             pass
     return None
+
+
+# ── Auto-Fetch: Concall Transcripts & Annual Report/Investor Presentations ──
+
+def _nse_session():
+    """Create an NSE session with cookies set. Retries cookie fetch."""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json, application/pdf, */*",
+        "Referer": "https://www.nseindia.com/",
+    })
+    for attempt in range(3):
+        try:
+            resp = session.get("https://www.nseindia.com/", timeout=10)
+            if resp.status_code == 200:
+                break
+        except Exception:
+            time.sleep(1.5 ** attempt)
+    return session
+
+
+def fetch_concall_transcripts(symbol, max_transcripts=6):
+    """
+    Auto-fetch concall/earnings-call transcripts from NSE corporate filings.
+    Downloads PDFs and extracts text via PyPDF2.
+    Returns list of dicts: [{quarter, text}, ...]
+    """
+    print("\n  Fetching concall transcripts from NSE filings...")
+    results = []
+
+    try:
+        session = _nse_session()
+        url = "https://www.nseindia.com/api/corporate-announcements"
+        cache_key = "concall_%s" % symbol
+        filings = _nse_get_json(session, url, params={
+            "index": "equities",
+            "symbol": symbol,
+            "subject": "Transcript of Analysts/Institutional Investor Meet/Con. Call",
+        }, cache_key=cache_key)
+
+        if not filings or not isinstance(filings, list):
+            print("    No concall transcript filings found on NSE")
+            return results
+
+        print("    Found %d transcript filings on NSE" % len(filings))
+
+        for item in filings[:max_transcripts]:
+            pdf_url = item.get("attchmntFile", "")
+            date_str = item.get("an_dt", "")
+            if not pdf_url:
+                continue
+
+            quarter_label = _quarter_from_date(date_str)
+
+            try:
+                pdf_bytes = _nse_download_pdf(session, pdf_url)
+                if not pdf_bytes:
+                    print("    Failed to download: %s" % pdf_url.split("/")[-1])
+                    continue
+
+                reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+                pages_text = []
+                for page in reader.pages:
+                    pt = page.extract_text()
+                    if pt:
+                        pages_text.append(pt)
+                text = "\n".join(pages_text)
+
+                if len(text) < 200:
+                    print("    Skipped (too little text): %s" % pdf_url.split("/")[-1])
+                    continue
+
+                results.append({"quarter": quarter_label, "text": text})
+                print("    Loaded: %s (%d pages, %d chars)" % (
+                    quarter_label, len(reader.pages), len(text)))
+
+            except Exception as e:
+                print("    Failed to parse PDF: %s" % e)
+                continue
+
+    except Exception as e:
+        print("    Concall transcript fetch failed: %s" % e)
+
+    print("    Total concall transcripts loaded: %d" % len(results))
+    return results
+
+
+def fetch_investor_presentations(symbol, max_docs=4):
+    """
+    Auto-fetch investor presentations from NSE corporate filings.
+    Returns list of dicts: [{year, text}, ...]
+    """
+    print("  Fetching investor presentations / annual report filings...")
+    results = []
+
+    try:
+        session = _nse_session()
+        url = "https://www.nseindia.com/api/corporate-announcements"
+
+        subjects = [
+            "Investor Presentation",
+            "Annual General Meeting",
+        ]
+
+        all_filings = []
+        for subject in subjects:
+            cache_key = "inv_pres_%s_%s" % (symbol, subject.replace(" ", "_"))
+            filings = _nse_get_json(session, url, params={
+                "index": "equities",
+                "symbol": symbol,
+                "subject": subject,
+            }, cache_key=cache_key)
+            if filings and isinstance(filings, list):
+                for f in filings:
+                    f["_source_subject"] = subject
+                all_filings.extend(filings)
+
+        if not all_filings:
+            print("    No investor presentation / AGM filings found on NSE")
+            return results
+
+        seen_urls = set()
+        unique_filings = []
+        for f in all_filings:
+            pdf_url = f.get("attchmntFile", "")
+            if pdf_url and pdf_url not in seen_urls:
+                seen_urls.add(pdf_url)
+                unique_filings.append(f)
+
+        print("    Found %d relevant filings" % len(unique_filings))
+
+        for item in unique_filings[:max_docs]:
+            pdf_url = item.get("attchmntFile", "")
+            date_str = item.get("an_dt", "")
+            source = item.get("_source_subject", "")
+            if not pdf_url:
+                continue
+
+            year_label = _year_from_date(date_str)
+
+            try:
+                pdf_bytes = _nse_download_pdf(session, pdf_url)
+                if not pdf_bytes:
+                    continue
+
+                reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+                pages_text = []
+                for page in reader.pages:
+                    pt = page.extract_text()
+                    if pt:
+                        pages_text.append(pt)
+                text = "\n".join(pages_text)
+
+                if len(text) < 300:
+                    continue
+
+                results.append({"year": year_label, "text": text})
+                print("    Loaded [%s]: %s (%d pages, %d chars)" % (
+                    source, year_label, len(reader.pages), len(text)))
+
+            except Exception as e:
+                print("    Failed to parse: %s" % e)
+                continue
+
+    except Exception as e:
+        print("    Investor presentation fetch failed: %s" % e)
+
+    print("    Total documents loaded for NLP: %d" % len(results))
+    return results
+
+
+def _quarter_from_date(date_str):
+    """Convert NSE date string to quarter label (e.g., 'Q2 FY2023')."""
+    try:
+        # Format: "21-Nov-2022 15:58:57" or "21-Nov-2022"
+        dt = datetime.datetime.strptime(date_str[:11].strip(), "%d-%b-%Y")
+        month = dt.month
+        year = dt.year
+        # Indian FY: Apr-Jun=Q1, Jul-Sep=Q2, Oct-Dec=Q3, Jan-Mar=Q4
+        if month in (4, 5, 6):
+            return "Q1 FY%d" % (year + 1)
+        elif month in (7, 8, 9):
+            return "Q2 FY%d" % (year + 1)
+        elif month in (10, 11, 12):
+            return "Q3 FY%d" % (year + 1)
+        else:
+            return "Q4 FY%d" % year
+    except Exception:
+        return date_str[:11] if date_str else "Unknown"
+
+
+def _year_from_date(date_str):
+    """Convert NSE date string to FY label."""
+    try:
+        dt = datetime.datetime.strptime(date_str[:11].strip(), "%d-%b-%Y")
+        month = dt.month
+        year = dt.year
+        fy = year + 1 if month >= 4 else year
+        return "FY%d" % fy
+    except Exception:
+        return date_str[:11] if date_str else "Unknown"
+
+
+# ── Auto-Fetch: Shareholding Pattern History (Quarterly FII/DII/Promoter) ────
+
+def fetch_shareholding_history(symbol, max_quarters=12):
+    """
+    Fetch quarterly shareholding pattern from NSE.
+    Returns list of dicts with promoter_pct, public_pct, date for each quarter.
+    """
+    print("  Fetching shareholding pattern history...")
+    results = []
+    try:
+        session = _nse_session()
+        cache_key = "shp_%s" % symbol
+        data = _nse_get_json(session,
+            "https://www.nseindia.com/api/corporate-share-holdings-master",
+            params={"symbol": symbol, "index": "equities"},
+            cache_key=cache_key,
+        )
+
+        if not data or not isinstance(data, list):
+            print("    No shareholding data available")
+            return results
+
+        for item in data[:max_quarters]:
+            entry = {
+                "date": item.get("date", ""),
+                "promoter_pct": _parse_float(item.get("pr_and_prgrp", "0")),
+                "public_pct": _parse_float(item.get("public_val", "0")),
+                "employee_trusts_pct": _parse_float(item.get("employeeTrusts", "0")),
+            }
+            results.append(entry)
+
+        if results:
+            print("    Loaded %d quarters of shareholding data (%s to %s)" % (
+                len(results), results[-1]["date"], results[0]["date"]))
+            print("    Latest: Promoter %.1f%% | Public %.1f%%" % (
+                results[0]["promoter_pct"], results[0]["public_pct"]))
+    except Exception as e:
+        print("    Shareholding history fetch failed: %s" % e)
+
+    return results
+
+
+# ── Auto-Fetch: Insider/Promoter Buy-Sell (SAST Disclosures) ─────────────────
+
+def fetch_sast_disclosures(symbol, max_filings=10):
+    """
+    Fetch SAST (Substantial Acquisition of Shares) disclosures from NSE.
+    Returns list of dicts with date, action, shares.
+    """
+    print("  Fetching SAST / insider trading disclosures...")
+    results = []
+    try:
+        session = _nse_session()
+        cache_key = "sast_%s" % symbol
+        filings = _nse_get_json(session,
+            "https://www.nseindia.com/api/corporate-announcements",
+            params={
+                "index": "equities",
+                "symbol": symbol,
+                "subject": "Disc. under Reg.30 of SEBI (SAST) Reg.2011",
+            },
+            cache_key=cache_key,
+        )
+        if not filings or not isinstance(filings, list):
+            filings = []
+
+        # Also check for Takeover disclosures
+        cache_key2 = "sast_takeover_%s" % symbol
+        more = _nse_get_json(session,
+            "https://www.nseindia.com/api/corporate-announcements",
+            params={
+                "index": "equities",
+                "symbol": symbol,
+                "subject": "Disclosure under SEBI Takeover Regulations",
+            },
+            cache_key=cache_key2,
+        )
+        if more and isinstance(more, list):
+            filings.extend(more)
+
+        if not filings:
+            print("    No SAST/insider trading disclosures found")
+            return results
+
+        print("    Found %d SAST/insider disclosures" % len(filings))
+
+        for item in filings[:max_filings]:
+            pdf_url = item.get("attchmntFile", "")
+            date_str = item.get("an_dt", "")
+            desc = item.get("desc", "")
+
+            entry = {
+                "date": date_str[:11] if date_str else "",
+                "description": desc,
+                "pdf_url": pdf_url,
+                "action": "Unknown",
+                "shares": 0,
+                "pct_change": 0,
+            }
+
+            if pdf_url:
+                try:
+                    pdf_bytes = _nse_download_pdf(session, pdf_url)
+                    if pdf_bytes:
+                        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+                        text = ""
+                        for page in reader.pages[:3]:
+                            text += (page.extract_text() or "")
+                        text_lower = text.lower()
+
+                        if "acquisition" in text_lower or "purchase" in text_lower or "bought" in text_lower:
+                            entry["action"] = "BUY"
+                        elif "disposal" in text_lower or "sold" in text_lower or "sale" in text_lower:
+                            entry["action"] = "SELL"
+
+                        share_match = re.search(r'(\d[\d,]+)\s*(?:equity\s+)?shares?', text, re.IGNORECASE)
+                        if share_match:
+                            entry["shares"] = int(share_match.group(1).replace(",", ""))
+
+                        pct_match = re.search(r'(\d+\.?\d*)\s*%\s*(?:of|after)', text)
+                        if pct_match:
+                            entry["pct_change"] = float(pct_match.group(1))
+                except Exception:
+                    pass
+
+            results.append(entry)
+
+        buys = sum(1 for r in results if r["action"] == "BUY")
+        sells = sum(1 for r in results if r["action"] == "SELL")
+        print("    Parsed: %d buys, %d sells, %d unknown" % (buys, sells, len(results) - buys - sells))
+
+    except Exception as e:
+        print("    SAST fetch failed: %s" % e)
+
+    return results
+
+
+# ── Auto-Fetch: Delivery & Volume Data ───────────────────────────────────────
+
+def fetch_delivery_data(symbol):
+    """
+    Fetch current delivery percentage and volume info from NSE trade_info.
+    Returns dict with delivery_pct, volume_traded, etc.
+    """
+    print("  Fetching delivery / volume data...")
+    result = {}
+    try:
+        session = _nse_session()
+        # Delivery data changes daily — short cache key with date
+        today = datetime.datetime.now().strftime("%Y%m%d")
+        cache_key = "delivery_%s_%s" % (symbol, today)
+        data = _nse_get_json(session,
+            "https://www.nseindia.com/api/quote-equity",
+            params={"symbol": symbol, "section": "trade_info"},
+            cache_key=cache_key,
+        )
+        if not data:
+            return result
+
+        dp = data.get("securityWiseDP", {})
+        if dp:
+            result = {
+                "quantity_traded": dp.get("quantityTraded", 0),
+                "delivery_quantity": dp.get("deliveryQuantity", 0),
+                "delivery_pct": dp.get("deliveryToTradedQuantity", 0),
+                "date": dp.get("secWiseDelPosDate", ""),
+            }
+            print("    Delivery: %.1f%% | Volume: %d | Date: %s" % (
+                result["delivery_pct"], result["quantity_traded"], result["date"]))
+
+    except Exception as e:
+        print("    Delivery data fetch failed: %s" % e)
+
+    return result
+
+
+# ── Auto-Fetch: Sector/Industry Classification & Peer List ───────────────────
+
+def fetch_sector_peers(symbol):
+    """
+    Get sector classification and find peer stocks from the same NSE sector index.
+    Returns dict with sector_info and list of peer symbols.
+    """
+    print("  Fetching sector peers...")
+    result = {"sector_info": {}, "peers": [], "sector_index": ""}
+    try:
+        session = _nse_session()
+
+        # Step 1: Get company's sector info from quote
+        cache_key = "quote_%s" % symbol
+        data = _nse_get_json(session,
+            "https://www.nseindia.com/api/quote-equity",
+            params={"symbol": symbol},
+            cache_key=cache_key,
+        )
+        if not data:
+            return result
+
+        industry_info = data.get("industryInfo", {})
+        metadata = data.get("metadata", {})
+
+        result["sector_info"] = {
+            "macro": industry_info.get("macro", ""),
+            "sector": industry_info.get("sector", ""),
+            "industry": industry_info.get("industry", ""),
+            "basic_industry": industry_info.get("basicIndustry", ""),
+            "sector_pe": metadata.get("pdSectorPe", 0),
+            "sector_index": metadata.get("pdSectorInd", ""),
+        }
+
+        sector_idx = metadata.get("pdSectorInd", "")
+        result["sector_index"] = sector_idx
+
+        if not sector_idx:
+            print("    No sector index found for %s" % symbol)
+            return result
+
+        # Step 2: Fetch all stocks in that sector index
+        time.sleep(0.5)
+        cache_key2 = "sector_idx_%s" % sector_idx.replace(" ", "_")
+        idx_data = _nse_get_json(session,
+            "https://www.nseindia.com/api/equity-stockIndices",
+            params={"index": sector_idx},
+            cache_key=cache_key2,
+        )
+        if idx_data:
+            stocks = idx_data.get("data", [])
+            for stock in stocks:
+                sym = stock.get("symbol", "")
+                if sym and sym != symbol and sym != sector_idx:
+                    result["peers"].append({
+                        "symbol": sym,
+                        "last_price": stock.get("lastPrice", 0),
+                        "change_1y": stock.get("perChange365d", 0),
+                        "change_30d": stock.get("perChange30d", 0),
+                    })
+
+        print("    Sector: %s | Index: %s | Peers found: %d" % (
+            industry_info.get("sector", "N/A"), sector_idx, len(result["peers"])))
+
+    except Exception as e:
+        print("    Sector peer fetch failed: %s" % e)
+
+    return result
+
+
+# ── Auto-Fetch: Corporate Actions (Dividends, Splits, Bonus) ─────────────────
+
+def fetch_corporate_actions(symbol):
+    """
+    Fetch corporate action history from yfinance (dividends, splits).
+    Returns dict with dividend history, splits, and bonus history.
+    """
+    print("  Fetching corporate actions history...")
+    result = {"dividends": [], "splits": [], "actions_summary": ""}
+    try:
+        yf_symbol = symbol + ".NS"
+        ticker = yf.Ticker(yf_symbol)
+
+        # Dividends
+        divs = ticker.dividends
+        if divs is not None and not divs.empty:
+            for date, amount in divs.tail(20).items():
+                result["dividends"].append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "amount": float(amount),
+                })
+            print("    Dividends: %d records (last 5Y)" % len(result["dividends"]))
+
+        # Splits
+        splits = ticker.splits
+        if splits is not None and not splits.empty:
+            for date, ratio in splits.items():
+                if ratio != 1.0:
+                    result["splits"].append({
+                        "date": date.strftime("%Y-%m-%d"),
+                        "ratio": str(ratio),
+                    })
+            if result["splits"]:
+                print("    Splits: %d events" % len(result["splits"]))
+
+        # Summary
+        total_div = sum(d["amount"] for d in result["dividends"])
+        result["actions_summary"] = "%d dividends (total Rs. %.1f), %d splits" % (
+            len(result["dividends"]), total_div, len(result["splits"]))
+
+    except Exception as e:
+        print("    Corporate actions fetch failed: %s" % e)
+
+    return result
+
+
+# ── Auto-Fetch: Related Party Transactions (NSE Filings) ─────────────────────
+
+def fetch_related_party_filings(symbol, max_filings=5):
+    """
+    Fetch related party transaction disclosures from NSE.
+    Returns list of RPT filing details.
+    """
+    print("  Fetching related party transaction filings...")
+    results = []
+    try:
+        session = _nse_session()
+        cache_key = "rpt_%s" % symbol
+        filings = _nse_get_json(session,
+            "https://www.nseindia.com/api/corporate-announcements",
+            params={
+                "index": "equities",
+                "symbol": symbol,
+                "subject": "Related Party Transaction",
+            },
+            cache_key=cache_key,
+        )
+
+        if not filings or not isinstance(filings, list):
+            cache_key2 = "rpt2_%s" % symbol
+            filings = _nse_get_json(session,
+                "https://www.nseindia.com/api/corporate-announcements",
+                params={
+                    "index": "equities",
+                    "symbol": symbol,
+                    "subject": "Related Party Transactions",
+                },
+                cache_key=cache_key2,
+            )
+
+        if not filings or not isinstance(filings, list):
+            print("    No RPT filings found")
+            return results
+
+        print("    Found %d RPT filings" % len(filings))
+
+        for item in filings[:max_filings]:
+            pdf_url = item.get("attchmntFile", "")
+            date_str = item.get("an_dt", "")
+
+            entry = {
+                "date": date_str[:11] if date_str else "",
+                "pdf_url": pdf_url,
+                "amount_cr": 0,
+                "parties": [],
+                "nature": "",
+            }
+
+            if pdf_url:
+                try:
+                    pdf_bytes = _nse_download_pdf(session, pdf_url)
+                    if pdf_bytes:
+                        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+                        text = ""
+                        for page in reader.pages[:5]:
+                            text += (page.extract_text() or "")
+
+                        amounts = re.findall(
+                            r'(?:Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)\s*(?:Cr|crore|Lacs|lakh)',
+                            text, re.IGNORECASE,
+                        )
+                        if amounts:
+                            entry["amount_cr"] = max(float(a.replace(",", "")) for a in amounts)
+
+                        text_lower = text.lower()
+                        if "loan" in text_lower:
+                            entry["nature"] = "Loan"
+                        elif "sale" in text_lower or "purchase" in text_lower:
+                            entry["nature"] = "Sale/Purchase"
+                        elif "service" in text_lower or "contract" in text_lower:
+                            entry["nature"] = "Services/Contract"
+                        elif "guarantee" in text_lower:
+                            entry["nature"] = "Guarantee"
+                except Exception:
+                    pass
+
+            results.append(entry)
+
+    except Exception as e:
+        print("    RPT fetch failed: %s" % e)
+
+    return results
+
+
+# ── Auto-Fetch: Mutual Fund Holdings (from yfinance) ─────────────────────────
+
+def fetch_mutual_fund_data(symbol):
+    """
+    Fetch mutual fund and institutional holder data from yfinance.
+    Returns dict with major holders, institutional holders, MF holders.
+    """
+    print("  Fetching mutual fund / institutional holder data...")
+    result = {"major_holders": {}, "institutional_holders": [], "mf_holders": []}
+    try:
+        yf_symbol = symbol + ".NS"
+        ticker = yf.Ticker(yf_symbol)
+
+        # Major holders (% breakdown)
+        try:
+            mh = ticker.major_holders
+            if mh is not None and not mh.empty:
+                for _, row in mh.iterrows():
+                    result["major_holders"][row.iloc[1]] = row.iloc[0]
+        except Exception:
+            pass
+
+        # Institutional holders (top institutions)
+        try:
+            ih = ticker.institutional_holders
+            if ih is not None and not ih.empty:
+                for _, row in ih.iterrows():
+                    result["institutional_holders"].append({
+                        "holder": str(row.get("Holder", "")),
+                        "shares": int(row.get("Shares", 0)),
+                        "pct_out": float(row.get("% Out", 0)) if row.get("% Out") else 0,
+                        "value": float(row.get("Value", 0)) if row.get("Value") else 0,
+                    })
+                print("    Institutional holders: %d entries" % len(result["institutional_holders"]))
+        except Exception:
+            pass
+
+        # Mutual fund holders
+        try:
+            mf = ticker.mutualfund_holders
+            if mf is not None and not mf.empty:
+                for _, row in mf.iterrows():
+                    result["mf_holders"].append({
+                        "holder": str(row.get("Holder", "")),
+                        "shares": int(row.get("Shares", 0)),
+                        "pct_out": float(row.get("% Out", 0)) if row.get("% Out") else 0,
+                    })
+                print("    Mutual fund holders: %d entries" % len(result["mf_holders"]))
+        except Exception:
+            pass
+
+    except Exception as e:
+        print("    MF/institutional data fetch failed: %s" % e)
+
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2479,6 +3385,2232 @@ class ForensicAnalyzer:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DEEP FUNDAMENTAL ANALYSIS ENGINE
+# ══════════════════════════════════════════════════════════════════════════════
+
+class DeepFundamentalAnalyzer:
+    """
+    Institutional-grade deep fundamental analysis.
+    Covers: DCF valuation, quality scoring, capital allocation,
+    NLP parsing of concalls/annual reports, working capital efficiency,
+    incremental ROCE, valuation bands, and risk analysis.
+    """
+
+    def __init__(self, data, forensic_analyzer=None):
+        self.d = data
+        self.fa = forensic_analyzer  # reference to ForensicAnalyzer for flags
+        self.inc = data.income_annual
+        self.bal = data.balance_annual
+        self.cf = data.cashflow_annual
+        self.inc_q = data.income_quarterly
+        self.bal_q = data.balance_quarterly
+        self.cf_q = data.cashflow_quarterly
+        self.info = data.info
+        self.prices = data.historical_prices
+        self.results = {}
+        self.insights = []       # qualitative insights from NLP
+        self.risk_factors = []   # identified risks
+        self.moat_signals = []   # competitive advantage signals
+
+    # ── Shorthand getters ────────────────────────────────────────────────────
+    def _i(self, key, col=0):
+        return safe_get(self.inc, key, col)
+
+    def _b(self, key, col=0):
+        return safe_get(self.bal, key, col)
+
+    def _c(self, key, col=0):
+        return safe_get(self.cf, key, col)
+
+    def _iq(self, key, col=0):
+        return safe_get(self.inc_q, key, col)
+
+    def _bq(self, key, col=0):
+        return safe_get(self.bal_q, key, col)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # VALUATION: Discounted Cash Flow (3-Stage)
+    # ─────────────────────────────────────────────────────────────────────────
+    def dcf_valuation(self):
+        """
+        3-stage DCF model:
+          Stage 1: High growth (5 years) — based on recent FCF CAGR
+          Stage 2: Fade period (5 years) — linear decline to terminal
+          Stage 3: Terminal value — perpetuity growth
+        """
+        print("  DCF Valuation...")
+
+        # Get FCF history
+        fcf_values = []
+        if self.cf is not None:
+            for col in range(min(self.cf.shape[1], 5)):
+                fcf = safe_get(self.cf, "fcf", col)
+                if not _nan(fcf):
+                    fcf_values.append(fcf)
+
+        if len(fcf_values) < 2:
+            self.results["dcf"] = {"status": "insufficient_data"}
+            return
+
+        # Latest FCF (most recent year)
+        fcf_latest = fcf_values[0]
+        if fcf_latest <= 0:
+            # Use average of positive FCFs or operating CF
+            positive_fcfs = [f for f in fcf_values if f > 0]
+            if positive_fcfs:
+                fcf_latest = sum(positive_fcfs) / len(positive_fcfs)
+            else:
+                ocf = safe_get(self.cf, "operating_cf", 0)
+                capex = abs(safe_get(self.cf, "capex", 0))
+                fcf_latest = ocf - capex if not (_nan(ocf) or _nan(capex)) else 0
+
+        if fcf_latest <= 0:
+            self.results["dcf"] = {"status": "negative_fcf", "fcf_latest": fcf_latest}
+            return
+
+        # FCF growth rate (historical CAGR)
+        if len(fcf_values) >= 3 and fcf_values[-1] > 0 and fcf_values[0] > 0:
+            n_years = len(fcf_values) - 1
+            fcf_cagr = (fcf_values[0] / fcf_values[-1]) ** (1 / n_years) - 1
+        else:
+            # Fallback to revenue growth
+            rev_0 = self._i("revenue", 0)
+            rev_n = self._i("revenue", min(3, self.d.years - 1))
+            if not _nan(rev_0) and not _nan(rev_n) and rev_n > 0:
+                n = min(3, self.d.years - 1)
+                fcf_cagr = (rev_0 / rev_n) ** (1 / n) - 1
+            else:
+                fcf_cagr = 0.10  # default 10%
+
+        # Cap growth assumptions
+        high_growth = min(max(fcf_cagr, 0.05), 0.35)  # 5% to 35%
+        terminal_growth = 0.05  # 5% perpetuity (India nominal GDP)
+
+        # Cost of equity (CAPM approximation)
+        beta = self.info.get("beta", 1.0) or 1.0
+        risk_free = 0.07   # India 10Y G-Sec yield ~7%
+        market_premium = 0.06  # equity risk premium India
+        cost_of_equity = risk_free + beta * market_premium
+
+        # WACC estimation
+        total_debt = self._b("total_debt", 0)
+        equity_val = self.info.get("marketCap", 0)
+        if _nan(total_debt):
+            total_debt = 0
+        if not equity_val:
+            equity_val = self._b("equity", 0)
+            if _nan(equity_val):
+                equity_val = 1
+
+        interest_exp = abs(self._i("interest_exp", 0)) if not _nan(self._i("interest_exp", 0)) else 0
+        cost_of_debt = safe_div(interest_exp, total_debt, 0.08) if total_debt > 0 else 0.08
+        tax_rate_val = self._i("tax", 0)
+        pretax = self._i("pretax_income", 0)
+        effective_tax = safe_div(tax_rate_val, pretax, 0.25) if not (_nan(tax_rate_val) or _nan(pretax)) else 0.25
+        effective_tax = min(max(effective_tax, 0.15), 0.35)
+
+        total_capital = equity_val + total_debt
+        we = safe_div(equity_val, total_capital, 0.8)
+        wd = safe_div(total_debt, total_capital, 0.2)
+        wacc = we * cost_of_equity + wd * cost_of_debt * (1 - effective_tax)
+        wacc = max(wacc, 0.08)  # Floor at 8%
+
+        # Stage 1: High growth (years 1-5)
+        stage1_cf = []
+        cf = fcf_latest
+        for yr in range(1, 6):
+            cf *= (1 + high_growth)
+            stage1_cf.append(cf / (1 + wacc) ** yr)
+
+        # Stage 2: Fade (years 6-10) — linear decline from high_growth to terminal
+        stage2_cf = []
+        for yr in range(6, 11):
+            fade_rate = high_growth - (high_growth - terminal_growth) * ((yr - 5) / 5)
+            cf *= (1 + fade_rate)
+            stage2_cf.append(cf / (1 + wacc) ** yr)
+
+        # Stage 3: Terminal value
+        terminal_cf = cf * (1 + terminal_growth)
+        terminal_value = terminal_cf / (wacc - terminal_growth)
+        pv_terminal = terminal_value / (1 + wacc) ** 10
+
+        # Enterprise value
+        ev = sum(stage1_cf) + sum(stage2_cf) + pv_terminal
+
+        # Equity value
+        cash = self._b("cash", 0)
+        if _nan(cash):
+            cash = 0
+        equity_value = ev - total_debt + cash
+
+        # Per share
+        shares = self.info.get("sharesOutstanding", 0)
+        if not shares:
+            shares_val = self._b("shares_outstanding", 0)
+            shares = shares_val if not _nan(shares_val) else 1
+
+        intrinsic_per_share = equity_value / shares if shares > 0 else 0
+        cmp = self.info.get("currentPrice", self.info.get("previousClose", 0)) or 0
+
+        margin_of_safety = safe_div(intrinsic_per_share - cmp, intrinsic_per_share) * 100 if intrinsic_per_share > 0 else 0
+
+        self.results["dcf"] = {
+            "status": "computed",
+            "fcf_latest_cr": to_cr(fcf_latest),
+            "fcf_cagr_pct": fcf_cagr * 100,
+            "high_growth_pct": high_growth * 100,
+            "terminal_growth_pct": terminal_growth * 100,
+            "wacc_pct": wacc * 100,
+            "cost_of_equity_pct": cost_of_equity * 100,
+            "beta": beta,
+            "ev_cr": to_cr(ev),
+            "equity_value_cr": to_cr(equity_value),
+            "intrinsic_per_share": intrinsic_per_share,
+            "cmp": cmp,
+            "margin_of_safety_pct": margin_of_safety,
+            "pv_stage1_cr": to_cr(sum(stage1_cf)),
+            "pv_stage2_cr": to_cr(sum(stage2_cf)),
+            "pv_terminal_cr": to_cr(pv_terminal),
+            "shares": shares,
+        }
+
+        # Flag interpretation
+        if margin_of_safety > 30:
+            self.moat_signals.append("DCF suggests %.0f%% margin of safety — significantly undervalued" % margin_of_safety)
+        elif margin_of_safety < -30:
+            self.risk_factors.append("DCF suggests stock is %.0f%% overvalued vs intrinsic value" % abs(margin_of_safety))
+
+        print("    Intrinsic Value: Rs. %.0f | CMP: Rs. %.0f | MoS: %.1f%%" % (
+            intrinsic_per_share, cmp, margin_of_safety))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # VALUATION: Reverse DCF (What growth is the market pricing in?)
+    # ─────────────────────────────────────────────────────────────────────────
+    def reverse_dcf(self):
+        """Calculate implied growth rate from current market price."""
+        print("  Reverse DCF...")
+
+        dcf_data = self.results.get("dcf", {})
+        if dcf_data.get("status") != "computed":
+            self.results["reverse_dcf"] = {"status": "skipped"}
+            return
+
+        cmp = dcf_data["cmp"]
+        shares = dcf_data["shares"]
+        if cmp <= 0 or shares <= 0:
+            self.results["reverse_dcf"] = {"status": "no_price"}
+            return
+
+        market_equity_value = cmp * shares
+        total_debt = self._b("total_debt", 0)
+        cash = self._b("cash", 0)
+        if _nan(total_debt): total_debt = 0
+        if _nan(cash): cash = 0
+        market_ev = market_equity_value + total_debt - cash
+
+        wacc = dcf_data["wacc_pct"] / 100
+        terminal_growth = 0.05
+
+        # Get latest FCF
+        fcf_latest = dcf_data["fcf_latest_cr"] * 1e7  # back to absolute
+
+        # Binary search for implied growth
+        low, high = -0.10, 0.60
+        for _ in range(50):
+            mid = (low + high) / 2
+            # Compute EV at this growth rate
+            cf = fcf_latest
+            pv_sum = 0
+            for yr in range(1, 11):
+                growth = mid - (mid - terminal_growth) * max(0, (yr - 5)) / 5 if yr > 5 else mid
+                cf *= (1 + growth)
+                pv_sum += cf / (1 + wacc) ** yr
+            term_cf = cf * (1 + terminal_growth)
+            term_val = term_cf / (wacc - terminal_growth)
+            pv_sum += term_val / (1 + wacc) ** 10
+
+            if pv_sum < market_ev:
+                low = mid
+            else:
+                high = mid
+
+        implied_growth = (low + high) / 2
+
+        # Compare with historical growth
+        hist_growth = dcf_data["fcf_cagr_pct"] / 100
+        growth_premium = implied_growth - hist_growth
+
+        self.results["reverse_dcf"] = {
+            "status": "computed",
+            "implied_growth_pct": implied_growth * 100,
+            "historical_growth_pct": hist_growth * 100,
+            "growth_premium_pct": growth_premium * 100,
+        }
+
+        if implied_growth > 0.30:
+            self.risk_factors.append("Market pricing in %.0f%% growth — very aggressive expectation" % (implied_growth * 100))
+        elif implied_growth < hist_growth * 0.5:
+            self.moat_signals.append("Market pricing in only %.0f%% growth vs %.0f%% historical — potential re-rating candidate" % (
+                implied_growth * 100, hist_growth * 100))
+
+        print("    Implied Growth: %.1f%% | Historical: %.1f%%" % (
+            implied_growth * 100, hist_growth * 100))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # VALUATION: Historical P/E and P/B Bands
+    # ─────────────────────────────────────────────────────────────────────────
+    def valuation_bands(self):
+        """10-year historical P/E and P/B bands to assess relative valuation."""
+        print("  Valuation Bands...")
+
+        if self.prices is None or self.prices.empty:
+            self.results["valuation_bands"] = {"status": "no_price_data"}
+            return
+
+        # Current ratios from yfinance
+        pe_trailing = self.info.get("trailingPE", float("nan"))
+        pe_forward = self.info.get("forwardPE", float("nan"))
+        pb = self.info.get("priceToBook", float("nan"))
+        ev_ebitda = self.info.get("enterpriseToEbitda", float("nan"))
+
+        # Historical PE approximation from price history + EPS
+        eps_trailing = self.info.get("trailingEps", 0) or 0
+
+        # Get 5-year price stats for band analysis
+        prices_5y = self.prices.tail(252 * 5) if len(self.prices) > 252 * 5 else self.prices
+        price_high_5y = prices_5y["High"].max() if "High" in prices_5y.columns else float("nan")
+        price_low_5y = prices_5y["Low"].min() if "Low" in prices_5y.columns else float("nan")
+        price_avg_5y = prices_5y["Close"].mean() if "Close" in prices_5y.columns else float("nan")
+
+        cmp = self.info.get("currentPrice", self.info.get("previousClose", 0)) or 0
+
+        # PE band estimation
+        pe_high = safe_div(price_high_5y, eps_trailing) if eps_trailing > 0 else float("nan")
+        pe_low = safe_div(price_low_5y, eps_trailing) if eps_trailing > 0 else float("nan")
+        pe_avg = safe_div(price_avg_5y, eps_trailing) if eps_trailing > 0 else float("nan")
+
+        # Where does current PE sit in the band (percentile)
+        if not (_nan(pe_trailing) or _nan(pe_low) or _nan(pe_high)) and pe_high > pe_low:
+            pe_percentile = (pe_trailing - pe_low) / (pe_high - pe_low) * 100
+        else:
+            pe_percentile = float("nan")
+
+        # Price position in 52-week range
+        high_52w = self.info.get("fiftyTwoWeekHigh", float("nan"))
+        low_52w = self.info.get("fiftyTwoWeekLow", float("nan"))
+        if not (_nan(high_52w) or _nan(low_52w)) and high_52w > low_52w:
+            price_position_52w = (cmp - low_52w) / (high_52w - low_52w) * 100
+        else:
+            price_position_52w = float("nan")
+
+        self.results["valuation_bands"] = {
+            "status": "computed",
+            "pe_trailing": pe_trailing,
+            "pe_forward": pe_forward,
+            "pb_ratio": pb,
+            "ev_ebitda": ev_ebitda,
+            "pe_high_5y": pe_high,
+            "pe_low_5y": pe_low,
+            "pe_avg_5y": pe_avg,
+            "pe_percentile": pe_percentile,
+            "price_high_5y": price_high_5y,
+            "price_low_5y": price_low_5y,
+            "cmp": cmp,
+            "high_52w": high_52w,
+            "low_52w": low_52w,
+            "price_position_52w": price_position_52w,
+            "eps_trailing": eps_trailing,
+        }
+
+        # Interpretation
+        if not _nan(pe_percentile):
+            if pe_percentile > 85:
+                self.risk_factors.append("PE at %.0f percentile of 5Y band — near historical highs" % pe_percentile)
+            elif pe_percentile < 20:
+                self.moat_signals.append("PE at %.0f percentile of 5Y band — near historical lows" % pe_percentile)
+
+        print("    PE: %.1f (Fwd: %.1f) | P/B: %.1f | EV/EBITDA: %.1f" % (
+            pe_trailing if not _nan(pe_trailing) else 0,
+            pe_forward if not _nan(pe_forward) else 0,
+            pb if not _nan(pb) else 0,
+            ev_ebitda if not _nan(ev_ebitda) else 0))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Capital Allocation & ROCE Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def capital_allocation_analysis(self):
+        """
+        Evaluate management's capital allocation:
+        - ROCE vs WACC spread (value creation)
+        - Incremental ROCE (returns on new capital deployed)
+        - Reinvestment rate and growth quality
+        """
+        print("  Capital Allocation & ROCE...")
+
+        years = min(self.d.years, 5)
+        roce_series = []
+        invested_capital_series = []
+        ebit_series = []
+
+        for col in range(years):
+            ebit = self._i("operating_inc", col)
+            tax_val = self._i("tax", col)
+            pretax = self._i("pretax_income", col)
+            tax_rate = safe_div(tax_val, pretax, 0.25) if not (_nan(tax_val) or _nan(pretax)) else 0.25
+            tax_rate = min(max(tax_rate, 0.15), 0.35)
+            nopat = ebit * (1 - tax_rate) if not _nan(ebit) else float("nan")
+
+            total_assets = self._b("total_assets", col)
+            current_liab = self._b("current_liabilities", col)
+            cash_val = self._b("cash", col)
+            if _nan(cash_val): cash_val = 0
+            invested_cap = total_assets - current_liab - cash_val if not (_nan(total_assets) or _nan(current_liab)) else float("nan")
+
+            roce = safe_div(nopat, invested_cap) * 100 if not (_nan(nopat) or _nan(invested_cap)) else float("nan")
+            roce_series.append(roce)
+            invested_capital_series.append(invested_cap)
+            ebit_series.append(ebit)
+
+        # Incremental ROCE (return on new capital deployed)
+        incremental_roce_values = []
+        for i in range(len(roce_series) - 1):
+            delta_nopat = (ebit_series[i] - ebit_series[i + 1]) if not (_nan(ebit_series[i]) or _nan(ebit_series[i + 1])) else float("nan")
+            delta_ic = (invested_capital_series[i] - invested_capital_series[i + 1]) if not (_nan(invested_capital_series[i]) or _nan(invested_capital_series[i + 1])) else float("nan")
+            inc_roce = safe_div(delta_nopat, delta_ic) * 100 if not (_nan(delta_nopat) or _nan(delta_ic)) else float("nan")
+            incremental_roce_values.append(inc_roce)
+
+        avg_roce = sum(r for r in roce_series if not _nan(r)) / max(1, len([r for r in roce_series if not _nan(r)]))
+        avg_inc_roce = sum(r for r in incremental_roce_values if not _nan(r)) / max(1, len([r for r in incremental_roce_values if not _nan(r)])) if incremental_roce_values else float("nan")
+
+        # ROCE vs WACC spread
+        dcf_data = self.results.get("dcf", {})
+        wacc_pct = dcf_data.get("wacc_pct", 12)
+        roce_wacc_spread = avg_roce - wacc_pct
+
+        # Reinvestment rate
+        capex_latest = abs(self._c("capex", 0)) if not _nan(self._c("capex", 0)) else 0
+        dep_latest = abs(self._i("depreciation", 0)) if not _nan(self._i("depreciation", 0)) else 0
+        net_capex = capex_latest - dep_latest
+        nopat_latest = ebit_series[0] * 0.75 if not _nan(ebit_series[0]) else 0
+        reinvestment_rate = safe_div(net_capex, nopat_latest) * 100 if nopat_latest > 0 else 0
+
+        self.results["capital_allocation"] = {
+            "roce_series_pct": roce_series,
+            "avg_roce_pct": avg_roce,
+            "incremental_roce_series": incremental_roce_values,
+            "avg_incremental_roce_pct": avg_inc_roce,
+            "roce_wacc_spread_pct": roce_wacc_spread,
+            "wacc_pct": wacc_pct,
+            "reinvestment_rate_pct": reinvestment_rate,
+            "invested_capital_cr": [to_cr(ic) for ic in invested_capital_series],
+        }
+
+        # Flags
+        if roce_wacc_spread > 10:
+            self.moat_signals.append("ROCE-WACC spread of %.1f%% — strong value creation" % roce_wacc_spread)
+        elif roce_wacc_spread < 0:
+            self.risk_factors.append("ROCE below WACC — destroying shareholder value")
+
+        if not _nan(avg_inc_roce) and avg_inc_roce > 20:
+            self.moat_signals.append("Incremental ROCE %.1f%% — new capital deployed productively" % avg_inc_roce)
+
+        print("    Avg ROCE: %.1f%% | ROCE-WACC Spread: %.1f%% | Incremental ROCE: %.1f%%" % (
+            avg_roce, roce_wacc_spread, avg_inc_roce if not _nan(avg_inc_roce) else 0))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Revenue & Margin Decomposition
+    # ─────────────────────────────────────────────────────────────────────────
+    def revenue_margin_analysis(self):
+        """
+        Multi-year revenue growth decomposition and margin trajectory.
+        - Revenue CAGR (3Y, 5Y)
+        - Gross/EBITDA/PAT margin trends
+        - Operating leverage (margin expansion vs revenue growth)
+        """
+        print("  Revenue & Margin Analysis...")
+
+        years = min(self.d.years, 5)
+        rev_series, gp_series, ebitda_series, pat_series = [], [], [], []
+        gm_series, em_series, pm_series = [], [], []
+
+        for col in range(years):
+            rev = self._i("revenue", col)
+            gp = self._i("gross_profit", col)
+            ebitda = self._i("ebitda", col)
+            pat = self._i("net_income", col)
+
+            rev_series.append(rev)
+            gp_series.append(gp)
+            ebitda_series.append(ebitda)
+            pat_series.append(pat)
+
+            gm_series.append(safe_div(gp, rev) * 100 if not (_nan(gp) or _nan(rev)) else float("nan"))
+            em_series.append(safe_div(ebitda, rev) * 100 if not (_nan(ebitda) or _nan(rev)) else float("nan"))
+            pm_series.append(safe_div(pat, rev) * 100 if not (_nan(pat) or _nan(rev)) else float("nan"))
+
+        # CAGR calculations
+        def _cagr(latest, oldest, n):
+            if _nan(latest) or _nan(oldest) or oldest <= 0 or latest <= 0 or n <= 0:
+                return float("nan")
+            return ((latest / oldest) ** (1 / n) - 1) * 100
+
+        rev_cagr_3y = _cagr(rev_series[0], rev_series[min(3, years - 1)], min(3, years - 1))
+        rev_cagr_5y = _cagr(rev_series[0], rev_series[years - 1], years - 1) if years >= 4 else float("nan")
+        pat_cagr_3y = _cagr(pat_series[0], pat_series[min(3, years - 1)], min(3, years - 1))
+
+        # Margin trajectory (expanding or contracting?)
+        valid_em = [e for e in em_series if not _nan(e)]
+        margin_trend = "stable"
+        if len(valid_em) >= 3:
+            if valid_em[0] > valid_em[-1] + 2:
+                margin_trend = "expanding"
+            elif valid_em[0] < valid_em[-1] - 2:
+                margin_trend = "contracting"
+
+        self.results["revenue_margins"] = {
+            "revenue_series_cr": [to_cr(r) for r in rev_series],
+            "pat_series_cr": [to_cr(p) for p in pat_series],
+            "gross_margin_series": gm_series,
+            "ebitda_margin_series": em_series,
+            "pat_margin_series": pm_series,
+            "rev_cagr_3y_pct": rev_cagr_3y,
+            "rev_cagr_5y_pct": rev_cagr_5y,
+            "pat_cagr_3y_pct": pat_cagr_3y,
+            "margin_trend": margin_trend,
+        }
+
+        if not _nan(rev_cagr_3y) and rev_cagr_3y > 20:
+            self.moat_signals.append("Revenue CAGR %.1f%% (3Y) — strong topline growth" % rev_cagr_3y)
+        if margin_trend == "expanding":
+            self.moat_signals.append("EBITDA margins expanding — operating leverage playing out")
+        elif margin_trend == "contracting":
+            self.risk_factors.append("EBITDA margins contracting — competitive pressure or cost inflation")
+
+        print("    Rev CAGR 3Y: %.1f%% | PAT CAGR 3Y: %.1f%% | Margin trend: %s" % (
+            rev_cagr_3y if not _nan(rev_cagr_3y) else 0,
+            pat_cagr_3y if not _nan(pat_cagr_3y) else 0,
+            margin_trend))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Working Capital Efficiency (DSO, DIO, DPO, Cash Conversion)
+    # ─────────────────────────────────────────────────────────────────────────
+    def working_capital_efficiency(self):
+        """
+        Compute working capital days:
+        - DSO (Days Sales Outstanding)
+        - DIO (Days Inventory Outstanding)
+        - DPO (Days Payable Outstanding)
+        - Cash Conversion Cycle = DSO + DIO - DPO
+        """
+        print("  Working Capital Efficiency...")
+
+        years = min(self.d.years, 5)
+        dso_series, dio_series, dpo_series, ccc_series = [], [], [], []
+
+        for col in range(years):
+            rev = self._i("revenue", col)
+            cogs = self._i("cogs", col)
+            recv = self._b("receivables", col)
+            inv = self._b("inventory", col)
+            pay = self._b("payables", col)
+
+            daily_rev = rev / 365 if not _nan(rev) and rev > 0 else float("nan")
+            daily_cogs = cogs / 365 if not _nan(cogs) and cogs > 0 else float("nan")
+
+            dso = safe_div(recv, daily_rev) if not _nan(recv) else float("nan")
+            dio = safe_div(inv, daily_cogs) if not _nan(inv) else float("nan")
+            dpo = safe_div(pay, daily_cogs) if not _nan(pay) else float("nan")
+
+            ccc = float("nan")
+            if not (_nan(dso) or _nan(dio) or _nan(dpo)):
+                ccc = dso + dio - dpo
+
+            dso_series.append(dso)
+            dio_series.append(dio)
+            dpo_series.append(dpo)
+            ccc_series.append(ccc)
+
+        # Trend in cash conversion cycle
+        valid_ccc = [c for c in ccc_series if not _nan(c)]
+        ccc_trend = "stable"
+        if len(valid_ccc) >= 3:
+            if valid_ccc[0] < valid_ccc[-1] - 5:
+                ccc_trend = "improving"
+            elif valid_ccc[0] > valid_ccc[-1] + 10:
+                ccc_trend = "deteriorating"
+
+        self.results["working_capital_eff"] = {
+            "dso_series": dso_series,
+            "dio_series": dio_series,
+            "dpo_series": dpo_series,
+            "ccc_series": ccc_series,
+            "ccc_trend": ccc_trend,
+        }
+
+        if ccc_trend == "deteriorating":
+            self.risk_factors.append("Cash conversion cycle deteriorating — working capital bloat")
+        elif ccc_trend == "improving":
+            self.moat_signals.append("Cash conversion cycle improving — better working capital efficiency")
+
+        latest_ccc = valid_ccc[0] if valid_ccc else 0
+        print("    CCC: %.0f days | DSO: %.0f | DIO: %.0f | DPO: %.0f | Trend: %s" % (
+            latest_ccc, dso_series[0] if not _nan(dso_series[0]) else 0,
+            dio_series[0] if not _nan(dio_series[0]) else 0,
+            dpo_series[0] if not _nan(dpo_series[0]) else 0, ccc_trend))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Earnings Quality & Accrual Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def earnings_quality_analysis(self):
+        """
+        Assess quality of reported earnings:
+        - CFO/PAT ratio (cash backing of profits)
+        - Accrual ratio (balance sheet vs cash)
+        - Revenue vs receivables growth divergence
+        - Capex vs depreciation (maintenance vs growth)
+        """
+        print("  Earnings Quality...")
+
+        years = min(self.d.years, 4)
+        cfo_pat_series = []
+        accrual_series = []
+
+        for col in range(years):
+            pat = self._i("net_income", col)
+            cfo = self._c("operating_cf", col)
+            ta_curr = self._b("total_assets", col)
+            ta_prev = self._b("total_assets", col + 1) if col + 1 < self.d.years else float("nan")
+
+            cfo_pat = safe_div(cfo, pat) if not (_nan(cfo) or _nan(pat) or pat == 0) else float("nan")
+            cfo_pat_series.append(cfo_pat)
+
+            # Balance sheet accrual ratio
+            avg_ta = (ta_curr + ta_prev) / 2 if not (_nan(ta_curr) or _nan(ta_prev)) else ta_curr
+            accrual = safe_div(pat - cfo, avg_ta) if not (_nan(pat) or _nan(cfo) or _nan(avg_ta)) else float("nan")
+            accrual_series.append(accrual)
+
+        # Revenue vs receivables growth divergence
+        rev_growth = safe_div(self._i("revenue", 0) - self._i("revenue", 1), abs(self._i("revenue", 1))) * 100 if self.d.years >= 2 else float("nan")
+        recv_growth = safe_div(self._b("receivables", 0) - self._b("receivables", 1), abs(self._b("receivables", 1))) * 100 if self.d.years >= 2 else float("nan")
+        rev_recv_divergence = (recv_growth - rev_growth) if not (_nan(rev_growth) or _nan(recv_growth)) else float("nan")
+
+        # Capex analysis
+        capex = abs(self._c("capex", 0)) if not _nan(self._c("capex", 0)) else 0
+        dep = abs(self._i("depreciation", 0)) if not _nan(self._i("depreciation", 0)) else 0
+        capex_dep_ratio = safe_div(capex, dep) if dep > 0 else float("nan")
+
+        avg_cfo_pat = sum(r for r in cfo_pat_series if not _nan(r)) / max(1, len([r for r in cfo_pat_series if not _nan(r)]))
+        avg_accrual = sum(r for r in accrual_series if not _nan(r)) / max(1, len([r for r in accrual_series if not _nan(r)]))
+
+        self.results["earnings_quality"] = {
+            "cfo_pat_series": cfo_pat_series,
+            "avg_cfo_pat": avg_cfo_pat,
+            "accrual_ratio_series": accrual_series,
+            "avg_accrual_ratio": avg_accrual,
+            "rev_growth_pct": rev_growth,
+            "receivables_growth_pct": recv_growth,
+            "rev_recv_divergence_pct": rev_recv_divergence,
+            "capex_dep_ratio": capex_dep_ratio,
+        }
+
+        # Flags
+        if avg_cfo_pat < 0.6:
+            self.risk_factors.append("Low CFO/PAT ratio (%.2f) — profits not backed by cash" % avg_cfo_pat)
+        elif avg_cfo_pat > 1.0:
+            self.moat_signals.append("Strong CFO/PAT ratio (%.2f) — earnings well backed by cash" % avg_cfo_pat)
+
+        if not _nan(rev_recv_divergence) and rev_recv_divergence > 20:
+            self.risk_factors.append("Receivables growing %.0f%% faster than revenue — channel stuffing risk" % rev_recv_divergence)
+
+        if avg_accrual > 0.10:
+            self.risk_factors.append("High accrual ratio (%.2f) — earnings driven by non-cash items" % avg_accrual)
+
+        print("    CFO/PAT: %.2f | Accrual Ratio: %.3f | Rev-Recv Divergence: %.1f%%" % (
+            avg_cfo_pat, avg_accrual, rev_recv_divergence if not _nan(rev_recv_divergence) else 0))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Debt Maturity & Stress Test
+    # ─────────────────────────────────────────────────────────────────────────
+    def debt_stress_test(self):
+        """
+        Assess debt sustainability under stress scenarios:
+        - Interest coverage at various rate scenarios
+        - Debt/EBITDA
+        - Net debt / equity
+        - Short-term vs long-term debt mix
+        """
+        print("  Debt Stress Test...")
+
+        ebitda = self._i("ebitda", 0)
+        interest = abs(self._i("interest_exp", 0)) if not _nan(self._i("interest_exp", 0)) else 0
+        total_debt = self._b("total_debt", 0)
+        lt_debt = self._b("long_term_debt", 0)
+        st_debt = self._b("current_debt", 0)
+        cash_val = self._b("cash", 0)
+        equity = self._b("equity", 0)
+
+        if _nan(total_debt): total_debt = 0
+        if _nan(lt_debt): lt_debt = 0
+        if _nan(st_debt): st_debt = total_debt - lt_debt if not _nan(lt_debt) else 0
+        if _nan(cash_val): cash_val = 0
+
+        net_debt = total_debt - cash_val
+        icr_current = safe_div(ebitda, interest) if interest > 0 else float("inf")
+        debt_ebitda = safe_div(total_debt, ebitda) if not _nan(ebitda) and ebitda > 0 else float("nan")
+        net_debt_equity = safe_div(net_debt, equity) if not _nan(equity) and equity > 0 else float("nan")
+        st_lt_mix = safe_div(st_debt, total_debt) * 100 if total_debt > 0 else 0
+
+        # Stress test: what if interest rates double?
+        icr_stress_2x = safe_div(ebitda, interest * 2) if interest > 0 else float("inf")
+        icr_stress_3x = safe_div(ebitda, interest * 3) if interest > 0 else float("inf")
+
+        # EBITDA decline scenario
+        icr_ebitda_minus_30 = safe_div(ebitda * 0.7, interest) if interest > 0 else float("inf")
+
+        self.results["debt_stress"] = {
+            "total_debt_cr": to_cr(total_debt),
+            "net_debt_cr": to_cr(net_debt),
+            "cash_cr": to_cr(cash_val),
+            "icr_current": icr_current,
+            "icr_stress_2x_rates": icr_stress_2x,
+            "icr_stress_3x_rates": icr_stress_3x,
+            "icr_ebitda_minus_30pct": icr_ebitda_minus_30,
+            "debt_ebitda": debt_ebitda,
+            "net_debt_equity": net_debt_equity,
+            "short_term_pct": st_lt_mix,
+            "is_net_cash": net_debt < 0,
+        }
+
+        if net_debt < 0:
+            self.moat_signals.append("Net cash position (Rs. %.0f Cr) — zero debt risk" % abs(to_cr(net_debt)))
+        elif not _nan(debt_ebitda) and debt_ebitda > 3:
+            self.risk_factors.append("Debt/EBITDA = %.1fx — highly leveraged" % debt_ebitda)
+        if icr_stress_2x < 2:
+            self.risk_factors.append("Interest coverage drops below 2x if rates double — refinancing risk")
+
+        print("    Net Debt: Rs. %.0f Cr | ICR: %.1fx | Debt/EBITDA: %.1fx | Net D/E: %.2f" % (
+            to_cr(net_debt), icr_current if icr_current != float("inf") else 99,
+            debt_ebitda if not _nan(debt_ebitda) else 0,
+            net_debt_equity if not _nan(net_debt_equity) else 0))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Dividend & Buyback Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def shareholder_returns_analysis(self):
+        """Analyze dividend consistency and buyback track record."""
+        print("  Shareholder Returns...")
+
+        years = min(self.d.years, 5)
+        div_series = []
+        payout_series = []
+
+        for col in range(years):
+            div = self._c("dividends_paid", col)
+            pat = self._i("net_income", col)
+            div_abs = abs(div) if not _nan(div) else 0
+            div_series.append(div_abs)
+            payout = safe_div(div_abs, pat) * 100 if not (_nan(pat) or pat <= 0) else 0
+            payout_series.append(payout)
+
+        div_yield = self.info.get("dividendYield", 0) or 0
+        div_yield_pct = div_yield * 100
+
+        # Consistency: how many years paid dividend
+        div_paying_years = sum(1 for d in div_series if d > 0)
+        is_consistent = div_paying_years >= years - 1
+
+        avg_payout = sum(payout_series) / max(1, len(payout_series))
+
+        self.results["shareholder_returns"] = {
+            "dividend_series_cr": [to_cr(d) for d in div_series],
+            "payout_ratio_series": payout_series,
+            "avg_payout_pct": avg_payout,
+            "dividend_yield_pct": div_yield_pct,
+            "div_paying_years": div_paying_years,
+            "total_years": years,
+            "is_consistent": is_consistent,
+        }
+
+        if is_consistent and avg_payout > 20:
+            self.moat_signals.append("Consistent dividend payer (%.0f%% avg payout) — shareholder friendly" % avg_payout)
+
+        print("    Div Yield: %.1f%% | Avg Payout: %.0f%% | Consistency: %d/%d years" % (
+            div_yield_pct, avg_payout, div_paying_years, years))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # NLP: Concall Transcript Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def analyze_concall_transcripts(self):
+        """
+        NLP analysis of earnings call transcripts:
+        - Sentiment scoring (positive/negative tone)
+        - Forward guidance extraction (growth keywords)
+        - Risk keyword detection
+        - Management confidence indicators
+        - Promise tracking (comparing guidance vs outcomes)
+        """
+        print("  Concall NLP Analysis...")
+
+        if not self.d.concall_texts:
+            self.results["concall_nlp"] = {"status": "no_transcripts"}
+            print("    No concall transcripts provided.")
+            return
+
+        # Keyword dictionaries for sentiment analysis
+        POSITIVE_KEYWORDS = [
+            "growth", "strong", "robust", "exceeded", "outperformed",
+            "confident", "optimistic", "momentum", "record", "milestone",
+            "profitable", "margin expansion", "market share gain",
+            "order book", "pipeline", "demand", "tailwind",
+            "upgrade", "beat", "improve", "recovery", "acceleration",
+            "strategic", "innovation", "scaling", "efficiency",
+        ]
+        NEGATIVE_KEYWORDS = [
+            "challenge", "headwind", "slowdown", "decline", "pressure",
+            "uncertain", "cautious", "concern", "risk", "disruption",
+            "weak", "below", "miss", "delay", "impairment",
+            "write-off", "loss", "restructuring", "downturn",
+            "competitive pressure", "margin compression", "attrition",
+            "default", "stress", "litigation", "contingent",
+        ]
+        GUIDANCE_KEYWORDS = [
+            "guidance", "outlook", "expect", "target", "forecast",
+            "aim", "plan to", "going forward", "next quarter",
+            "full year", "FY", "projection", "aspiration",
+            "medium term", "long term", "runway", "visibility",
+        ]
+        RISK_KEYWORDS = [
+            "regulatory", "compliance", "litigation", "contingent liability",
+            "related party", "promoter pledge", "auditor concern",
+            "going concern", "qualification", "deviation",
+            "fraud", "whistleblower", "investigation",
+            "forex", "currency", "geopolitical", "election",
+            "raw material", "input cost", "supply chain",
+        ]
+        CONFIDENCE_INDICATORS = [
+            "we are confident", "i am confident", "strong visibility",
+            "comfortable", "on track", "well positioned",
+            "market leader", "competitive advantage", "moat",
+        ]
+        HEDGING_INDICATORS = [
+            "subject to", "depending on", "uncertain",
+            "cannot guarantee", "no assurance", "may not",
+            "volatile", "unpredictable", "if conditions",
+        ]
+
+        all_results = []
+        aggregate_sentiment = 0
+        total_guidance_statements = []
+        total_risk_mentions = []
+
+        for transcript in self.d.concall_texts:
+            quarter = transcript.get("quarter", "Unknown")
+            text = transcript.get("text", "")
+            if not text:
+                continue
+
+            text_lower = text.lower()
+            words = text_lower.split()
+            total_words = len(words)
+
+            # Sentiment scoring
+            pos_count = sum(text_lower.count(kw) for kw in POSITIVE_KEYWORDS)
+            neg_count = sum(text_lower.count(kw) for kw in NEGATIVE_KEYWORDS)
+            sentiment_score = safe_div(pos_count - neg_count, pos_count + neg_count)
+            if _nan(sentiment_score):
+                sentiment_score = 0
+
+            # Guidance extraction
+            guidance_mentions = []
+            sentences = text.replace(".", ".\n").split("\n")
+            for sent in sentences:
+                sent_lower = sent.lower()
+                if any(kw in sent_lower for kw in GUIDANCE_KEYWORDS):
+                    # Extract the guidance sentence
+                    clean = sent.strip()
+                    if 20 < len(clean) < 300:
+                        guidance_mentions.append(clean)
+
+            # Risk mentions
+            risk_mentions = []
+            for sent in sentences:
+                sent_lower = sent.lower()
+                if any(kw in sent_lower for kw in RISK_KEYWORDS):
+                    clean = sent.strip()
+                    if 20 < len(clean) < 300:
+                        risk_mentions.append(clean)
+
+            # Confidence vs hedging
+            confidence_count = sum(text_lower.count(kw) for kw in CONFIDENCE_INDICATORS)
+            hedging_count = sum(text_lower.count(kw) for kw in HEDGING_INDICATORS)
+            confidence_ratio = safe_div(confidence_count, confidence_count + hedging_count)
+            if _nan(confidence_ratio):
+                confidence_ratio = 0.5
+
+            qr = {
+                "quarter": quarter,
+                "total_words": total_words,
+                "positive_mentions": pos_count,
+                "negative_mentions": neg_count,
+                "sentiment_score": sentiment_score,  # -1 to +1
+                "guidance_statements": len(guidance_mentions),
+                "risk_mentions": len(risk_mentions),
+                "confidence_ratio": confidence_ratio,
+                "top_guidance": guidance_mentions[:5],
+                "top_risks": risk_mentions[:5],
+            }
+            all_results.append(qr)
+            aggregate_sentiment += sentiment_score
+            total_guidance_statements.extend(guidance_mentions[:3])
+            total_risk_mentions.extend(risk_mentions[:3])
+
+        n_transcripts = len(all_results)
+        avg_sentiment = aggregate_sentiment / max(1, n_transcripts)
+
+        # Sentiment trend (improving or deteriorating?)
+        sentiment_trend = "stable"
+        if n_transcripts >= 2:
+            recent = all_results[0]["sentiment_score"]
+            older = all_results[-1]["sentiment_score"]
+            if recent > older + 0.15:
+                sentiment_trend = "improving"
+            elif recent < older - 0.15:
+                sentiment_trend = "deteriorating"
+
+        self.results["concall_nlp"] = {
+            "status": "analyzed",
+            "n_transcripts": n_transcripts,
+            "quarterly_results": all_results,
+            "avg_sentiment": avg_sentiment,
+            "sentiment_trend": sentiment_trend,
+            "key_guidance": total_guidance_statements[:10],
+            "key_risks": total_risk_mentions[:10],
+        }
+
+        # Flags
+        if avg_sentiment > 0.3:
+            self.moat_signals.append("Concall sentiment strongly positive (%.2f) — bullish management tone" % avg_sentiment)
+        elif avg_sentiment < -0.1:
+            self.risk_factors.append("Concall sentiment negative (%.2f) — management tone cautious/worried" % avg_sentiment)
+
+        if sentiment_trend == "deteriorating":
+            self.risk_factors.append("Management sentiment deteriorating across recent concalls")
+
+        print("    Transcripts: %d | Avg Sentiment: %.2f | Trend: %s" % (
+            n_transcripts, avg_sentiment, sentiment_trend))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # NLP: Annual Report Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def analyze_annual_reports(self):
+        """
+        Parse annual report text for:
+        - Related party transaction detection
+        - Contingent liability tracking
+        - Accounting policy changes
+        - Auditor qualification/emphasis of matter
+        - Key risk disclosures
+        """
+        print("  Annual Report NLP Analysis...")
+
+        if not self.d.annual_report_texts:
+            self.results["annual_report_nlp"] = {"status": "no_reports"}
+            print("    No annual report texts provided.")
+            return
+
+        RELATED_PARTY_PATTERNS = [
+            r"related\s+party\s+transaction",
+            r"transaction[s]?\s+with\s+related\s+part",
+            r"key\s+managerial\s+personnel",
+            r"promoter\s+group\s+entit",
+            r"loan[s]?\s+(?:to|from)\s+(?:director|promoter|related)",
+        ]
+        CONTINGENT_PATTERNS = [
+            r"contingent\s+liabilit",
+            r"claims?\s+against\s+the\s+company",
+            r"pending\s+(?:litigation|case|suit)",
+            r"disputed\s+(?:tax|demand|liabilit)",
+            r"guarantee[s]?\s+given",
+            r"letter[s]?\s+of\s+credit",
+        ]
+        AUDITOR_PATTERNS = [
+            r"emphasis\s+of\s+matter",
+            r"qualifi(?:ed|cation)",
+            r"material\s+(?:weakness|misstatement|uncertainty)",
+            r"going\s+concern",
+            r"disclaimer\s+of\s+opinion",
+            r"adverse\s+opinion",
+            r"key\s+audit\s+matter",
+        ]
+        POLICY_CHANGE_PATTERNS = [
+            r"change[s]?\s+in\s+accounting\s+polic",
+            r"(?:adopted|implemented)\s+(?:new|revised)\s+(?:Ind\s*AS|standard)",
+            r"retrospective(?:ly)?\s+(?:applied|restated)",
+            r"reclassif(?:ied|ication)",
+            r"change\s+in\s+(?:useful\s+life|depreciation\s+method|estimate)",
+        ]
+
+        all_year_results = []
+
+        for report in self.d.annual_report_texts:
+            year = report.get("year", "Unknown")
+            text = report.get("text", "")
+            if not text:
+                continue
+
+            text_lower = text.lower()
+
+            # Extract related party mentions
+            rpt_mentions = []
+            for pat in RELATED_PARTY_PATTERNS:
+                matches = re.finditer(pat, text_lower)
+                for m in matches:
+                    start = max(0, m.start() - 50)
+                    end = min(len(text), m.end() + 200)
+                    context = text[start:end].strip()
+                    rpt_mentions.append(context)
+
+            # Extract contingent liabilities
+            contingent_mentions = []
+            for pat in CONTINGENT_PATTERNS:
+                matches = re.finditer(pat, text_lower)
+                for m in matches:
+                    start = max(0, m.start() - 30)
+                    end = min(len(text), m.end() + 250)
+                    context = text[start:end].strip()
+                    contingent_mentions.append(context)
+
+            # Extract amounts from contingent liability sections
+            contingent_amounts = []
+            for mention in contingent_mentions:
+                amounts = re.findall(r'(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)\s*(?:Cr|crore|Lakh|lakh|million)?', mention)
+                contingent_amounts.extend(amounts)
+
+            # Auditor concerns
+            auditor_mentions = []
+            for pat in AUDITOR_PATTERNS:
+                matches = re.finditer(pat, text_lower)
+                for m in matches:
+                    start = max(0, m.start() - 30)
+                    end = min(len(text), m.end() + 200)
+                    context = text[start:end].strip()
+                    auditor_mentions.append(context)
+
+            # Accounting policy changes
+            policy_changes = []
+            for pat in POLICY_CHANGE_PATTERNS:
+                matches = re.finditer(pat, text_lower)
+                for m in matches:
+                    start = max(0, m.start() - 30)
+                    end = min(len(text), m.end() + 200)
+                    context = text[start:end].strip()
+                    policy_changes.append(context)
+
+            yr_result = {
+                "year": year,
+                "related_party_mentions": len(rpt_mentions),
+                "related_party_excerpts": rpt_mentions[:5],
+                "contingent_mentions": len(contingent_mentions),
+                "contingent_excerpts": contingent_mentions[:5],
+                "contingent_amounts": contingent_amounts[:5],
+                "auditor_concerns": len(auditor_mentions),
+                "auditor_excerpts": auditor_mentions[:3],
+                "policy_changes": len(policy_changes),
+                "policy_change_excerpts": policy_changes[:3],
+            }
+            all_year_results.append(yr_result)
+
+        # Aggregate flags
+        has_auditor_concerns = any(r["auditor_concerns"] > 0 for r in all_year_results)
+        high_rpt = any(r["related_party_mentions"] > 10 for r in all_year_results)
+        has_policy_changes = any(r["policy_changes"] > 2 for r in all_year_results)
+
+        self.results["annual_report_nlp"] = {
+            "status": "analyzed",
+            "years_analyzed": len(all_year_results),
+            "yearly_results": all_year_results,
+            "has_auditor_concerns": has_auditor_concerns,
+            "high_related_party": high_rpt,
+            "has_policy_changes": has_policy_changes,
+        }
+
+        if has_auditor_concerns:
+            self.risk_factors.append("Auditor emphasis/qualification detected in annual report — investigate")
+        if high_rpt:
+            self.risk_factors.append("High related party transaction volume — governance risk")
+        if has_policy_changes:
+            self.risk_factors.append("Accounting policy changes detected — verify impact on earnings comparability")
+
+        print("    Years analyzed: %d | Auditor concerns: %s | RPT flag: %s" % (
+            len(all_year_results), has_auditor_concerns, high_rpt))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # NLP: Load documents from PDF files in a directory
+    # ─────────────────────────────────────────────────────────────────────────
+    def load_documents_from_directory(self, directory_path):
+        """
+        Scan a directory for PDFs and text files.
+        Categorize as concall transcripts or annual reports based on filename.
+        Populate self.d.concall_texts and self.d.annual_report_texts.
+        """
+        print("  Loading documents from: %s" % directory_path)
+
+        if not os.path.isdir(directory_path):
+            print("    Directory not found: %s" % directory_path)
+            return
+
+        CONCALL_PATTERNS = ["concall", "transcript", "earnings call", "con-call",
+                           "conference call", "analyst meet", "investor call"]
+        AR_PATTERNS = ["annual report", "annual_report", "ar_", "ar-",
+                      "director report", "chairman", "mda", "management discussion"]
+
+        files = os.listdir(directory_path)
+        pdf_files = [f for f in files if f.lower().endswith(".pdf")]
+        txt_files = [f for f in files if f.lower().endswith(".txt")]
+
+        print("    Found %d PDFs, %d text files" % (len(pdf_files), len(txt_files)))
+
+        for fname in pdf_files + txt_files:
+            fpath = os.path.join(directory_path, fname)
+            fname_lower = fname.lower()
+
+            # Extract text
+            text = ""
+            if fname.lower().endswith(".pdf"):
+                try:
+                    reader = PyPDF2.PdfReader(fpath)
+                    pages_text = []
+                    for page in reader.pages:
+                        pt = page.extract_text()
+                        if pt:
+                            pages_text.append(pt)
+                    text = "\n".join(pages_text)
+                except Exception as e:
+                    print("    Failed to parse PDF %s: %s" % (fname, e))
+                    continue
+            else:
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as fh:
+                        text = fh.read()
+                except Exception as e:
+                    print("    Failed to read %s: %s" % (fname, e))
+                    continue
+
+            if len(text) < 100:
+                continue
+
+            # Categorize
+            is_concall = any(p in fname_lower for p in CONCALL_PATTERNS)
+            is_ar = any(p in fname_lower for p in AR_PATTERNS)
+
+            # Try to extract year/quarter from filename
+            year_match = re.search(r'(20\d{2})', fname)
+            year_str = year_match.group(1) if year_match else "Unknown"
+            quarter_match = re.search(r'Q([1-4])', fname, re.IGNORECASE)
+            quarter_str = "Q%s %s" % (quarter_match.group(1), year_str) if quarter_match else year_str
+
+            if is_concall:
+                self.d.concall_texts.append({"quarter": quarter_str, "text": text})
+                print("    Loaded concall: %s (%d chars)" % (fname, len(text)))
+            elif is_ar:
+                self.d.annual_report_texts.append({"year": year_str, "text": text})
+                print("    Loaded annual report: %s (%d chars)" % (fname, len(text)))
+            else:
+                # Try to auto-detect from content
+                text_sample = text[:2000].lower()
+                if any(p in text_sample for p in ["transcript", "earnings call", "conference call", "q&a session"]):
+                    self.d.concall_texts.append({"quarter": quarter_str, "text": text})
+                    print("    Auto-detected concall: %s" % fname)
+                elif any(p in text_sample for p in ["annual report", "director", "board of directors", "auditor"]):
+                    self.d.annual_report_texts.append({"year": year_str, "text": text})
+                    print("    Auto-detected annual report: %s" % fname)
+                else:
+                    print("    Skipped (unknown type): %s" % fname)
+
+        print("    Total: %d concalls, %d annual reports loaded" % (
+            len(self.d.concall_texts), len(self.d.annual_report_texts)))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUALITY: Competitive Moat Scoring
+    # ─────────────────────────────────────────────────────────────────────────
+    def moat_scoring(self):
+        """
+        Quantitative moat assessment based on financial characteristics:
+        - ROCE consistency (>15% for 5+ years = durable moat)
+        - Gross margin stability (low variance = pricing power)
+        - Revenue growth + margin expansion = scalable moat
+        - Low capex intensity = asset-light model
+        - High FCF conversion = real earnings
+        """
+        print("  Moat Scoring...")
+
+        score = 0
+        max_score = 10
+        components = {}
+
+        # 1. ROCE consistency (0-2 points)
+        ca = self.results.get("capital_allocation", {})
+        roce_series = ca.get("roce_series_pct", [])
+        high_roce_years = sum(1 for r in roce_series if not _nan(r) and r > 15)
+        if high_roce_years >= 4:
+            score += 2
+            components["ROCE consistency"] = "Strong (>15% for %d/%d years)" % (high_roce_years, len(roce_series))
+        elif high_roce_years >= 2:
+            score += 1
+            components["ROCE consistency"] = "Moderate"
+        else:
+            components["ROCE consistency"] = "Weak"
+
+        # 2. Gross margin stability (0-2 points)
+        rm = self.results.get("revenue_margins", {})
+        gm_series = rm.get("gross_margin_series", [])
+        valid_gm = [g for g in gm_series if not _nan(g)]
+        if len(valid_gm) >= 3:
+            gm_std = (sum((g - sum(valid_gm)/len(valid_gm))**2 for g in valid_gm) / len(valid_gm)) ** 0.5
+            if gm_std < 3:
+                score += 2
+                components["Margin stability"] = "Very stable (std: %.1f%%)" % gm_std
+            elif gm_std < 6:
+                score += 1
+                components["Margin stability"] = "Moderate (std: %.1f%%)" % gm_std
+            else:
+                components["Margin stability"] = "Volatile (std: %.1f%%)" % gm_std
+        else:
+            components["Margin stability"] = "Insufficient data"
+
+        # 3. Growth + margin expansion (0-2 points)
+        rev_cagr = rm.get("rev_cagr_3y_pct", 0) or 0
+        margin_trend = rm.get("margin_trend", "stable")
+        if rev_cagr > 15 and margin_trend == "expanding":
+            score += 2
+            components["Growth quality"] = "High growth + expanding margins"
+        elif rev_cagr > 10:
+            score += 1
+            components["Growth quality"] = "Good growth"
+        else:
+            components["Growth quality"] = "Modest"
+
+        # 4. Asset-light model (0-2 points)
+        capex_dep = self.results.get("earnings_quality", {}).get("capex_dep_ratio", float("nan"))
+        if not _nan(capex_dep):
+            if capex_dep < 1.5:
+                score += 2
+                components["Asset intensity"] = "Asset-light (capex/dep: %.1fx)" % capex_dep
+            elif capex_dep < 2.5:
+                score += 1
+                components["Asset intensity"] = "Moderate"
+            else:
+                components["Asset intensity"] = "Capital intensive (capex/dep: %.1fx)" % capex_dep
+        else:
+            components["Asset intensity"] = "N/A"
+
+        # 5. FCF conversion (0-2 points)
+        eq = self.results.get("earnings_quality", {})
+        cfo_pat = eq.get("avg_cfo_pat", 0) or 0
+        if cfo_pat > 0.9:
+            score += 2
+            components["FCF conversion"] = "Excellent (%.0f%%)" % (cfo_pat * 100)
+        elif cfo_pat > 0.7:
+            score += 1
+            components["FCF conversion"] = "Good (%.0f%%)" % (cfo_pat * 100)
+        else:
+            components["FCF conversion"] = "Weak (%.0f%%)" % (cfo_pat * 100)
+
+        # Classify moat
+        if score >= 8:
+            moat_type = "WIDE MOAT"
+        elif score >= 6:
+            moat_type = "NARROW MOAT"
+        elif score >= 4:
+            moat_type = "EMERGING MOAT"
+        else:
+            moat_type = "NO MOAT"
+
+        self.results["moat_score"] = {
+            "score": score,
+            "max_score": max_score,
+            "moat_type": moat_type,
+            "components": components,
+        }
+
+        print("    Moat Score: %d/%d => %s" % (score, max_score, moat_type))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # QUARTERLY: Sequential Momentum Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def quarterly_momentum(self):
+        """
+        Analyze quarter-on-quarter trends:
+        - Revenue sequential growth
+        - Margin improvement/deterioration
+        - Beat/miss vs street estimates (if available)
+        """
+        print("  Quarterly Momentum...")
+
+        if self.inc_q is None or self.inc_q.empty:
+            self.results["quarterly_momentum"] = {"status": "no_data"}
+            return
+
+        quarters = min(self.inc_q.shape[1], 8)
+        rev_q = []
+        pat_q = []
+        em_q = []
+
+        for col in range(quarters):
+            rev = self._iq("revenue", col)
+            pat = self._iq("net_income", col)
+            ebitda = self._iq("ebitda", col)
+            rev_q.append(rev)
+            pat_q.append(pat)
+            em_q.append(safe_div(ebitda, rev) * 100 if not (_nan(ebitda) or _nan(rev)) else float("nan"))
+
+        # QoQ growth
+        rev_qoq = []
+        for i in range(len(rev_q) - 1):
+            g = pct_change_val(rev_q[i], rev_q[i + 1]) if not (_nan(rev_q[i]) or _nan(rev_q[i + 1])) else float("nan")
+            rev_qoq.append(g)
+
+        # YoY growth (Q0 vs Q4)
+        rev_yoy = pct_change_val(rev_q[0], rev_q[4]) if len(rev_q) > 4 and not (_nan(rev_q[0]) or _nan(rev_q[4])) else float("nan")
+        pat_yoy = pct_change_val(pat_q[0], pat_q[4]) if len(pat_q) > 4 and not (_nan(pat_q[0]) or _nan(pat_q[4])) else float("nan")
+
+        # Acceleration/deceleration
+        accel = "stable"
+        if len(rev_qoq) >= 2 and not (_nan(rev_qoq[0]) or _nan(rev_qoq[1])):
+            if rev_qoq[0] > rev_qoq[1] + 3:
+                accel = "accelerating"
+            elif rev_qoq[0] < rev_qoq[1] - 3:
+                accel = "decelerating"
+
+        self.results["quarterly_momentum"] = {
+            "status": "computed",
+            "revenue_qoq_series": rev_qoq,
+            "revenue_yoy_pct": rev_yoy,
+            "pat_yoy_pct": pat_yoy,
+            "ebitda_margin_q_series": em_q,
+            "acceleration": accel,
+            "quarters_analyzed": quarters,
+        }
+
+        if accel == "accelerating":
+            self.moat_signals.append("Revenue growth accelerating QoQ — positive momentum")
+        elif accel == "decelerating":
+            self.risk_factors.append("Revenue growth decelerating QoQ — momentum fading")
+
+        print("    Rev YoY: %.1f%% | PAT YoY: %.1f%% | Momentum: %s" % (
+            rev_yoy if not _nan(rev_yoy) else 0,
+            pat_yoy if not _nan(pat_yoy) else 0, accel))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # RISK: Concentration & Regulatory Risk Assessment
+    # ─────────────────────────────────────────────────────────────────────────
+    def risk_assessment(self):
+        """
+        Compile comprehensive risk profile:
+        - Business concentration signals
+        - Leverage risk
+        - Valuation risk
+        - Governance risk
+        - Macro/regulatory risk (from NLP)
+        """
+        print("  Risk Assessment...")
+
+        risk_score = 0  # Higher = more risky (0-10)
+        risk_breakdown = {}
+
+        # 1. Leverage risk (0-3)
+        ds = self.results.get("debt_stress", {})
+        debt_ebitda = ds.get("debt_ebitda", 0) or 0
+        if not _nan(debt_ebitda):
+            if debt_ebitda > 4:
+                risk_score += 3
+                risk_breakdown["Leverage"] = "HIGH (Debt/EBITDA: %.1fx)" % debt_ebitda
+            elif debt_ebitda > 2:
+                risk_score += 1.5
+                risk_breakdown["Leverage"] = "MODERATE (Debt/EBITDA: %.1fx)" % debt_ebitda
+            else:
+                risk_breakdown["Leverage"] = "LOW"
+        elif ds.get("is_net_cash"):
+            risk_breakdown["Leverage"] = "NONE (Net cash)"
+
+        # 2. Valuation risk (0-2)
+        vb = self.results.get("valuation_bands", {})
+        pe_pctile = vb.get("pe_percentile", 50)
+        if not _nan(pe_pctile):
+            if pe_pctile > 85:
+                risk_score += 2
+                risk_breakdown["Valuation"] = "HIGH (PE at %.0f pctile)" % pe_pctile
+            elif pe_pctile > 65:
+                risk_score += 1
+                risk_breakdown["Valuation"] = "MODERATE"
+            else:
+                risk_breakdown["Valuation"] = "LOW"
+        else:
+            risk_breakdown["Valuation"] = "N/A"
+
+        # 3. Earnings quality risk (0-2)
+        eq = self.results.get("earnings_quality", {})
+        cfo_pat = eq.get("avg_cfo_pat", 1)
+        if cfo_pat < 0.5:
+            risk_score += 2
+            risk_breakdown["Earnings quality"] = "HIGH RISK (CFO/PAT: %.2f)" % cfo_pat
+        elif cfo_pat < 0.7:
+            risk_score += 1
+            risk_breakdown["Earnings quality"] = "MODERATE"
+        else:
+            risk_breakdown["Earnings quality"] = "LOW"
+
+        # 4. Governance risk (0-2)
+        ar_nlp = self.results.get("annual_report_nlp", {})
+        gov_risk = 0
+        if ar_nlp.get("has_auditor_concerns"):
+            gov_risk += 1
+        if ar_nlp.get("high_related_party"):
+            gov_risk += 1
+        risk_score += gov_risk
+        risk_breakdown["Governance"] = "HIGH" if gov_risk >= 2 else ("MODERATE" if gov_risk == 1 else "LOW")
+
+        # 5. Growth sustainability risk (0-1)
+        rdcf = self.results.get("reverse_dcf", {})
+        implied_g = rdcf.get("implied_growth_pct", 0) or 0
+        if implied_g > 30:
+            risk_score += 1
+            risk_breakdown["Growth expectations"] = "HIGH (Market pricing %.0f%% growth)" % implied_g
+        else:
+            risk_breakdown["Growth expectations"] = "MANAGEABLE"
+
+        # Risk category
+        if risk_score >= 7:
+            risk_category = "HIGH RISK"
+        elif risk_score >= 4:
+            risk_category = "MODERATE RISK"
+        else:
+            risk_category = "LOW RISK"
+
+        self.results["risk_assessment"] = {
+            "risk_score": risk_score,
+            "max_score": 10,
+            "risk_category": risk_category,
+            "breakdown": risk_breakdown,
+        }
+
+        print("    Risk Score: %.1f/10 => %s" % (risk_score, risk_category))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # OVERALL: Deep Fundamental Score & Recommendation
+    # ─────────────────────────────────────────────────────────────────────────
+    def compute_deep_score(self):
+        """
+        Compute final deep fundamental score (0-100) combining:
+        - Valuation attractiveness (25%)
+        - Business quality / moat (25%)
+        - Growth & momentum (20%)
+        - Earnings quality (15%)
+        - Risk profile (15%)
+        """
+        print("  Computing Deep Fundamental Score...")
+
+        scores = {}
+
+        # 1. Valuation (25%) — from DCF margin of safety + PE band position
+        dcf = self.results.get("dcf", {})
+        mos = dcf.get("margin_of_safety_pct", 0)
+        vb = self.results.get("valuation_bands", {})
+        pe_pctile = vb.get("pe_percentile", 50)
+
+        val_score = 50  # neutral default
+        if dcf.get("status") == "computed":
+            if mos > 40: val_score = 90
+            elif mos > 20: val_score = 75
+            elif mos > 0: val_score = 60
+            elif mos > -20: val_score = 40
+            elif mos > -40: val_score = 25
+            else: val_score = 10
+
+        if not _nan(pe_pctile):
+            pe_adj = (100 - pe_pctile) / 100 * 20  # low PE = bonus
+            val_score = min(100, val_score + pe_adj)
+        scores["valuation"] = val_score
+
+        # 2. Business quality / moat (25%)
+        moat = self.results.get("moat_score", {})
+        moat_sc = moat.get("score", 5)
+        quality_score = moat_sc * 10  # 0-100
+        scores["quality"] = quality_score
+
+        # 3. Growth & momentum (20%)
+        rm = self.results.get("revenue_margins", {})
+        rev_cagr = rm.get("rev_cagr_3y_pct", 0) or 0
+        qm = self.results.get("quarterly_momentum", {})
+        accel = qm.get("acceleration", "stable")
+
+        growth_score = 50
+        if rev_cagr > 25: growth_score = 85
+        elif rev_cagr > 15: growth_score = 70
+        elif rev_cagr > 8: growth_score = 55
+        elif rev_cagr > 0: growth_score = 40
+        else: growth_score = 20
+
+        if accel == "accelerating": growth_score = min(100, growth_score + 10)
+        elif accel == "decelerating": growth_score = max(0, growth_score - 10)
+        scores["growth"] = growth_score
+
+        # 4. Earnings quality (15%)
+        eq = self.results.get("earnings_quality", {})
+        cfo_pat = eq.get("avg_cfo_pat", 0.7)
+        accrual = eq.get("avg_accrual_ratio", 0.05)
+
+        eq_score = 50
+        if cfo_pat > 1.0: eq_score = 85
+        elif cfo_pat > 0.8: eq_score = 70
+        elif cfo_pat > 0.6: eq_score = 50
+        else: eq_score = 25
+
+        if accrual > 0.10: eq_score = max(0, eq_score - 15)
+        scores["earnings_quality"] = eq_score
+
+        # 5. Risk profile (15%) — inverted (lower risk = higher score)
+        ra = self.results.get("risk_assessment", {})
+        risk_sc = ra.get("risk_score", 5)
+        risk_score_inv = max(0, (10 - risk_sc) * 10)  # 0-100
+        scores["risk"] = risk_score_inv
+
+        # Weighted composite
+        weights = {"valuation": 0.25, "quality": 0.25, "growth": 0.20,
+                   "earnings_quality": 0.15, "risk": 0.15}
+        final_score = sum(scores[k] * weights[k] for k in weights)
+
+        # ── Bonus/Penalty from Extended Analyses (up to +/-10 pts) ──
+        bonus = 0
+
+        # Insider sentiment
+        insider = self.results.get("insider_trading", {})
+        if insider.get("net_sentiment") == "BULLISH":
+            bonus += 3
+        elif insider.get("net_sentiment") == "BEARISH":
+            bonus -= 3
+
+        # Shareholding trend
+        shp = self.results.get("shareholding_trend", {})
+        if shp.get("promoter_trend") == "increasing":
+            bonus += 2
+        elif shp.get("promoter_trend") == "decreasing":
+            bonus -= 2
+
+        # Relative strength
+        rs = self.results.get("relative_strength", {})
+        if rs.get("avg_alpha", 0) > 15:
+            bonus += 2
+        elif rs.get("avg_alpha", 0) < -15:
+            bonus -= 2
+
+        # Credit trajectory
+        cr = self.results.get("credit_intelligence", {})
+        if cr.get("trajectory") == "UPGRADED":
+            bonus += 2
+        elif cr.get("trajectory") == "DOWNGRADED":
+            bonus -= 3
+
+        # Institutional interest
+        inst = self.results.get("institutional_holdings", {})
+        if inst.get("total_institutional_pct", 0) > 30:
+            bonus += 1
+        if inst.get("n_mf_holders", 0) > 10:
+            bonus += 1
+
+        # Technical setup
+        tech = self.results.get("technical", {})
+        if tech.get("trend") == "STRONG UPTREND":
+            bonus += 2
+        elif tech.get("trend") == "DOWNTREND":
+            bonus -= 2
+
+        # Cap bonus
+        bonus = max(-10, min(10, bonus))
+        final_score = max(0, min(100, final_score + bonus))
+
+        # Recommendation
+        if final_score >= 75:
+            recommendation = "STRONG BUY"
+            rec_detail = "Excellent fundamentals with attractive valuation. High conviction."
+        elif final_score >= 60:
+            recommendation = "BUY"
+            rec_detail = "Good business at reasonable valuation. Favorable risk-reward."
+        elif final_score >= 45:
+            recommendation = "HOLD"
+            rec_detail = "Decent business but valuation or growth concerns limit upside."
+        elif final_score >= 30:
+            recommendation = "REDUCE"
+            rec_detail = "Fundamental concerns or rich valuation. Consider trimming."
+        else:
+            recommendation = "SELL"
+            rec_detail = "Significant fundamental weakness or extreme overvaluation."
+
+        self.results["deep_score"] = {
+            "final_score": final_score,
+            "component_scores": scores,
+            "weights": weights,
+            "recommendation": recommendation,
+            "rec_detail": rec_detail,
+            "moat_signals": self.moat_signals[:10],
+            "risk_factors": self.risk_factors[:10],
+        }
+
+        print("\n    ══════════════════════════════════════")
+        print("    DEEP FUNDAMENTAL SCORE: %.0f / 100" % final_score)
+        print("    RECOMMENDATION: %s" % recommendation)
+        print("    ══════════════════════════════════════")
+        print("    Valuation: %.0f | Quality: %.0f | Growth: %.0f | EQ: %.0f | Risk: %.0f" % (
+            val_score, quality_score, growth_score, eq_score, risk_score_inv))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Shareholding Pattern Trend Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def shareholding_trend_analysis(self):
+        """Analyze quarterly shareholding pattern trends."""
+        print("  Shareholding Trend Analysis...")
+
+        shp = self.d.shareholding_quarterly
+        if not shp or len(shp) < 2:
+            self.results["shareholding_trend"] = {"status": "insufficient_data"}
+            return
+
+        latest = shp[0]
+        prev_q = shp[1] if len(shp) > 1 else latest
+        older_q = shp[min(4, len(shp) - 1)]
+
+        promoter_change_1y = latest["promoter_pct"] - older_q["promoter_pct"]
+        promoter_change_qoq = latest["promoter_pct"] - prev_q["promoter_pct"]
+        public_change_1y = latest["public_pct"] - older_q["public_pct"]
+
+        promoter_series = [s["promoter_pct"] for s in shp[:8]]
+        promoter_trend = "stable"
+        if len(promoter_series) >= 4:
+            recent_avg = sum(promoter_series[:2]) / 2
+            older_avg = sum(promoter_series[-2:]) / 2
+            if recent_avg > older_avg + 1.5:
+                promoter_trend = "increasing"
+            elif recent_avg < older_avg - 1.5:
+                promoter_trend = "decreasing"
+
+        self.results["shareholding_trend"] = {
+            "status": "computed",
+            "latest_promoter_pct": latest["promoter_pct"],
+            "latest_public_pct": latest["public_pct"],
+            "promoter_change_1y_pct": promoter_change_1y,
+            "promoter_change_qoq_pct": promoter_change_qoq,
+            "public_change_1y_pct": public_change_1y,
+            "promoter_trend": promoter_trend,
+            "quarters_tracked": len(shp),
+            "series": [{"date": s["date"], "promoter": s["promoter_pct"], "public": s["public_pct"]} for s in shp[:8]],
+        }
+
+        if promoter_trend == "decreasing":
+            self.risk_factors.append("Promoter holding declining (%.1f%% over 1Y)" % promoter_change_1y)
+        elif promoter_trend == "increasing":
+            self.moat_signals.append("Promoter increasing stake (%.1f%% over 1Y)" % promoter_change_1y)
+        if latest["promoter_pct"] < 30:
+            self.risk_factors.append("Low promoter holding (%.1f%%)" % latest["promoter_pct"])
+        elif latest["promoter_pct"] > 70:
+            self.moat_signals.append("High promoter holding (%.1f%%)" % latest["promoter_pct"])
+
+        print("    Promoter: %.1f%% | 1Y Change: %+.1f%% | Trend: %s" % (
+            latest["promoter_pct"], promoter_change_1y, promoter_trend))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Insider Trading / SAST Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def insider_trading_analysis(self):
+        """Analyze insider buy/sell patterns from SAST disclosures."""
+        print("  Insider Trading (SAST) Analysis...")
+
+        sast = self.d.sast_disclosures
+        if not sast:
+            self.results["insider_trading"] = {"status": "no_data"}
+            return
+
+        buys = [s for s in sast if s["action"] == "BUY"]
+        sells = [s for s in sast if s["action"] == "SELL"]
+        total_buy_shares = sum(s["shares"] for s in buys)
+        total_sell_shares = sum(s["shares"] for s in sells)
+
+        net_sentiment = "NEUTRAL"
+        if len(buys) > len(sells) + 1:
+            net_sentiment = "BULLISH"
+        elif len(sells) > len(buys) + 1:
+            net_sentiment = "BEARISH"
+
+        self.results["insider_trading"] = {
+            "status": "computed",
+            "total_disclosures": len(sast),
+            "buys": len(buys),
+            "sells": len(sells),
+            "total_buy_shares": total_buy_shares,
+            "total_sell_shares": total_sell_shares,
+            "net_sentiment": net_sentiment,
+            "recent_actions": sast[:5],
+        }
+
+        if net_sentiment == "BULLISH":
+            self.moat_signals.append("Insider net buying (%d buys vs %d sells)" % (len(buys), len(sells)))
+        elif net_sentiment == "BEARISH":
+            self.risk_factors.append("Insider net selling (%d sells vs %d buys)" % (len(sells), len(buys)))
+
+        print("    Disclosures: %d | Buys: %d | Sells: %d | Sentiment: %s" % (
+            len(sast), len(buys), len(sells), net_sentiment))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Peer Comparison & Relative Valuation
+    # ─────────────────────────────────────────────────────────────────────────
+    def peer_comparison(self):
+        """Compare company against sector peers on PE, P/B, returns."""
+        print("  Peer Comparison...")
+
+        sp = self.d.sector_peers
+        if not sp or not sp.get("peers"):
+            self.results["peer_comparison"] = {"status": "no_peers"}
+            return
+
+        peers = sp["peers"]
+        sector_info = sp["sector_info"]
+        own_pe = self.info.get("trailingPE", float("nan"))
+        own_pb = self.info.get("priceToBook", float("nan"))
+        sector_pe = sector_info.get("sector_pe", 0)
+
+        peer_data = []
+        for peer in peers[:10]:
+            try:
+                pticker = yf.Ticker(peer["symbol"] + ".NS")
+                pinfo = pticker.info or {}
+                peer_data.append({
+                    "symbol": peer["symbol"],
+                    "pe": pinfo.get("trailingPE", float("nan")),
+                    "pb": pinfo.get("priceToBook", float("nan")),
+                    "ev_ebitda": pinfo.get("enterpriseToEbitda", float("nan")),
+                    "roe": pinfo.get("returnOnEquity", 0) * 100 if pinfo.get("returnOnEquity") else 0,
+                    "market_cap_cr": pinfo.get("marketCap", 0) / 1e7,
+                    "change_1y": peer.get("change_1y", 0),
+                })
+            except Exception:
+                continue
+            if len(peer_data) >= 5:
+                break
+
+        if not peer_data:
+            self.results["peer_comparison"] = {"status": "no_peer_data"}
+            return
+
+        valid_pe = [p["pe"] for p in peer_data if not _nan(p["pe"]) and p["pe"] > 0]
+        valid_pb = [p["pb"] for p in peer_data if not _nan(p["pb"]) and p["pb"] > 0]
+        avg_peer_pe = sum(valid_pe) / len(valid_pe) if valid_pe else 0
+        avg_peer_pb = sum(valid_pb) / len(valid_pb) if valid_pb else 0
+        pe_discount = ((avg_peer_pe - own_pe) / avg_peer_pe * 100) if avg_peer_pe > 0 and not _nan(own_pe) else 0
+
+        own_1y_return = 0
+        if self.prices is not None and len(self.prices) > 252:
+            own_1y_return = (self.prices["Close"].iloc[-1] / self.prices["Close"].iloc[-252] - 1) * 100
+
+        self.results["peer_comparison"] = {
+            "status": "computed",
+            "sector": sector_info.get("sector", ""),
+            "sector_index": sp.get("sector_index", ""),
+            "sector_pe": sector_pe,
+            "own_pe": own_pe,
+            "own_pb": own_pb,
+            "avg_peer_pe": avg_peer_pe,
+            "avg_peer_pb": avg_peer_pb,
+            "pe_discount_to_peers_pct": pe_discount,
+            "own_1y_return_pct": own_1y_return,
+            "peers": peer_data,
+        }
+
+        if pe_discount > 20:
+            self.moat_signals.append("Trading at %.0f%% PE discount to peers" % pe_discount)
+        elif pe_discount < -20:
+            self.risk_factors.append("Trading at %.0f%% PE premium to peers" % abs(pe_discount))
+
+        print("    Sector: %s | Own PE: %.1f | Peer avg PE: %.1f | Discount: %.0f%%" % (
+            sector_info.get("sector", "?"), own_pe if not _nan(own_pe) else 0, avg_peer_pe, pe_discount))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Relative Strength vs Nifty 50
+    # ─────────────────────────────────────────────────────────────────────────
+    def relative_strength_analysis(self):
+        """Calculate relative strength vs Nifty 50 over multiple timeframes."""
+        print("  Relative Strength vs Nifty...")
+
+        if self.prices is None or self.prices.empty:
+            self.results["relative_strength"] = {"status": "no_data"}
+            return
+
+        try:
+            nifty = yf.Ticker("^NSEI")
+            nifty_hist = nifty.history(period="2y")
+            if nifty_hist is None or nifty_hist.empty:
+                self.results["relative_strength"] = {"status": "nifty_fetch_failed"}
+                return
+        except Exception:
+            self.results["relative_strength"] = {"status": "nifty_fetch_failed"}
+            return
+
+        stock_close = self.prices["Close"]
+        nifty_close = nifty_hist["Close"]
+        common_dates = stock_close.index.intersection(nifty_close.index)
+        if len(common_dates) < 20:
+            self.results["relative_strength"] = {"status": "insufficient_overlap"}
+            return
+
+        stock_aligned = stock_close.loc[common_dates]
+        nifty_aligned = nifty_close.loc[common_dates]
+
+        periods = {"1M": 21, "3M": 63, "6M": 126, "1Y": 252}
+        rs_data = {}
+        for label, days in periods.items():
+            if len(stock_aligned) >= days:
+                stock_ret = (stock_aligned.iloc[-1] / stock_aligned.iloc[-days] - 1) * 100
+                nifty_ret = (nifty_aligned.iloc[-1] / nifty_aligned.iloc[-days] - 1) * 100
+                rs_data[label] = {"stock_return": stock_ret, "nifty_return": nifty_ret, "alpha": stock_ret - nifty_ret}
+
+        alphas = [rs_data[k]["alpha"] for k in rs_data]
+        avg_alpha = sum(alphas) / len(alphas) if alphas else 0
+
+        self.results["relative_strength"] = {
+            "status": "computed",
+            "periods": rs_data,
+            "avg_alpha": avg_alpha,
+            "outperforming": avg_alpha > 0,
+        }
+
+        if avg_alpha > 15:
+            self.moat_signals.append("Strong relative strength — outperforming Nifty by %.0f%%" % avg_alpha)
+        elif avg_alpha < -15:
+            self.risk_factors.append("Weak relative strength — underperforming Nifty by %.0f%%" % abs(avg_alpha))
+
+        print("    Avg Alpha vs Nifty: %+.1f%% | %s" % (avg_alpha, "OUTPERFORMING" if avg_alpha > 0 else "UNDERPERFORMING"))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Technical Structure (200DMA, RSI, Delivery)
+    # ─────────────────────────────────────────────────────────────────────────
+    def technical_structure(self):
+        """Basic technical context: DMA, RSI, delivery, volume trend."""
+        print("  Technical Structure...")
+
+        if self.prices is None or len(self.prices) < 200:
+            self.results["technical"] = {"status": "insufficient_data"}
+            return
+
+        close = self.prices["Close"]
+        volume = self.prices["Volume"] if "Volume" in self.prices.columns else None
+        cmp = close.iloc[-1]
+
+        dma_50 = close.rolling(50).mean().iloc[-1]
+        dma_200 = close.rolling(200).mean().iloc[-1]
+        above_50dma = cmp > dma_50
+        above_200dma = cmp > dma_200
+        golden_cross = dma_50 > dma_200
+        dist_200dma_pct = (cmp / dma_200 - 1) * 100
+
+        # RSI-14
+        delta = close.diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss
+        rsi_14 = 100 - (100 / (1 + rs.iloc[-1])) if loss.iloc[-1] != 0 else 50
+
+        # Volume trend
+        vol_trend = "N/A"
+        if volume is not None and not volume.empty:
+            vol_20 = volume.rolling(20).mean().iloc[-1]
+            vol_50 = volume.rolling(50).mean().iloc[-1]
+            if vol_50 > 0:
+                vol_ratio = vol_20 / vol_50
+                if vol_ratio > 1.3:
+                    vol_trend = "RISING (accumulation)"
+                elif vol_ratio < 0.7:
+                    vol_trend = "FALLING (distribution)"
+                else:
+                    vol_trend = "NORMAL"
+
+        delivery_pct = self.d.delivery_data.get("delivery_pct", 0)
+
+        if above_200dma and golden_cross and rsi_14 > 50:
+            trend = "STRONG UPTREND"
+        elif above_200dma and rsi_14 > 40:
+            trend = "UPTREND"
+        elif not above_200dma and not golden_cross and rsi_14 < 50:
+            trend = "DOWNTREND"
+        elif not above_200dma:
+            trend = "WEAK"
+        else:
+            trend = "SIDEWAYS"
+
+        self.results["technical"] = {
+            "status": "computed",
+            "cmp": cmp,
+            "dma_50": dma_50,
+            "dma_200": dma_200,
+            "above_50dma": above_50dma,
+            "above_200dma": above_200dma,
+            "golden_cross": golden_cross,
+            "dist_200dma_pct": dist_200dma_pct,
+            "rsi_14": rsi_14,
+            "volume_trend": vol_trend,
+            "delivery_pct": delivery_pct,
+            "trend": trend,
+        }
+
+        if trend in ("STRONG UPTREND", "UPTREND"):
+            self.moat_signals.append("Price in %s (RSI: %.0f)" % (trend, rsi_14))
+        elif trend == "DOWNTREND":
+            self.risk_factors.append("Price in DOWNTREND (below 200DMA, RSI: %.0f)" % rsi_14)
+        if delivery_pct > 60:
+            self.moat_signals.append("High delivery %% (%.0f%%) — institutional interest" % delivery_pct)
+
+        print("    Trend: %s | RSI: %.0f | 200DMA: Rs.%.0f (%+.1f%%) | Delivery: %.0f%%" % (
+            trend, rsi_14, dma_200, dist_200dma_pct, delivery_pct))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Graham Number & Magic Formula
+    # ─────────────────────────────────────────────────────────────────────────
+    def graham_magic_formula(self):
+        """Graham Number, Magic Formula (earnings yield + ROIC), PEG ratio."""
+        print("  Graham Number & Magic Formula...")
+
+        eps = self.info.get("trailingEps", 0) or 0
+        bvps = self.info.get("bookValue", 0) or 0
+        cmp = self.info.get("currentPrice", self.info.get("previousClose", 0)) or 0
+        pe = self.info.get("trailingPE", 0) or 0
+
+        graham_num = (22.5 * eps * bvps) ** 0.5 if eps > 0 and bvps > 0 else 0
+        graham_upside = (graham_num / cmp - 1) * 100 if cmp > 0 and graham_num > 0 else 0
+
+        ebit = self._i("operating_inc", 0)
+        ev = self.info.get("enterpriseValue", 0) or 0
+        earnings_yield = safe_div(ebit, ev) * 100 if not _nan(ebit) and ev > 0 else 0
+
+        total_assets = self._b("total_assets", 0)
+        current_liab = self._b("current_liabilities", 0)
+        cash_val = self._b("cash", 0)
+        if _nan(cash_val): cash_val = 0
+        invested_cap = total_assets - current_liab - cash_val if not (_nan(total_assets) or _nan(current_liab)) else 0
+        nopat = ebit * 0.75 if not _nan(ebit) else 0
+        roic = safe_div(nopat, invested_cap) * 100 if invested_cap > 0 else 0
+
+        growth_rate = self.results.get("revenue_margins", {}).get("pat_cagr_3y_pct", 0) or 0
+        peg = safe_div(pe, growth_rate) if growth_rate > 0 else float("nan")
+
+        self.results["graham_magic"] = {
+            "graham_number": graham_num,
+            "graham_upside_pct": graham_upside,
+            "earnings_yield_pct": earnings_yield,
+            "roic_pct": roic,
+            "peg_ratio": peg,
+            "eps": eps,
+            "bvps": bvps,
+            "cmp": cmp,
+        }
+
+        if graham_upside > 20:
+            self.moat_signals.append("Graham Number Rs.%.0f implies %.0f%% upside" % (graham_num, graham_upside))
+        if not _nan(peg) and peg < 1:
+            self.moat_signals.append("PEG ratio %.2f < 1 — growth at reasonable price" % peg)
+        elif not _nan(peg) and peg > 2.5:
+            self.risk_factors.append("PEG ratio %.2f — overvalued relative to growth" % peg)
+
+        print("    Graham: Rs.%.0f (%+.0f%%) | EY: %.1f%% | ROIC: %.1f%% | PEG: %.2f" % (
+            graham_num, graham_upside, earnings_yield, roic, peg if not _nan(peg) else 0))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Capex Cycle & Asset Efficiency Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def capex_cycle_analysis(self):
+        """Capex intensity, growth vs maintenance capex, asset turnover trend."""
+        print("  Capex Cycle Analysis...")
+
+        years = min(self.d.years, 5)
+        capex_series = []
+        rev_series = []
+        asset_turnover = []
+
+        for col in range(years):
+            capex = abs(safe_get(self.cf, "capex", col)) if not _nan(safe_get(self.cf, "capex", col)) else 0
+            rev = self._i("revenue", col)
+            total_assets = self._b("total_assets", col)
+            capex_series.append(capex)
+            rev_series.append(rev)
+            at = safe_div(rev, total_assets) if not (_nan(rev) or _nan(total_assets)) else float("nan")
+            asset_turnover.append(at)
+
+        capex_intensity = [safe_div(capex_series[i], rev_series[i]) * 100
+                          if not _nan(rev_series[i]) and rev_series[i] > 0 else 0
+                          for i in range(years)]
+
+        dep_latest = abs(self._i("depreciation", 0)) if not _nan(self._i("depreciation", 0)) else 0
+        capex_latest = capex_series[0] if capex_series else 0
+        growth_capex = max(0, capex_latest - dep_latest)
+        growth_capex_pct = safe_div(growth_capex, capex_latest) * 100 if capex_latest > 0 else 0
+
+        valid_at = [a for a in asset_turnover if not _nan(a)]
+        at_trend = "stable"
+        if len(valid_at) >= 3:
+            if valid_at[0] > valid_at[-1] + 0.1:
+                at_trend = "improving"
+            elif valid_at[0] < valid_at[-1] - 0.1:
+                at_trend = "deteriorating"
+
+        self.results["capex_cycle"] = {
+            "capex_intensity_series": capex_intensity,
+            "capex_latest_cr": to_cr(capex_latest),
+            "maintenance_capex_cr": to_cr(dep_latest),
+            "growth_capex_cr": to_cr(growth_capex),
+            "growth_capex_pct": growth_capex_pct,
+            "asset_turnover_series": asset_turnover,
+            "asset_turnover_trend": at_trend,
+        }
+
+        if growth_capex_pct > 50:
+            self.moat_signals.append("%.0f%% growth capex — investing for expansion" % growth_capex_pct)
+        if at_trend == "improving":
+            self.moat_signals.append("Asset turnover improving")
+        elif at_trend == "deteriorating":
+            self.risk_factors.append("Asset turnover declining")
+
+        print("    Capex Intensity: %.1f%% | Growth Capex: %.0f%% | AT Trend: %s" % (
+            capex_intensity[0] if capex_intensity else 0, growth_capex_pct, at_trend))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Tax Sustainability Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def tax_sustainability_analysis(self):
+        """Effective vs statutory tax rate, deferred tax trends."""
+        print("  Tax Sustainability Analysis...")
+
+        years = min(self.d.years, 5)
+        effective_tax_series = []
+        statutory_rate = 0.252
+
+        for col in range(years):
+            tax_exp = self._i("tax", col)
+            pretax = self._i("pretax_income", col)
+            eff_rate = safe_div(tax_exp, pretax) if not (_nan(tax_exp) or _nan(pretax) or pretax <= 0) else float("nan")
+            effective_tax_series.append(eff_rate)
+
+        valid_rates = [r for r in effective_tax_series if not _nan(r) and 0 < r < 0.5]
+        avg_effective_rate = sum(valid_rates) / len(valid_rates) if valid_rates else 0
+        tax_gap = (statutory_rate - avg_effective_rate) * 100
+
+        self.results["tax_sustainability"] = {
+            "effective_tax_series": [r * 100 if not _nan(r) else 0 for r in effective_tax_series],
+            "avg_effective_rate_pct": avg_effective_rate * 100,
+            "statutory_rate_pct": statutory_rate * 100,
+            "tax_gap_pct": tax_gap,
+            "has_tax_benefit": tax_gap > 5,
+        }
+
+        if tax_gap > 5:
+            self.risk_factors.append("Effective tax %.1f%% vs statutory %.1f%% — tax benefit dependency" % (
+                avg_effective_rate * 100, statutory_rate * 100))
+
+        print("    Effective Tax: %.1f%% | Statutory: %.1f%% | Gap: %.1f%%" % (
+            avg_effective_rate * 100, statutory_rate * 100, tax_gap))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Institutional Holding Analysis
+    # ─────────────────────────────────────────────────────────────────────────
+    def institutional_holding_analysis(self):
+        """Analyze MF/institutional ownership structure."""
+        print("  Institutional Holding Analysis...")
+
+        mf_data = self.d.mf_institutional_data
+        if not mf_data:
+            self.results["institutional_holdings"] = {"status": "no_data"}
+            return
+
+        inst_holders = mf_data.get("institutional_holders", [])
+        mf_holders = mf_data.get("mf_holders", [])
+
+        total_inst_pct = sum(h.get("pct_out", 0) for h in inst_holders)
+        total_mf_pct = sum(h.get("pct_out", 0) for h in mf_holders)
+        top_5_inst = sorted(inst_holders, key=lambda x: x.get("pct_out", 0), reverse=True)[:5]
+        top_5_mf = sorted(mf_holders, key=lambda x: x.get("pct_out", 0), reverse=True)[:5]
+
+        self.results["institutional_holdings"] = {
+            "status": "computed",
+            "total_institutional_pct": total_inst_pct,
+            "total_mf_pct": total_mf_pct,
+            "n_institutional_holders": len(inst_holders),
+            "n_mf_holders": len(mf_holders),
+            "top_5_institutional": top_5_inst,
+            "top_5_mf": top_5_mf,
+        }
+
+        if total_inst_pct > 30:
+            self.moat_signals.append("Strong institutional ownership (%.1f%%)" % total_inst_pct)
+        if len(mf_holders) > 10:
+            self.moat_signals.append("%d mutual funds holding" % len(mf_holders))
+
+        print("    Institutional: %.1f%% (%d holders) | MF: %.1f%% (%d funds)" % (
+            total_inst_pct, len(inst_holders), total_mf_pct, len(mf_holders)))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Corporate Actions History
+    # ─────────────────────────────────────────────────────────────────────────
+    def corporate_actions_analysis(self):
+        """Analyze dividend consistency, capital return track record."""
+        print("  Corporate Actions Analysis...")
+
+        ca = self.d.corporate_actions
+        if not ca:
+            self.results["corporate_actions"] = {"status": "no_data"}
+            return
+
+        dividends = ca.get("dividends", [])
+        splits = ca.get("splits", [])
+
+        years_with_div = set()
+        for d in dividends:
+            years_with_div.add(d["date"][:4])
+
+        total_div_amount = sum(d["amount"] for d in dividends)
+        avg_div = total_div_amount / len(dividends) if dividends else 0
+        div_growth = 0
+        if len(dividends) >= 4:
+            recent_divs = sum(d["amount"] for d in dividends[:2])
+            older_divs = sum(d["amount"] for d in dividends[-2:])
+            if older_divs > 0:
+                div_growth = (recent_divs / older_divs - 1) * 100
+
+        self.results["corporate_actions"] = {
+            "status": "computed",
+            "dividend_count": len(dividends),
+            "years_with_dividend": len(years_with_div),
+            "total_dividend_per_share": total_div_amount,
+            "avg_dividend_per_share": avg_div,
+            "dividend_growth_pct": div_growth,
+            "splits": splits,
+            "recent_dividends": dividends[:5],
+        }
+
+        if len(years_with_div) >= 5:
+            self.moat_signals.append("Consistent dividend payer (%d years)" % len(years_with_div))
+        if div_growth > 20:
+            self.moat_signals.append("Dividend growing at %.0f%%" % div_growth)
+
+        print("    Dividends: %d payments over %d years | Growth: %.0f%%" % (
+            len(dividends), len(years_with_div), div_growth))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXTENDED: Credit Rating Intelligence
+    # ─────────────────────────────────────────────────────────────────────────
+    def credit_rating_intelligence(self):
+        """Multi-agency credit rating trajectory analysis."""
+        print("  Credit Rating Intelligence...")
+
+        cr = self.d.credit_ratings
+        if not cr:
+            self.results["credit_intelligence"] = {"status": "no_ratings"}
+            return
+
+        RATING_HIERARCHY = {
+            "AAA": 10, "AA+": 9, "AA": 8, "AA-": 7,
+            "A+": 6, "A": 5, "A-": 4, "A1+": 6, "A1": 5,
+            "BBB+": 3, "BBB": 2, "BBB-": 1,
+            "BB+": 0, "BB": -1, "B+": -2, "B": -3,
+        }
+
+        all_ratings = []
+        agencies = {}
+        for filing in cr:
+            agency = filing.get("agency", "Unknown")
+            ratings = filing.get("ratings", [])
+            date_str = filing.get("date", "")
+            outlook = filing.get("outlook", "")
+            if agency not in agencies:
+                agencies[agency] = {"latest_ratings": ratings, "outlook": outlook, "date": date_str}
+            for r in ratings:
+                score = RATING_HIERARCHY.get(r.upper(), -5)
+                all_ratings.append({"date": date_str, "agency": agency, "rating": r, "score": score})
+
+        latest_score = all_ratings[0]["score"] if all_ratings else 0
+        oldest_score = all_ratings[-1]["score"] if all_ratings else 0
+        trajectory = "STABLE"
+        if latest_score > oldest_score:
+            trajectory = "UPGRADED"
+        elif latest_score < oldest_score:
+            trajectory = "DOWNGRADED"
+
+        is_ig = latest_score >= 2
+
+        self.results["credit_intelligence"] = {
+            "status": "computed",
+            "agencies": agencies,
+            "n_agencies": len(agencies),
+            "latest_score": latest_score,
+            "trajectory": trajectory,
+            "is_investment_grade": is_ig,
+            "all_ratings": all_ratings[:10],
+        }
+
+        if trajectory == "UPGRADED":
+            self.moat_signals.append("Credit rating upgraded")
+        elif trajectory == "DOWNGRADED":
+            self.risk_factors.append("Credit rating downgraded")
+        if is_ig:
+            self.moat_signals.append("Investment grade from %d agencies" % len(agencies))
+        elif latest_score < 0:
+            self.risk_factors.append("Sub-investment grade (junk) rating")
+
+        print("    Agencies: %d | Trajectory: %s | Inv. Grade: %s" % (len(agencies), trajectory, is_ig))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # RUN ALL DEEP ANALYSES
+    # ─────────────────────────────────────────────────────────────────────────
+    def run_all(self, documents_dir=None):
+        """Execute all deep fundamental analysis modules."""
+        print("\n[DEEP] Running Deep Fundamental Analysis...")
+
+        # Load documents if directory provided
+        if documents_dir:
+            self.load_documents_from_directory(documents_dir)
+
+        # Quantitative analysis
+        self.dcf_valuation()
+        self.reverse_dcf()
+        self.valuation_bands()
+        self.capital_allocation_analysis()
+        self.revenue_margin_analysis()
+        self.working_capital_efficiency()
+        self.earnings_quality_analysis()
+        self.debt_stress_test()
+        self.shareholder_returns_analysis()
+        self.quarterly_momentum()
+
+        # Extended quantitative analysis
+        self.shareholding_trend_analysis()
+        self.insider_trading_analysis()
+        self.peer_comparison()
+        self.relative_strength_analysis()
+        self.technical_structure()
+        self.graham_magic_formula()
+        self.capex_cycle_analysis()
+        self.tax_sustainability_analysis()
+        self.institutional_holding_analysis()
+        self.corporate_actions_analysis()
+        self.credit_rating_intelligence()
+
+        # Qualitative / NLP analysis
+        self.analyze_concall_transcripts()
+        self.analyze_annual_reports()
+
+        # Composite scoring
+        self.moat_scoring()
+        self.risk_assessment()
+        self.compute_deep_score()
+
+        return self.results
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PDF REPORT GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -3747,6 +6879,32 @@ class ForensicReport(FPDF):
         self.add_esm_section()
         self.add_promoter_section()
 
+        # ── Deep Fundamental Analysis Sections ──
+        if hasattr(self, "deep_analyzer") and self.deep_analyzer:
+            self.add_deep_dcf_section()
+            self.add_deep_valuation_bands_section()
+            self.add_deep_capital_allocation_section()
+            self.add_deep_earnings_quality_section()
+            self.add_deep_working_capital_section()
+            self.add_deep_debt_stress_section()
+            self.add_deep_moat_section()
+            self.add_deep_quarterly_momentum_section()
+            self.add_deep_concall_nlp_section()
+            self.add_deep_annual_report_nlp_section()
+            self.add_deep_risk_section()
+            self.add_deep_score_section()
+            # Extended analysis sections
+            self.add_deep_shareholding_section()
+            self.add_deep_insider_trading_section()
+            self.add_deep_peer_comparison_section()
+            self.add_deep_relative_strength_section()
+            self.add_deep_technical_section()
+            self.add_deep_graham_section()
+            self.add_deep_capex_section()
+            self.add_deep_institutional_section()
+            self.add_deep_corporate_actions_section()
+            self.add_deep_credit_intelligence_section()
+
         self.add_flags_page()
         self.add_credit_rating_page()
         self.add_sector_analysis()
@@ -3756,20 +6914,694 @@ class ForensicReport(FPDF):
         print("  PDF saved: %s" % output_path)
         return output_path
 
+    # ── DEEP FUNDAMENTAL PDF SECTIONS ────────────────────────────────────────
+
+    def add_deep_dcf_section(self):
+        """DCF Valuation page."""
+        dr = self.deep_analyzer.results.get("dcf", {})
+        if dr.get("status") != "computed":
+            return
+        self.add_page()
+        self._section("DCF VALUATION (3-Stage Model)")
+        self.set_font("Helvetica", "", 9)
+
+        # Key metrics
+        rows = [
+            ["Latest FCF", "Rs. %.0f Cr" % dr["fcf_latest_cr"]],
+            ["FCF CAGR (Historical)", "%.1f%%" % dr["fcf_cagr_pct"]],
+            ["High Growth Rate (Stage 1)", "%.1f%%" % dr["high_growth_pct"]],
+            ["Terminal Growth Rate", "%.1f%%" % dr["terminal_growth_pct"]],
+            ["WACC", "%.1f%%" % dr["wacc_pct"]],
+            ["Cost of Equity", "%.1f%%" % dr["cost_of_equity_pct"]],
+            ["Beta", "%.2f" % dr["beta"]],
+            ["", ""],
+            ["PV Stage 1 (High Growth)", "Rs. %.0f Cr" % dr["pv_stage1_cr"]],
+            ["PV Stage 2 (Fade)", "Rs. %.0f Cr" % dr["pv_stage2_cr"]],
+            ["PV Terminal Value", "Rs. %.0f Cr" % dr["pv_terminal_cr"]],
+            ["Enterprise Value", "Rs. %.0f Cr" % dr["ev_cr"]],
+            ["Equity Value", "Rs. %.0f Cr" % dr["equity_value_cr"]],
+            ["", ""],
+            ["Intrinsic Value / Share", "Rs. %.0f" % dr["intrinsic_per_share"]],
+            ["Current Market Price", "Rs. %.0f" % dr["cmp"]],
+            ["Margin of Safety", "%.1f%%" % dr["margin_of_safety_pct"]],
+        ]
+        self._table(["Parameter", "Value"], rows, col_widths=[100, 80])
+
+        # Interpretation
+        mos = dr["margin_of_safety_pct"]
+        self.ln(3)
+        if mos > 20:
+            self._metric("Verdict", "UNDERVALUED (%.0f%% upside to intrinsic)" % mos, C_GREEN)
+        elif mos > -10:
+            self._metric("Verdict", "FAIRLY VALUED", C_YELLOW)
+        else:
+            self._metric("Verdict", "OVERVALUED (%.0f%% above intrinsic)" % abs(mos), C_RED)
+
+    def add_deep_valuation_bands_section(self):
+        """Valuation bands and relative valuation."""
+        vb = self.deep_analyzer.results.get("valuation_bands", {})
+        if vb.get("status") != "computed":
+            return
+        self._check_page_break(80)
+        self._section("VALUATION BANDS & RELATIVE METRICS")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Trailing P/E", fmt_num(vb.get("pe_trailing", 0), 1)],
+            ["Forward P/E", fmt_num(vb.get("pe_forward", 0), 1)],
+            ["P/B Ratio", fmt_num(vb.get("pb_ratio", 0), 1)],
+            ["EV/EBITDA", fmt_num(vb.get("ev_ebitda", 0), 1)],
+            ["", ""],
+            ["5Y PE High (approx)", fmt_num(vb.get("pe_high_5y", 0), 1)],
+            ["5Y PE Low (approx)", fmt_num(vb.get("pe_low_5y", 0), 1)],
+            ["5Y PE Average", fmt_num(vb.get("pe_avg_5y", 0), 1)],
+            ["PE Percentile (5Y band)", fmt_num(vb.get("pe_percentile", 0), 0) + "%"],
+            ["", ""],
+            ["52W High", "Rs. %.0f" % vb.get("high_52w", 0) if not _nan(vb.get("high_52w", 0)) else "N/A"],
+            ["52W Low", "Rs. %.0f" % vb.get("low_52w", 0) if not _nan(vb.get("low_52w", 0)) else "N/A"],
+            ["Price Position (52W)", "%.0f%%" % vb.get("price_position_52w", 0) if not _nan(vb.get("price_position_52w", 0)) else "N/A"],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+    def add_deep_capital_allocation_section(self):
+        """Capital allocation & ROCE section."""
+        ca = self.deep_analyzer.results.get("capital_allocation", {})
+        if not ca:
+            return
+        self._check_page_break(70)
+        self._section("CAPITAL ALLOCATION & ROCE")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Avg ROCE", "%.1f%%" % ca.get("avg_roce_pct", 0)],
+            ["Avg Incremental ROCE", "%.1f%%" % ca.get("avg_incremental_roce_pct", 0) if not _nan(ca.get("avg_incremental_roce_pct", 0)) else "N/A"],
+            ["ROCE - WACC Spread", "%.1f%%" % ca.get("roce_wacc_spread_pct", 0)],
+            ["WACC", "%.1f%%" % ca.get("wacc_pct", 0)],
+            ["Reinvestment Rate", "%.1f%%" % ca.get("reinvestment_rate_pct", 0)],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+        # ROCE trend
+        roce_s = ca.get("roce_series_pct", [])
+        if roce_s:
+            self.ln(2)
+            self.set_font("Helvetica", "B", 9)
+            self.cell(0, 5, _latin("ROCE Trend: " + " -> ".join(
+                ["%.1f%%" % r if not _nan(r) else "N/A" for r in roce_s])),
+                new_x="LMARGIN", new_y="NEXT")
+
+    def add_deep_earnings_quality_section(self):
+        """Earnings quality analysis."""
+        eq = self.deep_analyzer.results.get("earnings_quality", {})
+        if not eq:
+            return
+        self._check_page_break(60)
+        self._section("EARNINGS QUALITY ANALYSIS")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Avg CFO / PAT Ratio", "%.2f" % eq.get("avg_cfo_pat", 0)],
+            ["Avg Accrual Ratio", "%.3f" % eq.get("avg_accrual_ratio", 0)],
+            ["Revenue Growth", fmt_pct(eq.get("rev_growth_pct", 0))],
+            ["Receivables Growth", fmt_pct(eq.get("receivables_growth_pct", 0))],
+            ["Rev-Recv Divergence", fmt_pct(eq.get("rev_recv_divergence_pct", 0))],
+            ["Capex / Depreciation", "%.1fx" % eq.get("capex_dep_ratio", 0) if not _nan(eq.get("capex_dep_ratio", 0)) else "N/A"],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+        # Interpretation
+        cfo_pat = eq.get("avg_cfo_pat", 0)
+        self.ln(2)
+        if cfo_pat > 0.9:
+            self._metric("Quality", "HIGH — Earnings well backed by operating cash flow", C_GREEN)
+        elif cfo_pat > 0.6:
+            self._metric("Quality", "MODERATE — Some gap between profits and cash", C_YELLOW)
+        else:
+            self._metric("Quality", "LOW — Profits significantly exceed cash generation", C_RED)
+
+    def add_deep_working_capital_section(self):
+        """Working capital efficiency (DSO/DIO/DPO/CCC)."""
+        wc = self.deep_analyzer.results.get("working_capital_eff", {})
+        if not wc:
+            return
+        self._check_page_break(60)
+        self._section("WORKING CAPITAL EFFICIENCY")
+        self.set_font("Helvetica", "", 9)
+
+        headers = ["Metric"] + ["Y%d" % (i+1) for i in range(len(wc.get("dso_series", [])))]
+        dso_row = ["DSO (days)"] + [fmt_num(d, 0) for d in wc.get("dso_series", [])]
+        dio_row = ["DIO (days)"] + [fmt_num(d, 0) for d in wc.get("dio_series", [])]
+        dpo_row = ["DPO (days)"] + [fmt_num(d, 0) for d in wc.get("dpo_series", [])]
+        ccc_row = ["Cash Conv. Cycle"] + [fmt_num(d, 0) for d in wc.get("ccc_series", [])]
+
+        self._table(headers, [dso_row, dio_row, dpo_row, ccc_row],
+                    col_widths=[45] + [28] * len(wc.get("dso_series", [])))
+        self.ln(2)
+        self._metric("Trend", wc.get("ccc_trend", "N/A").upper(),
+                     C_GREEN if wc.get("ccc_trend") == "improving" else
+                     (C_RED if wc.get("ccc_trend") == "deteriorating" else C_YELLOW))
+
+    def add_deep_debt_stress_section(self):
+        """Debt stress test section."""
+        ds = self.deep_analyzer.results.get("debt_stress", {})
+        if not ds:
+            return
+        self._check_page_break(70)
+        self._section("DEBT STRESS TEST")
+        self.set_font("Helvetica", "", 9)
+
+        icr = ds.get("icr_current", 0)
+        icr_str = "%.1fx" % icr if icr != float("inf") else "No Debt"
+        icr_2x = ds.get("icr_stress_2x_rates", 0)
+        icr_2x_str = "%.1fx" % icr_2x if icr_2x != float("inf") else "N/A"
+        icr_3x = ds.get("icr_stress_3x_rates", 0)
+        icr_3x_str = "%.1fx" % icr_3x if icr_3x != float("inf") else "N/A"
+        icr_ebitda = ds.get("icr_ebitda_minus_30pct", 0)
+        icr_ebitda_str = "%.1fx" % icr_ebitda if icr_ebitda != float("inf") else "N/A"
+
+        rows = [
+            ["Total Debt", "Rs. %.0f Cr" % ds.get("total_debt_cr", 0)],
+            ["Net Debt", "Rs. %.0f Cr" % ds.get("net_debt_cr", 0)],
+            ["Cash & Equivalents", "Rs. %.0f Cr" % ds.get("cash_cr", 0)],
+            ["Net Debt / Equity", fmt_num(ds.get("net_debt_equity", 0), 2)],
+            ["Debt / EBITDA", "%.1fx" % ds.get("debt_ebitda", 0) if not _nan(ds.get("debt_ebitda", 0)) else "N/A"],
+            ["Short-term Debt %", "%.0f%%" % ds.get("short_term_pct", 0)],
+            ["", ""],
+            ["ICR (Current)", icr_str],
+            ["ICR (If rates 2x)", icr_2x_str],
+            ["ICR (If rates 3x)", icr_3x_str],
+            ["ICR (EBITDA -30%)", icr_ebitda_str],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+        if ds.get("is_net_cash"):
+            self.ln(2)
+            self._metric("Status", "NET CASH — Zero debt risk", C_GREEN)
+
+    def add_deep_moat_section(self):
+        """Competitive moat scoring."""
+        moat = self.deep_analyzer.results.get("moat_score", {})
+        if not moat:
+            return
+        self.add_page()
+        self._section("COMPETITIVE MOAT ASSESSMENT")
+        self.set_font("Helvetica", "", 9)
+
+        score = moat.get("score", 0)
+        max_sc = moat.get("max_score", 10)
+        moat_type = moat.get("moat_type", "N/A")
+
+        color = C_GREEN if score >= 7 else (C_YELLOW if score >= 4 else C_RED)
+        self._score_box("Moat Score: %d/%d" % (score, max_sc), moat_type, color)
+        self.ln(5)
+
+        # Component breakdown
+        components = moat.get("components", {})
+        if components:
+            rows = [[k, v] for k, v in components.items()]
+            self._table(["Factor", "Assessment"], rows, col_widths=[80, 110])
+
+        # Moat signals
+        signals = self.deep_analyzer.moat_signals
+        if signals:
+            self.ln(3)
+            self._subsection("Moat Signals Detected")
+            for sig in signals[:8]:
+                self.set_font("Helvetica", "", 8)
+                self.set_text_color(*C_GREEN)
+                self.multi_cell(0, 4, _latin("+ " + sig), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(*C_DARK)
+
+    def add_deep_quarterly_momentum_section(self):
+        """Quarterly momentum section."""
+        qm = self.deep_analyzer.results.get("quarterly_momentum", {})
+        if qm.get("status") != "computed":
+            return
+        self._check_page_break(50)
+        self._section("QUARTERLY MOMENTUM")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Revenue YoY Growth", fmt_pct(qm.get("revenue_yoy_pct", 0))],
+            ["PAT YoY Growth", fmt_pct(qm.get("pat_yoy_pct", 0))],
+            ["Growth Momentum", qm.get("acceleration", "N/A").upper()],
+            ["Quarters Analyzed", str(qm.get("quarters_analyzed", 0))],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+    def add_deep_concall_nlp_section(self):
+        """Concall NLP analysis section."""
+        cn = self.deep_analyzer.results.get("concall_nlp", {})
+        if cn.get("status") != "analyzed":
+            return
+        self.add_page()
+        self._section("CONCALL TRANSCRIPT ANALYSIS (NLP)")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Transcripts Analyzed", str(cn.get("n_transcripts", 0))],
+            ["Average Sentiment Score", "%.2f (-1 to +1)" % cn.get("avg_sentiment", 0)],
+            ["Sentiment Trend", cn.get("sentiment_trend", "N/A").upper()],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[100, 80])
+
+        # Per-quarter breakdown
+        qr = cn.get("quarterly_results", [])
+        if qr:
+            self.ln(3)
+            self._subsection("Quarter-wise Sentiment")
+            q_rows = []
+            for q in qr[:6]:
+                q_rows.append([
+                    q.get("quarter", "?"),
+                    "%.2f" % q.get("sentiment_score", 0),
+                    str(q.get("positive_mentions", 0)),
+                    str(q.get("negative_mentions", 0)),
+                    "%.0f%%" % (q.get("confidence_ratio", 0) * 100),
+                ])
+            self._table(["Quarter", "Sentiment", "+ve", "-ve", "Confidence"],
+                        q_rows, col_widths=[35, 30, 25, 25, 35])
+
+        # Key guidance
+        guidance = cn.get("key_guidance", [])
+        if guidance:
+            self.ln(3)
+            self._subsection("Key Forward Guidance Statements")
+            for g in guidance[:5]:
+                self.set_font("Helvetica", "", 7)
+                self.multi_cell(0, 3.5, _latin(">> " + g[:200]), new_x="LMARGIN", new_y="NEXT")
+
+        # Key risks from concalls
+        risks = cn.get("key_risks", [])
+        if risks:
+            self.ln(3)
+            self._subsection("Risk Mentions from Concalls")
+            for r in risks[:5]:
+                self.set_font("Helvetica", "", 7)
+                self.set_text_color(*C_RED)
+                self.multi_cell(0, 3.5, _latin("!! " + r[:200]), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(*C_DARK)
+
+    def add_deep_annual_report_nlp_section(self):
+        """Annual report NLP section."""
+        ar = self.deep_analyzer.results.get("annual_report_nlp", {})
+        if ar.get("status") != "analyzed":
+            return
+        self._check_page_break(70)
+        self._section("ANNUAL REPORT ANALYSIS (NLP)")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Years Analyzed", str(ar.get("years_analyzed", 0))],
+            ["Auditor Concerns Found", "YES" if ar.get("has_auditor_concerns") else "No"],
+            ["High Related Party Txns", "YES" if ar.get("high_related_party") else "No"],
+            ["Accounting Policy Changes", "YES" if ar.get("has_policy_changes") else "No"],
+        ]
+        self._table(["Check", "Result"], rows, col_widths=[100, 80])
+
+        # Year-wise details
+        yearly = ar.get("yearly_results", [])
+        if yearly:
+            self.ln(3)
+            y_rows = []
+            for yr in yearly:
+                y_rows.append([
+                    str(yr.get("year", "?")),
+                    str(yr.get("related_party_mentions", 0)),
+                    str(yr.get("contingent_mentions", 0)),
+                    str(yr.get("auditor_concerns", 0)),
+                    str(yr.get("policy_changes", 0)),
+                ])
+            self._table(["Year", "RPT Mentions", "Contingent", "Auditor", "Policy Chg"],
+                        y_rows, col_widths=[30, 35, 35, 35, 35])
+
+    def add_deep_risk_section(self):
+        """Risk assessment section."""
+        ra = self.deep_analyzer.results.get("risk_assessment", {})
+        if not ra:
+            return
+        self._check_page_break(60)
+        self._section("COMPREHENSIVE RISK ASSESSMENT")
+        self.set_font("Helvetica", "", 9)
+
+        risk_sc = ra.get("risk_score", 5)
+        category = ra.get("risk_category", "N/A")
+        color = C_RED if risk_sc >= 7 else (C_YELLOW if risk_sc >= 4 else C_GREEN)
+        self._score_box("Risk Score: %.1f/10" % risk_sc, category, color)
+        self.ln(3)
+
+        breakdown = ra.get("breakdown", {})
+        if breakdown:
+            rows = [[k, v] for k, v in breakdown.items()]
+            self._table(["Risk Type", "Level"], rows, col_widths=[80, 110])
+
+        # Risk factors list
+        risks = self.deep_analyzer.risk_factors
+        if risks:
+            self.ln(3)
+            self._subsection("Identified Risk Factors")
+            for rf in risks[:8]:
+                self.set_font("Helvetica", "", 8)
+                self.set_text_color(*C_RED)
+                self.multi_cell(0, 4, _latin("- " + rf), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(*C_DARK)
+
+    def add_deep_score_section(self):
+        """Deep fundamental score summary page."""
+        ds = self.deep_analyzer.results.get("deep_score", {})
+        if not ds:
+            return
+        self.add_page()
+        self._section("DEEP FUNDAMENTAL SCORE")
+        self.set_font("Helvetica", "", 9)
+
+        final = ds.get("final_score", 0)
+        rec = ds.get("recommendation", "N/A")
+        detail = ds.get("rec_detail", "")
+
+        # Score box
+        if final >= 60:
+            color = C_GREEN
+        elif final >= 40:
+            color = C_YELLOW
+        else:
+            color = C_RED
+        self._score_box("Score: %.0f / 100" % final, rec, color)
+        self.ln(3)
+        self.set_font("Helvetica", "I", 9)
+        self.multi_cell(0, 4, _latin(detail), new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
+
+        # Component scores
+        scores = ds.get("component_scores", {})
+        weights = ds.get("weights", {})
+        if scores:
+            rows = []
+            for k in ["valuation", "quality", "growth", "earnings_quality", "risk"]:
+                label = k.replace("_", " ").title()
+                sc = scores.get(k, 0)
+                wt = weights.get(k, 0) * 100
+                rows.append([label, "%.0f / 100" % sc, "%.0f%%" % wt, "%.1f" % (sc * wt / 100)])
+            rows.append(["TOTAL", "%.0f / 100" % final, "100%", "%.1f" % final])
+            self._table(["Component", "Score", "Weight", "Weighted"], rows,
+                        col_widths=[55, 40, 30, 40])
+
+    # ── EXTENDED PDF SECTIONS ────────────────────────────────────────────────
+
+    def add_deep_shareholding_section(self):
+        """Shareholding pattern trend section."""
+        dr = self.deep_analyzer.results.get("shareholding_trend", {})
+        if dr.get("status") != "computed":
+            return
+        self.add_page()
+        self._section("SHAREHOLDING PATTERN TREND")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Current Promoter Holding", "%.1f%%" % dr["latest_promoter_pct"]],
+            ["Current Public Holding", "%.1f%%" % dr["latest_public_pct"]],
+            ["Promoter Change (1Y)", "%+.1f%%" % dr["promoter_change_1y_pct"]],
+            ["Promoter Change (QoQ)", "%+.1f%%" % dr["promoter_change_qoq_pct"]],
+            ["Promoter Trend", dr["promoter_trend"].upper()],
+            ["Quarters Tracked", str(dr["quarters_tracked"])],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Quarterly series table
+        series = dr.get("series", [])
+        if series:
+            self.ln(3)
+            self._subsection("Quarterly History")
+            qrows = [[s["date"][:11], "%.1f%%" % s["promoter"], "%.1f%%" % s["public"]] for s in series]
+            self._table(["Quarter", "Promoter %", "Public %"], qrows, col_widths=[60, 50, 50])
+
+    def add_deep_insider_trading_section(self):
+        """Insider/SAST trading section."""
+        dr = self.deep_analyzer.results.get("insider_trading", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(60)
+        self._section("INSIDER TRADING (SAST DISCLOSURES)")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Total Disclosures", str(dr["total_disclosures"])],
+            ["Buys", str(dr["buys"])],
+            ["Sells", str(dr["sells"])],
+            ["Net Sentiment", dr["net_sentiment"]],
+            ["Total Buy Shares", "{:,}".format(dr["total_buy_shares"])],
+            ["Total Sell Shares", "{:,}".format(dr["total_sell_shares"])],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Recent actions
+        recent = dr.get("recent_actions", [])
+        if recent:
+            self.ln(3)
+            self._subsection("Recent Insider Actions")
+            arows = [[a["date"][:11], a["action"], "{:,}".format(a["shares"]) if a["shares"] else "N/A"] for a in recent[:5]]
+            self._table(["Date", "Action", "Shares"], arows, col_widths=[50, 40, 70])
+
+    def add_deep_peer_comparison_section(self):
+        """Peer comparison section."""
+        dr = self.deep_analyzer.results.get("peer_comparison", {})
+        if dr.get("status") != "computed":
+            return
+        self.add_page()
+        self._section("PEER COMPARISON & RELATIVE VALUATION")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Sector", dr.get("sector", "N/A")],
+            ["Sector Index", dr.get("sector_index", "N/A")],
+            ["Sector PE", "%.1f" % dr.get("sector_pe", 0)],
+            ["Own PE", "%.1f" % dr.get("own_pe", 0) if not _nan(dr.get("own_pe", 0)) else "N/A"],
+            ["Peer Avg PE", "%.1f" % dr.get("avg_peer_pe", 0)],
+            ["PE Discount to Peers", "%+.0f%%" % dr.get("pe_discount_to_peers_pct", 0)],
+            ["Own 1Y Return", "%.1f%%" % dr.get("own_1y_return_pct", 0)],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Peer table
+        peers = dr.get("peers", [])
+        if peers:
+            self.ln(3)
+            self._subsection("Sector Peers")
+            prows = [[p["symbol"], "%.1f" % p["pe"] if not _nan(p["pe"]) else "N/A",
+                      "%.1f" % p["pb"] if not _nan(p["pb"]) else "N/A",
+                      "%.1f%%" % p.get("change_1y", 0)]
+                     for p in peers[:8]]
+            self._table(["Symbol", "PE", "P/B", "1Y Return"], prows, col_widths=[45, 35, 35, 45])
+
+    def add_deep_relative_strength_section(self):
+        """Relative strength vs Nifty section."""
+        dr = self.deep_analyzer.results.get("relative_strength", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(50)
+        self._section("RELATIVE STRENGTH VS NIFTY 50")
+        self.set_font("Helvetica", "", 9)
+
+        periods = dr.get("periods", {})
+        rows = []
+        for label in ["1M", "3M", "6M", "1Y"]:
+            p = periods.get(label, {})
+            if p:
+                rows.append([label, "%.1f%%" % p["stock_return"], "%.1f%%" % p["nifty_return"],
+                            "%+.1f%%" % p["alpha"]])
+        if rows:
+            self._table(["Period", "Stock Return", "Nifty Return", "Alpha"], rows,
+                        col_widths=[35, 45, 45, 40])
+
+        avg_alpha = dr.get("avg_alpha", 0)
+        status = "OUTPERFORMING" if avg_alpha > 0 else "UNDERPERFORMING"
+        self.ln(3)
+        self.set_font("Helvetica", "B", 10)
+        self.cell(0, 6, _latin("Average Alpha: %+.1f%% | %s" % (avg_alpha, status)),
+                  new_x="LMARGIN", new_y="NEXT")
+
+    def add_deep_technical_section(self):
+        """Technical structure section."""
+        dr = self.deep_analyzer.results.get("technical", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(60)
+        self._section("TECHNICAL STRUCTURE")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Current Price (CMP)", "Rs. %.0f" % dr["cmp"]],
+            ["50 DMA", "Rs. %.0f" % dr["dma_50"]],
+            ["200 DMA", "Rs. %.0f" % dr["dma_200"]],
+            ["Distance from 200 DMA", "%+.1f%%" % dr["dist_200dma_pct"]],
+            ["RSI (14)", "%.0f" % dr["rsi_14"]],
+            ["Trend", dr["trend"]],
+            ["Golden Cross (50>200)", "Yes" if dr["golden_cross"] else "No"],
+            ["Volume Trend", dr["volume_trend"]],
+            ["Delivery %", "%.1f%%" % dr["delivery_pct"] if dr["delivery_pct"] else "N/A"],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+    def add_deep_graham_section(self):
+        """Graham Number & Magic Formula section."""
+        dr = self.deep_analyzer.results.get("graham_magic", {})
+        if not dr:
+            return
+        self._check_page_break(50)
+        self._section("GRAHAM NUMBER & MAGIC FORMULA")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Trailing EPS", "Rs. %.1f" % dr.get("eps", 0)],
+            ["Book Value / Share", "Rs. %.1f" % dr.get("bvps", 0)],
+            ["Graham Number", "Rs. %.0f" % dr.get("graham_number", 0)],
+            ["Graham Upside", "%+.0f%%" % dr.get("graham_upside_pct", 0)],
+            ["Earnings Yield", "%.1f%%" % dr.get("earnings_yield_pct", 0)],
+            ["ROIC", "%.1f%%" % dr.get("roic_pct", 0)],
+            ["PEG Ratio", "%.2f" % dr.get("peg_ratio", 0) if not _nan(dr.get("peg_ratio", 0)) else "N/A"],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+    def add_deep_capex_section(self):
+        """Capex cycle analysis section."""
+        dr = self.deep_analyzer.results.get("capex_cycle", {})
+        if not dr:
+            return
+        self._check_page_break(50)
+        self._section("CAPEX CYCLE & ASSET EFFICIENCY")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Latest Capex", "Rs. %.0f Cr" % dr.get("capex_latest_cr", 0)],
+            ["Maintenance Capex (Depreciation)", "Rs. %.0f Cr" % dr.get("maintenance_capex_cr", 0)],
+            ["Growth Capex", "Rs. %.0f Cr" % dr.get("growth_capex_cr", 0)],
+            ["Growth Capex %", "%.0f%%" % dr.get("growth_capex_pct", 0)],
+            ["Asset Turnover Trend", dr.get("asset_turnover_trend", "N/A").upper()],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Capex intensity series
+        series = dr.get("capex_intensity_series", [])
+        if series:
+            self.ln(3)
+            self._subsection("Capex Intensity (% of Revenue)")
+            srows = [["Year -%d" % i, "%.1f%%" % v] for i, v in enumerate(series)]
+            self._table(["Year", "Capex/Revenue"], srows, col_widths=[60, 60])
+
+    def add_deep_institutional_section(self):
+        """Institutional/MF holdings section."""
+        dr = self.deep_analyzer.results.get("institutional_holdings", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(60)
+        self._section("INSTITUTIONAL & MUTUAL FUND HOLDINGS")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Total Institutional %", "%.1f%%" % dr.get("total_institutional_pct", 0)],
+            ["Total Mutual Fund %", "%.1f%%" % dr.get("total_mf_pct", 0)],
+            ["# Institutional Holders", str(dr.get("n_institutional_holders", 0))],
+            ["# MF Holders", str(dr.get("n_mf_holders", 0))],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Top holders
+        top5 = dr.get("top_5_institutional", [])
+        if top5:
+            self.ln(3)
+            self._subsection("Top Institutional Holders")
+            hrows = [[h["holder"][:40], "%.2f%%" % h["pct_out"]] for h in top5]
+            self._table(["Holder", "% Holding"], hrows, col_widths=[120, 40])
+
+        top5mf = dr.get("top_5_mf", [])
+        if top5mf:
+            self.ln(3)
+            self._subsection("Top Mutual Fund Holders")
+            mrows = [[h["holder"][:40], "%.2f%%" % h["pct_out"]] for h in top5mf]
+            self._table(["Fund", "% Holding"], mrows, col_widths=[120, 40])
+
+    def add_deep_corporate_actions_section(self):
+        """Corporate actions history section."""
+        dr = self.deep_analyzer.results.get("corporate_actions", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(50)
+        self._section("CORPORATE ACTIONS HISTORY")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Total Dividends", str(dr.get("dividend_count", 0))],
+            ["Years with Dividend", str(dr.get("years_with_dividend", 0))],
+            ["Total Div/Share (lifetime)", "Rs. %.1f" % dr.get("total_dividend_per_share", 0)],
+            ["Avg Dividend/Share", "Rs. %.1f" % dr.get("avg_dividend_per_share", 0)],
+            ["Dividend Growth", "%.0f%%" % dr.get("dividend_growth_pct", 0)],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Recent dividends
+        recent = dr.get("recent_dividends", [])
+        if recent:
+            self.ln(3)
+            self._subsection("Recent Dividends")
+            drows = [[d["date"], "Rs. %.1f" % d["amount"]] for d in recent[:5]]
+            self._table(["Date", "Amount/Share"], drows, col_widths=[60, 60])
+
+        # Splits
+        splits = dr.get("splits", [])
+        if splits:
+            self.ln(3)
+            self._subsection("Stock Splits")
+            srows = [[s["date"], s["ratio"]] for s in splits]
+            self._table(["Date", "Ratio"], srows, col_widths=[60, 60])
+
+    def add_deep_credit_intelligence_section(self):
+        """Enhanced credit rating intelligence section."""
+        dr = self.deep_analyzer.results.get("credit_intelligence", {})
+        if dr.get("status") != "computed":
+            return
+        self._check_page_break(50)
+        self._section("CREDIT RATING INTELLIGENCE")
+        self.set_font("Helvetica", "", 9)
+
+        rows = [
+            ["Agencies Covering", str(dr.get("n_agencies", 0))],
+            ["Rating Trajectory", dr.get("trajectory", "N/A")],
+            ["Investment Grade", "Yes" if dr.get("is_investment_grade") else "No"],
+            ["Latest Score", str(dr.get("latest_score", 0))],
+        ]
+        self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Agency breakdown
+        agencies = dr.get("agencies", {})
+        if agencies:
+            self.ln(3)
+            self._subsection("Agency Breakdown")
+            arows = []
+            for agency, info in agencies.items():
+                ratings_str = ", ".join(info.get("latest_ratings", [])) or "N/A"
+                arows.append([agency, ratings_str, info.get("outlook", "N/A"), info.get("date", "")[:11]])
+            self._table(["Agency", "Ratings", "Outlook", "Date"], arows, col_widths=[40, 50, 35, 40])
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(symbol=None):
-    """Run the complete forensic accounting analysis."""
+def run(symbol=None, documents_dir=None):
+    """Run the complete forensic + deep fundamental analysis.
+    
+    Args:
+        symbol: NSE symbol (e.g. 'RELIANCE'). Defaults to COMPANY_SYMBOL.
+        documents_dir: Optional path to a folder containing concall PDFs
+                       and annual report PDFs for NLP analysis.
+    """
     if symbol is None:
         symbol = COMPANY_SYMBOL
 
     symbol = symbol.strip().upper()
 
     print("=" * 64)
-    print("  FORENSIC ACCOUNTING ANALYSIS")
+    print("  FORENSIC + DEEP FUNDAMENTAL ANALYSIS")
     print("  Symbol: %s" % symbol)
     print("  Date  : %s" % datetime.datetime.now().strftime("%d-%b-%Y %H:%M"))
     print("=" * 64)
@@ -3782,32 +7614,57 @@ def run(symbol=None):
         print("Check if '%s' is a valid NSE symbol with at least 2 years of filings." % symbol)
         return
 
-    # Step 2: Analyse
+    # Step 2: Forensic Analysis
     analyzer = ForensicAnalyzer(data)
     results = analyzer.run_all()
 
-    # Step 3: Generate PDF
+    # Step 3: Auto-fetch extended data (concalls, investor pres, shareholding, peers, etc.)
+    if not documents_dir:
+        data.concall_texts = fetch_concall_transcripts(symbol)
+        data.annual_report_texts = fetch_investor_presentations(symbol)
+
+    data.shareholding_quarterly = fetch_shareholding_history(symbol)
+    data.sast_disclosures = fetch_sast_disclosures(symbol)
+    data.delivery_data = fetch_delivery_data(symbol)
+    data.sector_peers = fetch_sector_peers(symbol)
+    data.corporate_actions = fetch_corporate_actions(symbol)
+    data.related_party_filings = fetch_related_party_filings(symbol)
+    data.mf_institutional_data = fetch_mutual_fund_data(symbol)
+
+    # Step 4: Deep Fundamental Analysis
+    deep_analyzer = DeepFundamentalAnalyzer(data, forensic_analyzer=analyzer)
+    deep_results = deep_analyzer.run_all(documents_dir=documents_dir)
+    data.deep_results = deep_results
+
+    # Step 5: Generate PDF
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     pdf_name = "forensic_report_%s_%s.pdf" % (symbol, timestamp)
     pdf_path = os.path.join(SCRIPT_DIR, pdf_name)
 
     report = ForensicReport(symbol, data, analyzer)
+    report.deep_analyzer = deep_analyzer
     report.generate(pdf_path)
 
-    # Step 4: Console summary
+    # Step 6: Console summary
     print("\n" + "=" * 64)
     print("  ANALYSIS COMPLETE")
     print("=" * 64)
     overall = results.get("overall", {})
-    print("  Score         : %.0f / 100" % overall.get("final_score", 0))
-    print("  Recommendation: %s" % overall.get("recommendation", "N/A"))
-    print("  Red Flags     : %d" % len(analyzer.red_flags))
-    print("  Green Flags   : %d" % len(analyzer.green_flags))
-    print("  Report        : %s" % pdf_path)
+    deep_sc = deep_results.get("deep_score", {})
+    print("  Forensic Score    : %.0f / 100" % overall.get("final_score", 0))
+    print("  Deep Fund. Score  : %.0f / 100" % deep_sc.get("final_score", 0))
+    print("  Recommendation    : %s" % deep_sc.get("recommendation", overall.get("recommendation", "N/A")))
+    print("  Red Flags         : %d" % len(analyzer.red_flags))
+    print("  Green Flags       : %d" % len(analyzer.green_flags))
+    print("  Moat Signals      : %d" % len(deep_analyzer.moat_signals))
+    print("  Risk Factors      : %d" % len(deep_analyzer.risk_factors))
+    print("  Report            : %s" % pdf_path)
     print("=" * 64)
 
-    return results, pdf_path
+    return results, deep_results, pdf_path
 
 
 if __name__ == "__main__":
+    # To run with documents for NLP analysis, set the path:
+    # run(documents_dir="/path/to/company/documents")
     run()

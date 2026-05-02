@@ -1,18 +1,54 @@
 """
 Sector Momentum & Relative Strength Analyzer
 ==============================================
-Computes Mansfield Relative Strength of each custom sector index
-versus the Nifty 50 benchmark (NIFTYBEES ETF proxy).
 
-RS > 0 = sector outperforming Nifty 50
-RS < 0 = sector underperforming Nifty 50
-Rising RS = sector gaining momentum
+SUMMARY
+-------
+Computes Mansfield Relative Strength (RS) of each custom sector index
+versus the Nifty 50 benchmark (NIFTYBEES ETF proxy).  Ranks sectors by
+current RS and trend direction.
 
-Uses custom_sector_index.py for sector data and jugaad-data for benchmark.
+  RS > 0  = sector outperforming Nifty 50
+  RS < 0  = sector underperforming Nifty 50
+  Rising RS = sector gaining momentum relative to market
 
-Usage:
-  python sector_momentum.py                # Build & plot all sectors
-  python sector_momentum.py -o my_report   # Custom output prefix
+WORKFLOW
+--------
+1. Load custom sector definitions from index_constituents.json.
+2. Fetch Nifty 50 benchmark via NIFTYBEES ETF (jugaad-data primary, yfinance fallback).
+3. Build each custom sector index using custom_sector_index.py (equal-weighted).
+4. Compute RS = (sector / benchmark) × 100 for each trading day.
+5. Calculate RS stats — current level, 20-day trend (rising / falling).
+6. Rank all sectors by current RS.
+7. Create multi-line Plotly chart with RS history + range slider.
+8. Export RS data + rankings to Excel.
+
+DATA SOURCES
+------------
+- jugaad-data     — NIFTYBEES.NS benchmark daily closes (primary)
+- yfinance        — Fallback if jugaad-data fails
+- custom_sector_index.py — Sector index values (which uses jugaad-data + yfinance)
+- index_constituents.json — User-defined sector → stock mappings
+
+OUTPUT
+------
+- sector_momentum.xlsx         — RS Ranking, RS History, Index Values sheets
+- sector_momentum_chart.html   — Multi-line RS chart with range slider
+
+USAGE
+-----
+Individual run:
+    python3 sector_momentum.py                # build & plot all sectors
+    python3 sector_momentum.py -o my_report   # custom output prefix
+
+Group run (via run_all.py):
+    Scenario name: sector_momentum
+    Called as: sector_momentum.run()  →  returns (rs_dict, indices_dict, ranking_df, fig, excel_path, html_path)
+    Skip with: python3 run_all.py --skip sector_momentum
+
+DEPENDENCIES
+------------
+pandas, plotly, jugaad-data, yfinance, custom_sector_index
 """
 
 import os

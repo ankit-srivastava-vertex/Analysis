@@ -1,25 +1,48 @@
 """
 FII Sector-wise Flows — Equity Cash Market (Last 1 Year)
 =========================================================
-Fetches fortnightly sector-wise FII/FPI net-investment data from
-NSDL FPI Monitor, aggregates the last 12 months, and produces a
-single horizontal bar chart showing which sectors FII are buying
-versus selling (equity cash market only — no F&O).
 
-Data Source
------------
-NSDL FPI Monitor — Fortnightly Sector-wise FII Investment Data
-https://www.fpi.nsdl.co.in/web/Reports/FPI_Fortnightly_Selection.aspx
+SUMMARY
+-------
+Aggregates fortnightly sector-wise FII/FPI net-investment data from
+NSDL FPI Monitor over the last 12 months.  Shows which sectors FII
+are buying vs selling (equity cash market only — no F&O).
 
-Output
+WORKFLOW
+--------
+1. Scrape NSDL FPI Fortnightly Selection page to discover all available reports.
+2. Filter reports from the last 12 months (365 days).
+3. Download each fortnightly sector report HTML.
+4. Parse HTML tables to extract sector-wise net investment amounts.
+5. Aggregate all fortnightly data into total sector flows.
+6. Create horizontal bar chart (green = net buying, red = net selling).
+7. Export to Excel (total flows + fortnightly detail) + standalone HTML chart.
+
+DATA SOURCES
+------------
+- NSDL FPI Monitor — Fortnightly Sector-wise FII Investment Data
+  https://www.fpi.nsdl.co.in/web/Reports/FPI_Fortnightly_Selection.aspx
+  (scraped via requests + BeautifulSoup)
+
+OUTPUT
 ------
-  - Interactive HTML chart  (horizontal bar: green = buying, red = selling)
-  - Excel workbook          (total flows + fortnightly detail)
+- fii_sector_flows.xlsx         — Net sector flows + fortnightly detail sheets
+- fii_sector_flows_chart.html   — Interactive horizontal bar chart
 
-Usage
+USAGE
 -----
-  python fii_sector_flows.py
-  python fii_sector_flows.py -o my_report
+Individual run:
+    python3 fii_sector_flows.py                # default
+    python3 fii_sector_flows.py -o my_report   # custom output prefix
+
+Group run (via run_all.py):
+    Scenario name: fii_sector_flows
+    Called as: fii_sector_flows.run()  →  returns (sector_df, detail_df, fig, chart_path, excel_path)
+    Skip with: python3 run_all.py --skip fii_sector_flows
+
+DEPENDENCIES
+------------
+requests, pandas, plotly, BeautifulSoup (bs4)
 """
 
 import os

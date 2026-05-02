@@ -20,6 +20,7 @@ pct_down_report.xlsx
 # Cache files (re-created by scripts)
 fii_equity_cache.csv
 fii_oi_cache.csv
+.cache/
 
 # Excel lock files
 ~$*.xlsx

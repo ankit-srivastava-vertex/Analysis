@@ -1,8 +1,52 @@
 """
 Custom Sector Index Builder
-Reads index definitions from index_constituents.json, fetches 1-year historical
-close prices, calculates equal-weighted custom indices, plots interactive charts
-with Plotly, and exports to Excel + standalone HTML.
+===========================
+
+SUMMARY
+-------
+Builds custom equal-weighted sector indices from user-defined stock
+constituents.  Fetches 1-year prices, calculates index values
+(base = 1000), and produces interactive charts with summary statistics.
+
+WORKFLOW
+--------
+1. Load sector definitions from index_constituents.json.
+   Each sector maps to a list of NSE stock symbols.
+2. For each sector, fetch 1-year daily close prices for all constituents
+   (jugaad-data primary, yfinance fallback).
+3. Calculate daily returns per stock (clipped at ±35% to handle splits/demergers).
+4. Compute equal-weighted portfolio return (simple average of stock returns).
+5. Build cumulative index values with base value 1000.
+6. Create multi-line Plotly chart with all sector indices + individual sub-charts.
+7. Export summary stats + index values + daily prices to Excel + standalone HTML.
+
+DATA SOURCES
+------------
+- jugaad-data              — NSE stock daily close prices (primary)
+- yfinance                 — Fallback if jugaad-data fails for a symbol
+- index_constituents.json  — User-defined sector → stock symbol mappings
+                             (must exist in script directory)
+
+OUTPUT
+------
+- custom_sector_index.xlsx         — Summary stats, Index Values, Daily Prices sheets
+- custom_sector_index_chart.html   — Multi-line chart + individual sector sub-charts
+
+USAGE
+-----
+Individual run:
+    python3 custom_sector_index.py                         # default
+    python3 custom_sector_index.py -c my_constituents.json  # custom file
+    python3 custom_sector_index.py -o my_report             # custom output prefix
+
+Group run (via run_all.py):
+    Scenario name: sector_index
+    Called as: custom_sector_index.run()  →  returns (indices_dict, prices_dict, summary_df, fig, excel_path, html_path)
+    Skip with: python3 run_all.py --skip sector_index
+
+DEPENDENCIES
+------------
+pandas, plotly, jugaad-data, yfinance
 """
 
 import json

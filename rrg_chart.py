@@ -1,31 +1,57 @@
 """
 Relative Rotation Graph (RRG) — Indian Sector Indices
 ======================================================
+
+SUMMARY
+-------
 Plots an interactive RRG chart showing sector rotation relative to
 the Nifty 50 benchmark.  Sectors rotate clockwise through four
 quadrants: Leading → Weakening → Lagging → Improving.
 
-Data: 1-year daily close prices from yfinance, resampled to various
-      frequencies (daily, weekly, monthly, quarterly).
+WORKFLOW
+--------
+1. Fetch 1-year daily close prices for all sectors + Nifty 50 from yfinance.
+2. Resample to 8 timeframes (3-day, 7-day, 2-week, 12-day, 3-week, weekly,
+   monthly, quarterly).
+3. For each timeframe compute:
+   RS       = sector_close / benchmark_close × 100
+   RS-Ratio = RS / SMA(RS, N) × 100
+   RS-Mom   = RS-Ratio / SMA(RS-Ratio, N) × 100
+4. Classify sectors into quadrants:
+   Leading     (RS-Ratio > 100, RS-Mom > 100) — top-right
+   Weakening   (RS-Ratio > 100, RS-Mom < 100) — bottom-right
+   Lagging     (RS-Ratio < 100, RS-Mom < 100) — bottom-left
+   Improving   (RS-Ratio < 100, RS-Mom > 100) — top-left
+5. Create interactive scatter plot with timeframe selector buttons
+   and sector multi-select dropdown.
+6. Export to Excel + standalone HTML chart.
 
-Methodology:
-  RS       = sector_close / benchmark_close × 100
-  RS-Ratio = RS / SMA(RS, N) × 100
-  RS-Mom   = RS-Ratio / SMA(RS-Ratio, N) × 100
+DATA SOURCES
+------------
+- yfinance — 1-year daily closes for:
+  Sector indices: ^NSEBANK, ^CNXIT, ^CNXPHARMA, ^CNXAUTO, ^CNXMETAL, etc.
+  Sector ETFs: HEALTHIETF.NS, COMMOIETF.NS, OILIETF.NS, CONSUMBEES.NS
+  Benchmark: ^NSEI (Nifty 50)
 
-Quadrants (centred at 100, 100):
-  Leading     (RS-Ratio > 100, RS-Mom > 100)  — top-right
-  Weakening   (RS-Ratio > 100, RS-Mom < 100)  — bottom-right
-  Lagging     (RS-Ratio < 100, RS-Mom < 100)  — bottom-left
-  Improving   (RS-Ratio < 100, RS-Mom > 100)  — top-left
+OUTPUT
+------
+- rrg_chart.xlsx         — RRG data for all timeframes
+- rrg_chart_chart.html   — Interactive scatter RRG with timeframe tabs
 
-Output:
-  - Interactive HTML chart with timeframe buttons and sector multi-select
-  - Excel workbook with RS data for all timeframes
+USAGE
+-----
+Individual run:
+    python3 rrg_chart.py                  # default output
+    python3 rrg_chart.py -o my_report     # custom output prefix
 
-Usage:
-  python rrg_chart.py                 # Default output
-  python rrg_chart.py -o my_report    # Custom output prefix
+Group run (via run_all.py):
+    Scenario name: rrg
+    Called as: rrg_chart.run()  →  returns (all_data_dict, fig, excel_path, html_path)
+    Skip with: python3 run_all.py --skip rrg
+
+DEPENDENCIES
+------------
+pandas, plotly, yfinance
 """
 
 import os

@@ -1,28 +1,55 @@
 """
 Email Sender Utility
 ====================
+
+SUMMARY
+-------
 Shared module for sending consolidated analysis reports via email.
+Used by run_all.py and BulkBlock.py to deliver reports with file
+attachments over SMTP.
 
-Configuration is loaded entirely from environment variables.
+WORKFLOW
+--------
+1. Load SMTP configuration from environment variables.
+2. Build MIME message with subject, body text, and file attachments.
+3. Connect to SMTP server with TLS encryption.
+4. Authenticate and send email.
+5. Return True on success, False on failure.
 
-Environment variables (set via GitHub Secrets or local shell):
+DATA SOURCES
+------------
+Configuration only — loaded from environment variables:
     EMAIL_SMTP_SERVER   — SMTP server (default: smtp.gmail.com)
     EMAIL_SMTP_PORT     — SMTP port (default: 587)
     EMAIL_USE_TLS       — 'true' or 'false' (default: true)
     EMAIL_FROM          — Sender email address
-    EMAIL_SENDER_NAME   — Display name for sender (default: Market Analysis Bot)
+    EMAIL_SENDER_NAME   — Display name (default: Market Analysis Bot)
     EMAIL_TO            — Comma-separated recipient addresses
     EMAIL_USERNAME      — SMTP login username (defaults to EMAIL_FROM)
-    EMAIL_PASSWORD      — SMTP password / app password
-    EMAIL_SUBJECT_PREFIX— Subject line prefix (default: Daily Market Analysis Report)
+    EMAIL_PASSWORD      — SMTP password / app-specific password
+    EMAIL_SUBJECT_PREFIX— Subject prefix (default: Daily Market Analysis Report)
 
-Usage (from other scripts):
+OUTPUT
+------
+No files — sends email only.
+
+USAGE
+-----
+This is a library module, not meant to be run directly.
+
     from email_sender import send_report
     send_report(
-        subject="Daily Market Analysis Report — 24-Apr-2026",
+        subject="Daily Report — 02-May-2026",
         body_text="Please find attached the daily analysis reports.",
         attachments=["report.xlsx", "chart.html"],
     )
+
+Group run (via run_all.py):
+    Called automatically at the end of run_all.py (unless --no-email).
+
+DEPENDENCIES
+------------
+smtplib, email.mime (stdlib only — no external packages)
 """
 
 import os

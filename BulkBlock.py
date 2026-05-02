@@ -1,3 +1,51 @@
+"""
+Bulk & Block Deals Scraper (NSE + BSE)
+=======================================
+
+SUMMARY
+-------
+Fetches today's bulk and block deals from both NSE and BSE, optionally
+filters by "superstar" client names, exports to Excel, and sends an
+email report with styled HTML preview.
+
+WORKFLOW
+--------
+1. Fetch NSE bulk + block deals via nsepython library
+   (NSE API: /api/snapshot-capital-market-largedeal).
+2. Fetch BSE bulk + block deals via BSE website scraping + JSON API
+   (https://www.bseindia.com, https://api.bseindia.com).
+3. Parse and normalise deal data from both exchanges.
+4. Optionally filter deals by a hardcoded list of superstar client names.
+5. Save all deals to Excel with separate sheets:
+   NSE Bulk, NSE Block, BSE Bulk, BSE Block.
+6. Generate styled HTML email preview table.
+7. Send email with Excel attachment via SMTP.
+
+DATA SOURCES
+------------
+- NSE API (via nsepython)  — /api/snapshot-capital-market-largedeal
+                              BULK_DEALS_DATA + BLOCK_DEALS_DATA
+- BSE Website              — https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx
+- BSE JSON API             — https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w
+
+OUTPUT
+------
+- BULK_BLOCK_Deals_<timestamp>.xlsx — Multi-sheet Excel (NSE Bulk, NSE Block, BSE Bulk, BSE Block)
+- HTML email with styled deal tables
+
+USAGE
+-----
+Individual run:
+    python3 BulkBlock.py           # scrape deals, save Excel, send email
+
+Group run (via run_all.py):
+    Not part of run_all.py — run independently.
+
+DEPENDENCIES
+------------
+nsepython (nsepythonserver), requests, BeautifulSoup (bs4), pandas, openpyxl, smtplib
+"""
+
 import os
 import sys
 import time

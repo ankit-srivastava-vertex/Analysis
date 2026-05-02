@@ -1,18 +1,29 @@
 """
 Multi-Universe Pct-Down Screener (NSE / NSE-SME / BSE-SME)
 ==========================================================
-Initial universes (fetched live, no cached CSV files):
-  - NSE main board   <- nsearchives.nseindia.com EQUITY_L.csv
-  - NSE SME (Emerge) <- nsearchives.nseindia.com SME_EQUITY_L.csv
-  - BSE SME platform <- api.bseindia.com ListofScripData (groups M/MT/MS)
 
-Pipeline (applied independently per universe; see FILTER_MATRIX below):
-  1. Load full universe
-  2. Drop NSE F&O underlyings           [NSE only]
-  3. Keep market cap in [MCAP_MIN_CR, MCAP_MAX_CR] (300-45000 Cr) [NSE only]
-  4. Drop stocks with 1Y price change > MAX_1Y_RUNUP_PCT (50%)   [all]
-  5. Keep stocks down between MIN_PCT% and MAX_PCT% (2%-30%) from
-     their 3M / 6M / 9M highs                                    [all]
+SUMMARY
+-------
+Screens 3 stock universes for stocks trading 2–30% below their
+3-month / 6-month / 9-month highs.  Uses multi-threaded data fetching
+with smart retry/fallback logic.  Useful for finding pullback/dip
+buying opportunities across market segments.
+
+WORKFLOW
+--------
+1. Fetch live equity lists per universe:
+   - NSE main board   ← nsearchives.nseindia.com EQUITY_L.csv
+   - NSE SME (Emerge) ← nsearchives.nseindia.com SME_EQUITY_L.csv
+   - BSE SME platform ← api.bseindia.com ListofScripData (groups M/MT/MS)
+2. Apply universe-specific filters:
+   - NSE: Drop F&O underlyings, market cap 300–45K Cr, 1Y runup <50%
+   - NSE-SME / BSE-SME: Keep 1Y runup filter only (skip mcap/F&O)
+3. Fetch 1-year prices per stock via yfinance (3 retries, exponential backoff,
+   automatic .NS → .BO fallback for BSE-listed NSE tickers).
+4. Calculate 3M / 6M / 9M highs and % down from each.
+5. Filter to stocks within the target % range (default 2–30%).
+6. Find common hits across multiple timeframes (3M+6M, 3M+6M+9M).
+7. Export to Excel with separate sheets per universe + timeframe.
 
 Filter matrix:
   +-----------+-----------+-----------------+----------+----------------+
@@ -23,26 +34,45 @@ Filter matrix:
   | BSE_SME   |    No     |      No         |   Yes    |      Yes       |
   +-----------+-----------+-----------------+----------+----------------+
 
-Output: one Excel workbook with sheets per universe:
-   <UNI> 3M, <UNI> 6M, <UNI> 9M
-   <UNI> Common 3M+6M
-   <UNI> Common 3M+6M+9M
+DATA SOURCES
+------------
+- NSE Archives  — https://nsearchives.nseindia.com/content/equities/
+                   EQUITY_L.csv (main board), SME_EQUITY_L.csv (SME)
+- BSE API       — https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/
+                   Groups M, MT, MS (SME segments)
+- yfinance      — 1-year daily close prices per stock (.NS primary, .BO fallback)
 
-Usage:
-  python multi_pct_down.py
-  python multi_pct_down.py --min 5 --max 25
-  python multi_pct_down.py --skip bse_sme --workers 4
-  python multi_pct_down.py --max-symbols 100   # quick test
-  python multi_pct_down.py --workers 2         # safest vs Yahoo rate limit
-  python multi_pct_down.py -o my_report
+OUTPUT
+------
+- multi_pct_down_report_<date>.xlsx — Sheets per universe:
+    <UNI> 3M, <UNI> 6M, <UNI> 9M,
+    <UNI> Common 3M+6M, <UNI> Common 3M+6M+9M
+
+USAGE
+-----
+Individual run:
+    python3 multi_pct_down.py                       # default settings
+    python3 multi_pct_down.py --min 5 --max 25      # custom % range
+    python3 multi_pct_down.py --skip bse_sme         # skip a universe
+    python3 multi_pct_down.py --max-symbols 100      # quick test
+    python3 multi_pct_down.py --workers 2            # reduce parallelism
+    python3 multi_pct_down.py -o my_report           # custom output prefix
+
+Group run (via run_all.py):
+    Scenario name: pct_down
+    Called as: multi_pct_down.run()  →  returns excel_path
+    Skip with: python3 run_all.py --skip pct_down
 
 Coverage notes:
   Yahoo Finance does NOT carry NSE Emerge (NSE_SME) listings, so most
-  of that universe will be missing data even with retries. NSE main and
+  of that universe will be missing data even with retries.  NSE main and
   BSE_SME are well covered; transient failures are recovered via:
     - up to 3 retries with exponential backoff (1s/2s/4s)
-    - automatic .NS -> .BO fallback for NSE tickers that have a BSE
-      listing too (uses BSE's full active-equity list as the lookup map)
+    - automatic .NS → .BO fallback for NSE tickers with BSE listing
+
+DEPENDENCIES
+------------
+pandas, yfinance, requests, concurrent.futures
 """
 
 import os
