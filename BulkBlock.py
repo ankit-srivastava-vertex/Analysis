@@ -10,10 +10,12 @@ email report with styled HTML preview.
 
 WORKFLOW
 --------
-1. Fetch NSE bulk + block deals via nsepython library
-   (NSE API: /api/snapshot-capital-market-largedeal).
-2. Fetch BSE bulk + block deals via BSE website scraping + JSON API
-   (https://www.bseindia.com, https://api.bseindia.com).
+1. Fetch NSE bulk + block deals:
+   Primary: direct requests with NSE cookie management (3 retries, backoff).
+   Fallback: nsepython library (if installed).
+2. Fetch BSE bulk + block deals:
+   Primary: BSE JSON API (api.bseindia.com).
+   Fallback: BSE HTML website scraping (bseindia.com).
 3. Parse and normalise deal data from both exchanges.
 4. Optionally filter deals by a hardcoded list of superstar client names.
 5. Save all deals to Excel with separate sheets:
@@ -23,10 +25,10 @@ WORKFLOW
 
 DATA SOURCES
 ------------
-- NSE API (via nsepython)  — /api/snapshot-capital-market-largedeal
-                              BULK_DEALS_DATA + BLOCK_DEALS_DATA
-- BSE Website              — https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx
+- NSE API                  — /api/snapshot-capital-market-largedeal
+                              (direct requests primary, nsepython fallback)
 - BSE JSON API             — https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w
+- BSE Website (fallback)   — https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx
 
 OUTPUT
 ------
@@ -43,7 +45,8 @@ Group run (via run_all.py):
 
 DEPENDENCIES
 ------------
-nsepython (nsepythonserver), requests, BeautifulSoup (bs4), pandas, openpyxl, smtplib
+requests, BeautifulSoup (bs4), pandas, openpyxl, smtplib
+(optional: nsepython — used as NSE fallback if installed)
 """
 
 import os
@@ -55,17 +58,16 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
-try:
-    from nsepython import nsefetch
-except Exception:
-    # Provide a graceful fallback if nsepythonserver is not installed
-    def nsefetch(url):
-        print(f"Warning: 'nsepythonserver' not available; returning empty payload for {url}")
-        return {"BULK_DEALS_DATA": [], "BLOCK_DEALS_DATA": []}
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+
+try:
+    from nsepython import nsefetch as _nsefetch
+    _HAS_NSEPYTHON = True
+except Exception:
+    _HAS_NSEPYTHON = False
 
 
 class BSEScraper:
@@ -300,22 +302,74 @@ class BSEScraper:
             traceback.print_exc()
             return None
 
+    def _nse_session(self):
+        """Create/refresh a requests session with NSE cookies."""
+        if not hasattr(self, '_nse_sess') or self._nse_sess is None:
+            s = requests.Session()
+            s.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                              'AppleWebKit/537.36 (KHTML, like Gecko) '
+                              'Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.nseindia.com/market-data/live-market-action/bulk-block-deals',
+            })
+            for attempt in range(3):
+                try:
+                    r = s.get('https://www.nseindia.com', timeout=10)
+                    if r.status_code == 200:
+                        self._nse_sess = s
+                        return s
+                except Exception:
+                    time.sleep(1 + attempt)
+            self._nse_sess = s  # return even without cookies
+        return self._nse_sess
+
     def nse_largedeals(self, mode="bulk_deals"):
-        """This function fetches both bulk and block deals from the NSE API endpoint"""
-        payload = nsefetch('https://www.nseindia.com/api/snapshot-capital-market-largedeal')
-        if mode == "bulk_deals":
-            return pd.DataFrame(payload["BULK_DEALS_DATA"])
-        if mode == "block_deals":
-            return pd.DataFrame(payload["BLOCK_DEALS_DATA"])
+        """Fetch bulk/block deals from NSE API using direct requests (no nsepython)."""
+        url = 'https://www.nseindia.com/api/snapshot-capital-market-largedeal'
+        key = 'BULK_DEALS_DATA' if mode == 'bulk_deals' else 'BLOCK_DEALS_DATA'
+        for attempt in range(3):
+            try:
+                sess = self._nse_session()
+                r = sess.get(url, timeout=15)
+                if r.status_code == 401:
+                    # Cookie expired — refresh
+                    self._nse_sess = None
+                    time.sleep(1)
+                    continue
+                if r.status_code == 429:
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                payload = r.json()
+                data = payload.get(key, [])
+                if data:
+                    print(f"  ✓ NSE {mode}: {len(data)} deals fetched")
+                    return pd.DataFrame(data)
+                return None
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                else:
+                    print(f"  ⚠️ NSE {mode} fetch failed after 3 attempts: {e}")
         return None
 
     def fetch_bse_deals_api(self, deal_type="bulk"):
-        """Fetch BSE bulk/block deals from the working API endpoints.
-        deal_type: 'bulk' or 'block'
+        """Fetch BSE bulk/block deals.
+        Primary: BSE JSON API.
+        Fallback: BSE HTML scraping.
         """
         api_map = {
             "bulk": "https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w",
             "block": "https://api.bseindia.com/BseIndiaAPI/api/BlockDeal_Beta/w",
+        }
+        html_map = {
+            "bulk": ("https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx",
+                     "scrape_bulk_deals"),
+            "block": ("https://www.bseindia.com/markets/equity/EQReports/block_deals.aspx",
+                      "scrape_block_deals"),
         }
         url = api_map.get(deal_type)
         label = f"BSE {deal_type.title()} Deals"
@@ -356,9 +410,24 @@ class BSEScraper:
             return df
 
         except Exception as e:
-            print(f"\u274c Error fetching {label}: {e}")
-            traceback.print_exc()
-            return None
+            print(f"\u274c BSE API failed for {label}: {e}")
+
+        # ── Fallback: BSE HTML scraping ──
+        html_url, scrape_method = html_map.get(deal_type, (None, None))
+        if html_url and scrape_method:
+            try:
+                print(f"  Trying BSE HTML scraping fallback for {label} ...")
+                scraper_fn = getattr(self, scrape_method, None)
+                if scraper_fn:
+                    df = scraper_fn(html_url, label)
+                    if df is not None and not df.empty:
+                        print(f"  \u2713 BSE {deal_type} deals: {len(df)} fetched (HTML fallback)")
+                        return df
+            except Exception as e2:
+                print(f"  \u26a0\ufe0f BSE HTML fallback also failed: {e2}")
+
+        print(f"  \u26a0\ufe0f BSE {deal_type} deals: no data available")
+        return None
 
     def save_to_excel(self, dataframes_dict, filename):
         """Save all dataframes to Excel with multiple sheets"""
@@ -488,12 +557,18 @@ class BSEScraper:
 'VQ FASTERCAP FUND'
         ]
 
-        # Check for potential hidden spaces in column names
-        nse_bulk_deals_df.columns = nse_bulk_deals_df.columns.str.strip()
-        nse_block_deals_df.columns = nse_block_deals_df.columns.str.strip()
-        # Filtering the DataFrame based on the "Client Name" column for NSE data only
-        filtered_nse_bulk_df = nse_bulk_deals_df[nse_bulk_deals_df['clientName'].isin(client_names_to_filter)]
-        filtered_nse_block_df = nse_block_deals_df[nse_block_deals_df['clientName'].isin(client_names_to_filter)]
+        # Guard against empty NSE DataFrames (e.g. nsepython unavailable)
+        if nse_bulk_deals_df is not None and not nse_bulk_deals_df.empty:
+            nse_bulk_deals_df.columns = nse_bulk_deals_df.columns.str.strip()
+            filtered_nse_bulk_df = nse_bulk_deals_df[nse_bulk_deals_df['clientName'].isin(client_names_to_filter)]
+        else:
+            filtered_nse_bulk_df = pd.DataFrame()
+
+        if nse_block_deals_df is not None and not nse_block_deals_df.empty:
+            nse_block_deals_df.columns = nse_block_deals_df.columns.str.strip()
+            filtered_nse_block_df = nse_block_deals_df[nse_block_deals_df['clientName'].isin(client_names_to_filter)]
+        else:
+            filtered_nse_block_df = pd.DataFrame()
 
         dataframes = {"nse_bulk": filtered_nse_bulk_df,
                       "nse_block": filtered_nse_block_df}
