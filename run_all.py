@@ -11,13 +11,12 @@ email with all reports + interactive HTML charts attached.
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 6 scenarios in order:
+2. Run 5 scenarios in order:
    a. sector_index      → custom_sector_index.run()   — custom equal-weighted sector indices
    b. fii_flows          → fii_flows.run()             — daily FII equity cash flows
    c. fii_sector_flows   → fii_sector_flows.run()      — fortnightly FII sector-wise flows
    d. sector_momentum    → sector_momentum.run()       — Mansfield RS per sector
-   e. pct_down           → multi_pct_down.run()        — pct-down screener (NSE/NSE-SME/BSE-SME)
-   f. rrg                → rrg_chart.run()             — Relative Rotation Graph
+   e. rrg                → rrg_chart.run()             — Relative Rotation Graph
 3. Merge all scenario sheets into a unified Excel workbook
    (market_analysis_report.xlsx).
 4. Collect all HTML chart files.
@@ -30,8 +29,7 @@ This script only orchestrates and consolidates.
 
 OUTPUT
 ------
-- market_analysis_report.xlsx    — Unified workbook (6+ sheets)
-- multi_pct_down_report.xlsx     — Separate screener workbook
+- market_analysis_report.xlsx    — Unified workbook (5+ sheets)
 - *_chart.html                   — 5 interactive Plotly charts
 
 USAGE
@@ -39,10 +37,10 @@ USAGE
 Individual run:
     python3 run_all.py                              # run all + send email
     python3 run_all.py --no-email                   # run all, skip email
-    python3 run_all.py --skip fii_flows pct_down    # skip specific scenarios
+    python3 run_all.py --skip fii_flows rrg          # skip specific scenarios
 
 Available scenario names for --skip:
-    sector_index, fii_flows, fii_sector_flows, sector_momentum, pct_down, rrg
+    sector_index, fii_flows, fii_sector_flows, sector_momentum, rrg
 
 DEPENDENCIES
 ------------
@@ -62,7 +60,7 @@ TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Scenario names for --skip
 ALL_SCENARIOS = ["sector_index", "fii_flows", "fii_sector_flows",
-                 "sector_momentum", "pct_down", "rrg"]
+                 "sector_momentum", "rrg"]
 
 
 # ─── Scenario runners ───────────────────────────────────────────────────────
@@ -183,23 +181,6 @@ def run_sector_momentum():
     return sheets, html_path
 
 
-def run_pct_down():
-    """Run Multi-Universe Pct-Down Screener (NSE / NSE-SME / BSE-SME).
-    Returns Excel path (separate workbook)."""
-    from multi_pct_down import run as mpd_run, DEFAULT_WORKERS
-    prefix = os.path.join(SCRIPT_DIR, "multi_pct_down_report")
-    excel_path = mpd_run(
-        out_dir=SCRIPT_DIR,
-        skip=set(),
-        min_pct=2.0,
-        max_pct=30.0,
-        max_symbols=0,
-        workers=DEFAULT_WORKERS,
-        output_prefix=prefix,
-    )
-    return excel_path
-
-
 def run_rrg():
     """Run RRG Chart. Returns sheets dict + chart path."""
     from rrg_chart import run as rrg_run
@@ -279,13 +260,12 @@ def main():
 
     unified_sheets = {}
     chart_files = []
-    pct_down_excel = None
     errors = []
 
-    # ── 1. Custom Sector Index ───────────────────────────────────────────
+    # ── 1. Custom Sector Index ──────────────────────────────────
     if "sector_index" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/6: Custom Sector Index")
+        print("  SCENARIO 1/5: Custom Sector Index")
         print("=" * 70)
         try:
             sheets, chart = run_sector_index()
@@ -301,7 +281,7 @@ def main():
     # ── 2. FII Equity Flows ──────────────────────────────────────────────
     if "fii_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 2/6: FII Equity Cash Market Flows")
+        print("  SCENARIO 2/5: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_flows()
@@ -317,7 +297,7 @@ def main():
     # ── 3. FII Sector-wise Flows ─────────────────────────────────────────
     if "fii_sector_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 3/6: FII Sector-wise Flows")
+        print("  SCENARIO 3/5: FII Sector-wise Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_sector_flows()
@@ -333,7 +313,7 @@ def main():
     # ── 4. Sector Momentum ───────────────────────────────────────────────
     if "sector_momentum" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 4/6: Sector Momentum & Relative Strength")
+        print("  SCENARIO 4/5: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
             sheets, chart = run_sector_momentum()
@@ -346,27 +326,10 @@ def main():
             print("  ✗ Sector Momentum FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 5. Percentage Down Screener ──────────────────────────────────────
-    if "pct_down" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 5/6: Multi-Universe Pct-Down Screener")
-        print("=" * 70)
-        try:
-            pct_down_excel = run_pct_down()
-            if pct_down_excel:
-                print("  ✓ Multi Pct-Down complete")
-            else:
-                errors.append("pct_down: returned no data")
-                print("  ✗ Multi Pct-Down returned no data")
-        except Exception as e:
-            errors.append("pct_down: %s" % e)
-            print("  ✗ Multi Pct-Down FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 6. RRG Chart ─────────────────────────────────────────────────────
+    # ── 5. RRG Chart ─────────────────────────────────────────────────────
     if "rrg" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 6/6: Relative Rotation Graph")
+        print("  SCENARIO 5/5: Relative Rotation Graph")
         print("=" * 70)
         try:
             sheets, chart = run_rrg()
@@ -404,8 +367,6 @@ def main():
         attachments = []
         if unified_excel_path and os.path.exists(unified_excel_path):
             attachments.append(unified_excel_path)
-        if pct_down_excel and os.path.exists(pct_down_excel):
-            attachments.append(pct_down_excel)
         attachments.extend([f for f in chart_files if os.path.exists(f)])
 
         subject = "Daily Market Analysis Report — %s" % TODAY.strftime("%d-%b-%Y")
@@ -418,9 +379,6 @@ def main():
         if unified_excel_path:
             body_lines.append("  • Market Analysis Report (Excel) — %d sheets" %
                               len(unified_sheets))
-        if pct_down_excel:
-            body_lines.append(
-                "  • Multi-Universe Pct-Down Screener (Excel)")
         for cf in chart_files:
             body_lines.append("  • %s (Interactive Chart)" % os.path.basename(cf))
 
@@ -449,8 +407,6 @@ def main():
 
     if unified_excel_path:
         print("  Unified Excel : %s" % os.path.basename(unified_excel_path))
-    if pct_down_excel:
-        print("  Pct Down Excel: %s" % os.path.basename(pct_down_excel))
     for cf in chart_files:
         print("  Chart         : %s" % os.path.basename(cf))
     if errors:

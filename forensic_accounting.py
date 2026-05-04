@@ -10,47 +10,75 @@ with investment recommendation (BUY / HOLD / SELL / AVOID).
 
 WORKFLOW
 --------
-1. Fetch 3+ years of financials (Balance Sheet, P&L, Cash Flow) via yfinance
-   (.NS primary, .BO BSE fallback if NSE data is sparse).
-2. Compute forensic scores:
+1. Resolve the user-supplied symbol to the best yfinance ticker by trying
+   .NS, .BO, a manual SME-alias map, prefix-truncation heuristics, and
+   yf.Search. The candidate with the most years of financials wins.
+2. Fetch financials (Balance Sheet, P&L, Cash Flow) via yfinance, then
+   universally backfill from Screener.in (HTML scrape) so even BSE-only /
+   SME / newly-listed stocks get 6-12 years of statements. Screener values
+   are in Rs. crore; converted to absolute INR (×1e7) for yfinance shape.
+3. Compute forensic scores:
    - Beneish M-Score (earnings manipulation detection)
    - Altman Z-Score  (bankruptcy risk)
    - Piotroski F-Score (financial strength, 0-9)
    - DuPont decomposition (ROE breakdown)
    - Springate S-Score, Ohlson O-Score, Montier C-Score
    - Benford's Law digit distribution analysis
-3. Fetch extended data from NSE APIs (with retry + 18-hour cache):
+4. Fetch extended data from NSE APIs (with retry + 18-hour cache; index=sme
+   retry baked into _nse_get_json for SME-listed issuers):
    - Credit ratings, promoter holding, ESM status
    - Concall transcripts, investor presentations (auto-downloaded PDFs)
    - Shareholding history (quarterly), SAST / insider disclosures
    - Delivery / volume data, sector peers
    - Corporate actions, related-party filings, MF / institutional holders
-4. Run deep fundamental analysis:
+   - Financial-result PDFs and annual-report PDFs (filings library, exchange-
+     direct, plus PDF-regex fallback to synthesize income_annual when
+     yfinance has nothing).
+5. Run deep fundamental analysis:
    - Shareholding trend, insider trading signals
    - Peer comparison, relative strength vs Nifty 50
    - Technical structure, Graham / Magic Formula valuation
    - Capex cycle, tax sustainability, institutional holding trends
    - Credit rating intelligence
-5. Score: Forensic Score (0-100) + Deep Fundamental Score (0-100).
-6. Generate PDF report with all sections and save to script directory.
+6. Score: Forensic Score (0-100) + Deep Fundamental Score (0-100).
+7. Generate PDF report with all sections and save to script directory.
 
 DATA SOURCES
 ------------
-- yfinance          — Financial statements, historical prices, MF holders
-                      (.NS = NSE, .BO = BSE fallback)
+- yfinance          — Financial statements, historical prices, MF holders,
+                      corporate actions (.NS = NSE, .BO = BSE; resolver auto-
+                      picks the best variant including SME aliases).
+- Screener.in       — Universal financials backfill (P&L, BS, CF, quarterly)
+                      via HTML scrape of /company/<symbol-or-scripcode>/.
+                      Works for NSE main-board, BSE main-board, and BSE-SME
+                      stocks where yfinance has 0-4 years of data. Values
+                      converted from Rs. crore to absolute INR.
 - NSE APIs          — Credit ratings, shareholding, SAST, delivery data,
                       sector peers, concalls, investor presentations,
-                      related-party filings, ESM status, promoter holding
-- Local PDF parsing  — Concall transcripts & investor presentations
-                      (auto-downloaded from NSE, parsed via PyPDF2)
+                      related-party filings, ESM status, promoter holding,
+                      financial-result and annual-report filing libraries.
+                      index=sme retry built in for SME issuers.
+- Local PDF parsing  — Concall transcripts, investor presentations,
+                      annual reports, financial-result PDFs (auto-
+                      downloaded from NSE, parsed via PyPDF2; revenue/PAT/
+                      EBITDA regex-extracted as last-resort financial source).
 
 RESILIENCE
 ----------
 - Retry:  All NSE API calls retry 3× with exponential backoff.
           Auto-refreshes cookies on HTTP 401; backs off on 429.
-- Cache:  JSON responses cached in .cache/ directory (18-hour TTL).
+- Cache:  JSON responses cached in .cache/ directory (18-hour TTL); large
+          Screener HTML pages cached separately as .html files.
           Same-day re-runs are dramatically faster.
-- BSE fallback: If yfinance .NS returns < 2 years of data, tries .BO.
+- Ticker resolution: .NS → .BO → SME alias map → prefix-truncation →
+          yf.Search. Best candidate (most years of financials) wins.
+- SME support: NSE corporate APIs auto-retry with index=sme when the
+          equities call returns nothing.
+- Universal financials: Screener.in scrape backfills missing years/rows
+          when yfinance is sparse; PDF-regex extraction synthesizes a
+          minimal income statement when even Screener has no data.
+- No hard refusal: the script will always produce a report, even for
+          newly-listed / SME / data-poor stocks (with appropriate caveats).
 
 OUTPUT
 ------
@@ -79,13 +107,20 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# ── Auto-install fpdf2 if missing ────────────────────────────────────────────
-try:
-    from fpdf import FPDF
-except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
-    from fpdf import FPDF
+# ── Auto-install required third-party libraries if missing ───────────────────
+def _ensure(import_name, pip_name=None):
+    """Import a module, pip-installing it on the fly if it isn't available."""
+    import importlib
+    try:
+        return importlib.import_module(import_name)
+    except ImportError:
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name or import_name])
+        return importlib.import_module(import_name)
+
+
+_fpdf_mod = _ensure("fpdf", "fpdf2")
+FPDF = _fpdf_mod.FPDF
 
 import re
 import io
@@ -93,16 +128,10 @@ import json
 import time
 import hashlib
 
-import pandas as pd
-import yfinance as yf
-import requests
-
-try:
-    import PyPDF2
-except ImportError:
-    import subprocess as _sp
-    _sp.check_call([sys.executable, "-m", "pip", "install", "PyPDF2"])
-    import PyPDF2
+pd = _ensure("pandas")
+yf = _ensure("yfinance")
+requests = _ensure("requests")
+PyPDF2 = _ensure("PyPDF2")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -194,12 +223,49 @@ def _nse_get_json(session, url, params=None, cache_key=None, max_retries=3):
 
     resp = _nse_get(session, url, params=params, max_retries=max_retries)
     if resp is None or resp.status_code != 200:
-        return None
+        data = None
+    else:
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
 
-    try:
-        data = resp.json()
-    except Exception:
-        return None
+    # ── SME RETRY ──
+    # Many NSE corporate APIs require index=sme for SME-listed issuers.
+    # If the equities call returned nothing useful, transparently retry with sme.
+    def _is_empty(d):
+        if d is None:
+            return True
+        if isinstance(d, list) and len(d) == 0:
+            return True
+        if isinstance(d, dict):
+            # Common 'no data' shapes
+            if not d:
+                return True
+            for k in ("data", "records", "results", "shareholding"):
+                v = d.get(k)
+                if isinstance(v, list) and len(v) == 0:
+                    return True
+        return False
+
+    if _is_empty(data) and params and params.get("index") == "equities":
+        sme_params = dict(params)
+        sme_params["index"] = "sme"
+        sme_cache_key = (cache_key + "_sme") if cache_key else None
+        if sme_cache_key:
+            cached_sme = _cache_get(sme_cache_key)
+            if cached_sme is not None:
+                return cached_sme
+        resp2 = _nse_get(session, url, params=sme_params, max_retries=max_retries)
+        if resp2 is not None and resp2.status_code == 200:
+            try:
+                data2 = resp2.json()
+                if not _is_empty(data2):
+                    if sme_cache_key:
+                        _cache_set(sme_cache_key, data2)
+                    return data2
+            except Exception:
+                pass
 
     # Store in cache
     if cache_key and data:
@@ -230,7 +296,7 @@ def _nse_download_pdf(session, pdf_url, max_retries=2):
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION — Change this symbol each time you run the analysis
 # ══════════════════════════════════════════════════════════════════════════════
-COMPANY_SYMBOL = "POWERMECH"       # NSE symbol (e.g. RELIANCE, TCS, INFY, HDFCBANK)
+COMPANY_SYMBOL = "SUDEEPPHRM"       # NSE symbol (e.g. RELIANCE, TCS, INFY, HDFCBANK)
 # ══════════════════════════════════════════════════════════════════════════════
 
 
@@ -444,17 +510,141 @@ class FinancialData:
         self.corporate_actions = {}      # dividends, splits, bonus
         self.related_party_filings = []  # RPT disclosures
         self.mf_institutional_data = {}  # MF + institutional holder data
+        # ── Filings library (independent of yfinance) ──
+        self.financial_results_filings = []  # quarterly P&L PDFs from NSE
+        self.annual_report_filings = []      # annual report PDFs from NSE
+        self.filings_summary = {}            # counts per source
+
+
+# ── Resolved-ticker cache so we only resolve once per symbol per process ───
+_RESOLVED_TICKERS = {}
+
+# ── Manual alias map for SME / unusual tickers where Yahoo abbreviates the symbol
+#    differently from the exchange listing. Add new entries here as needed.
+#    Key = user-friendly symbol (uppercased); value = list of yfinance suffixed
+#    candidates to try in order.
+_TICKER_ALIASES = {
+    "YASHHIGHVOLTAGE": ["YASHHV.BO"],
+    "JEENASIKHO":      ["JSLL.NS", "JSLL.BO"],
+    "JEENASIKHOLIFECARE": ["JSLL.NS", "JSLL.BO"],
+}
+
+
+def _score_yf_candidate(t):
+    """Score a yfinance Ticker: prefer most years of financials, then info presence."""
+    years = 0
+    has_info = 0
+    has_price = 0
+    try:
+        fin = t.financials
+        if fin is not None and not fin.empty:
+            years = fin.shape[1]
+    except Exception:
+        pass
+    try:
+        info = t.info or {}
+        if info.get("longName") or info.get("shortName"):
+            has_info = 1
+    except Exception:
+        info = {}
+    try:
+        h = t.history(period="6mo")
+        if h is not None and not h.empty:
+            has_price = len(h)
+    except Exception:
+        pass
+    return (years, has_info, has_price, info)
+
+
+def _resolve_yf_ticker(symbol):
+    """
+    Resolve user symbol to the best yfinance Ticker.
+    Tries SYMBOL.NS, SYMBOL.BO, then yf.Search lookup (handles SME tickers
+    like YASHHIGHVOLTAGE -> YASHHV.BO, JEENASIKHO -> JSLL.NS, etc.).
+    Picks the candidate with the most financial-year coverage.
+    """
+    if symbol in _RESOLVED_TICKERS:
+        return _RESOLVED_TICKERS[symbol]
+
+    candidates = []  # list of (yf_sym, ticker, years, has_info, has_price, info)
+    tried = set()
+
+    def _try(yf_sym):
+        if not yf_sym or yf_sym in tried:
+            return
+        tried.add(yf_sym)
+        try:
+            t = yf.Ticker(yf_sym)
+            years, has_info, has_price, info = _score_yf_candidate(t)
+            if years > 0 or has_info or has_price > 30:
+                candidates.append((yf_sym, t, years, has_info, has_price, info))
+                print("    candidate %-22s  years=%d  info=%s  price_days=%d" % (
+                    yf_sym, years, "Y" if has_info else "-", has_price))
+        except Exception:
+            pass
+
+    # 1) Direct suffix attempts (main board NSE/BSE)
+    _try(symbol + ".NS")
+    _try(symbol + ".BO")
+
+    # 2) Manual alias map (handles SME tickers Yahoo abbreviates)
+    for alias in _TICKER_ALIASES.get(symbol, []):
+        _try(alias)
+
+    # 3) Prefix-truncation heuristic for BSE SME (e.g. YASHHIGHVOLTAGE -> YASHHV.BO).
+    #    Try the first 4..8 chars of the symbol with .BO and .NS.
+    if not candidates or max(c[2] for c in candidates) < 1:
+        for n in (8, 7, 6, 5, 4):
+            if n >= len(symbol):
+                continue
+            _try(symbol[:n] + ".BO")
+            _try(symbol[:n] + ".NS")
+            if candidates and max(c[2] for c in candidates) >= 2:
+                break
+
+    # 4) yfinance Search — handles natural-language remapping
+    if not candidates or max(c[2] for c in candidates) < 2:
+        try:
+            sr = yf.Search(symbol, max_results=8)
+            for q in (sr.quotes or [])[:8]:
+                qs = q.get("symbol", "")
+                if qs.endswith(".NS") or qs.endswith(".BO"):
+                    _try(qs)
+        except Exception as e:
+            print("    yf.Search failed: %s" % e)
+
+    if not candidates:
+        # Return an empty .NS ticker as last resort
+        t = yf.Ticker(symbol + ".NS")
+        result = (t, symbol + ".NS", {}, False)
+        _RESOLVED_TICKERS[symbol] = result
+        return result
+
+    # Pick best: most years > most info > most price
+    candidates.sort(key=lambda c: (c[2], c[3], c[4]), reverse=True)
+    best = candidates[0]
+    yf_sym, ticker, years, has_info, has_price, info = best
+    is_sme = False
+    # Heuristic: BSE-only listings (no .NS candidate with data) often = SME
+    has_ns = any(c[0].endswith(".NS") and c[2] > 0 for c in candidates)
+    if not has_ns:
+        is_sme = True
+    print("    -> resolved '%s' to %s (%d yrs%s)" % (
+        symbol, yf_sym, years, ", SME-likely" if is_sme else ""))
+    result = (ticker, yf_sym, info, is_sme)
+    _RESOLVED_TICKERS[symbol] = result
+    return result
 
 
 def fetch_financial_data(symbol):
-    """Fetch all financial data from yfinance with BSE fallback."""
+    """Fetch all financial data from yfinance with multi-variant resolution."""
     data = FinancialData()
     data.symbol = symbol
-    yf_symbol = symbol + ".NS"
 
     print("\n[1/5] Fetching financial data for %s ..." % symbol)
-
-    ticker = yf.Ticker(yf_symbol)
+    print("  Resolving ticker variants (.NS / .BO / SME)...")
+    ticker, yf_symbol, resolved_info, _is_sme = _resolve_yf_ticker(symbol)
+    print("  Using yfinance ticker: %s" % yf_symbol)
 
     # ── Company info ──
     try:
@@ -530,8 +720,8 @@ def fetch_financial_data(symbol):
     except Exception as e:
         print("  Cash Flow (Qtr)      : FAILED (%s)" % e)
 
-    if data.years < 2:
-        # ── BSE FALLBACK: Try .BO suffix if .NS failed ──
+    if False and data.years < 2:
+        # ── (legacy) BSE fallback path — disabled, resolver above already picked best ticker
         print("\n  NSE data insufficient — trying BSE fallback (.BO)...")
         try:
             bse_ticker = yf.Ticker(symbol + ".BO")
@@ -593,8 +783,25 @@ def fetch_financial_data(symbol):
             print("  BSE fallback failed: %s" % e)
 
     if data.years < 2:
-        print("\n  ERROR: Need at least 2 years of annual data for forensic analysis.")
-        print("  Only %d year(s) available. Check if the symbol is correct." % data.years)
+        print("\n  NOTE: Only %d year(s) of annual data available — report will be generated" % data.years)
+        print("  with whatever data could be sourced (newly-listed / SME / low-history stocks).")
+
+    # ── Screener.in backfill (universal source for NSE + BSE incl. SME) ──
+    # Always attempt — when yfinance is rich, Screener just adds older years.
+    # When yfinance is sparse (BSE-only / SME / new listing), Screener provides
+    # the bulk of the financial statements.
+    try:
+        sc = fetch_screener_financials(symbol)
+        if sc:
+            yf_years_before = data.years
+            _merge_screener_into_data(data, sc)
+            if data.years > yf_years_before:
+                print("  Screener backfill: years %d -> %d (added %d)" % (
+                    yf_years_before, data.years, data.years - yf_years_before))
+            elif data.years > 0:
+                print("  Screener backfill: rows augmented (years unchanged at %d)" % data.years)
+    except Exception as e:
+        print("  Screener backfill failed: %s" % e)
 
     # ── Credit ratings from NSE filings ──
     data.credit_ratings = fetch_credit_ratings(symbol)
@@ -1051,6 +1258,8 @@ def fetch_investor_presentations(symbol, max_docs=4):
         subjects = [
             "Investor Presentation",
             "Annual General Meeting",
+            "Annual Report",
+            "Notice of Annual General Meeting",
         ]
 
         all_filings = []
@@ -1408,8 +1617,7 @@ def fetch_corporate_actions(symbol):
     print("  Fetching corporate actions history...")
     result = {"dividends": [], "splits": [], "actions_summary": ""}
     try:
-        yf_symbol = symbol + ".NS"
-        ticker = yf.Ticker(yf_symbol)
+        ticker, yf_symbol, _, _ = _resolve_yf_ticker(symbol)
 
         # Dividends
         divs = ticker.dividends
@@ -1542,8 +1750,7 @@ def fetch_mutual_fund_data(symbol):
     print("  Fetching mutual fund / institutional holder data...")
     result = {"major_holders": {}, "institutional_holders": [], "mf_holders": []}
     try:
-        yf_symbol = symbol + ".NS"
-        ticker = yf.Ticker(yf_symbol)
+        ticker, yf_symbol, _, _ = _resolve_yf_ticker(symbol)
 
         # Major holders (% breakdown)
         try:
@@ -1587,6 +1794,602 @@ def fetch_mutual_fund_data(symbol):
         print("    MF/institutional data fetch failed: %s" % e)
 
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCREENER.IN FALLBACK — universal financials source (NSE + BSE incl. SME)
+# Used to backfill yfinance gaps. Screener publishes 6-10 years of P&L, BS, CF
+# in HTML form for every listed Indian stock (consolidated AND standalone).
+# Values are in Rs. crore; we convert to absolute INR (×1e7) so downstream
+# code that expects yfinance-shape numbers works unchanged.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _screener_session():
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0",
+        "Accept": "text/html,application/json,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    return s
+
+
+def _screener_resolve_url(symbol):
+    """Resolve user symbol -> canonical screener.in /company/<slug>/ URL.
+    Tries /company/<SYMBOL>/ directly, then any cached yfinance-resolved
+    ticker (without exchange suffix), then the search API, then the
+    company-info longName from the resolved yfinance Ticker.
+    """
+    cache_key = "screener_url_%s" % symbol
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached or None
+    s = _screener_session()
+
+    # Build a list of candidate query strings
+    candidates = [symbol]
+    # If yfinance already resolved this symbol, also try the ticker
+    # (e.g. YASHHIGHVOLTAGE -> YASHHV.BO -> 'YASHHV') and the company name
+    if symbol in _RESOLVED_TICKERS:
+        _t, yf_sym, info, _sme = _RESOLVED_TICKERS[symbol]
+        base = yf_sym.split(".")[0]
+        if base and base not in candidates:
+            candidates.append(base)
+        nm = (info or {}).get("longName") or (info or {}).get("shortName") or ""
+        if nm:
+            # Strip common suffixes
+            nm2 = re.sub(r"\s+(Ltd|Limited|Ltd\.|Limited\.|Inc|Corporation|Corp)\.?$", "", nm, flags=re.I)
+            candidates.append(nm2)
+
+    # 1) Direct /company/<X>/ URL
+    for q in candidates:
+        try:
+            r = s.get("https://www.screener.in/company/%s/" % q.replace(" ", "%20"),
+                      timeout=15, allow_redirects=True)
+            if r.status_code == 200 and "Profit & Loss" in r.text:
+                url = r.url.rstrip("/") + "/"
+                _cache_set(cache_key, url)
+                return url
+        except Exception:
+            pass
+
+    # 2) Search API (try each candidate)
+    for q in candidates:
+        try:
+            r = s.get("https://www.screener.in/api/company/search/",
+                      params={"q": q, "v": 3}, timeout=15)
+            if r.status_code == 200:
+                hits = r.json() or []
+                if hits and isinstance(hits, list):
+                    rel = hits[0].get("url", "")
+                    if rel:
+                        url = "https://www.screener.in" + rel
+                        _cache_set(cache_key, url)
+                        return url
+        except Exception:
+            pass
+
+    _cache_set(cache_key, "")
+    return None
+
+
+_SCREENER_NUM_RE = re.compile(r"-?[\d,]+(?:\.\d+)?")
+
+
+def _screener_parse_num(s):
+    """Parse a Screener cell: '38', '-29', '21%', '1,234.5', '' -> float (NaN if blank)."""
+    if not s or s in ("-", ""):
+        return float("nan")
+    s = s.replace(",", "").replace("%", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return float("nan")
+
+
+def _screener_parse_table(html, section_id):
+    """Extract a Screener section's data table as (headers, {label: [values]}).
+    headers = list of period strings (e.g. ['Mar 2020','Mar 2021',...,'TTM'])
+    """
+    sec_re = re.compile(
+        r'<section[^>]*id="' + re.escape(section_id) + r'"[^>]*>([\s\S]*?)</section>')
+    sec = sec_re.search(html)
+    if not sec:
+        return [], {}
+    body = sec.group(1)
+    tab_re = re.compile(r'(<table[\s\S]*?</table>)')
+    tab = tab_re.search(body)
+    if not tab:
+        return [], {}
+    t = tab.group(1)
+    raw_heads = re.findall(r'<th[^>]*>([\s\S]*?)</th>', t)
+    headers = [re.sub(r'<[^>]+>', '', h).strip() for h in raw_heads]
+    headers = [h for h in headers if h and h.lower() != "&nbsp;"]
+    rows_html = re.findall(r'<tr[^>]*>([\s\S]*?)</tr>', t)
+    data = {}
+    for row in rows_html:
+        lm = re.search(r'<td class="text"[^>]*>([\s\S]*?)</td>', row)
+        if not lm:
+            continue
+        label = re.sub(r'<[^>]+>', '', lm.group(1))
+        label = label.replace("\xa0", " ").replace("&nbsp;", " ")
+        label = re.sub(r"\s+", " ", label).replace(" +", "").strip()
+        if not label:
+            continue
+        # Numeric cells
+        cells = re.findall(r'<td[^>]*class="[^"]*"[^>]*>\s*([\s\S]*?)\s*</td>', row)
+        # The first td was the label; skip it
+        vals_raw = []
+        for c in cells:
+            txt = re.sub(r'<[^>]+>', '', c)
+            txt = txt.replace("\xa0", " ").replace("&nbsp;", " ")
+            txt = re.sub(r"\s+", " ", txt).replace(" +", "").strip()
+            vals_raw.append(txt)
+        # Drop the label cell (first occurrence)
+        if vals_raw and vals_raw[0] == label:
+            vals_raw = vals_raw[1:]
+        # Normalize length to headers
+        vals = [_screener_parse_num(v) for v in vals_raw]
+        data[label] = vals
+    return headers, data
+
+
+# Mapping: Screener row label -> yfinance-style row name(s) used by ALIASES.
+# Values from Screener are in Rs. Crore -> multiply by 1e7 unless tagged "ratio".
+_SCREENER_PNL_MAP = {
+    "Sales":             ("Total Revenue", 1e7),
+    "Revenue":           ("Total Revenue", 1e7),
+    "Expenses":          ("Total Expenses", 1e7),
+    "Operating Profit":  ("EBITDA", 1e7),
+    "Other Income":      ("Interest Income Non Operating", 1e7),
+    "Interest":          ("Interest Expense", 1e7),
+    "Depreciation":      ("Reconciled Depreciation", 1e7),
+    "Profit before tax": ("Pretax Income", 1e7),
+    "Net Profit":        ("Net Income", 1e7),
+    "EPS in Rs":         ("Basic EPS", 1.0),
+}
+
+_SCREENER_BS_MAP = {
+    "Equity Capital":      ("Common Stock", 1e7),
+    "Reserves":            ("Retained Earnings", 1e7),
+    "Borrowings":          ("Total Debt", 1e7),
+    "Other Liabilities":   ("Other Current Liabilities", 1e7),
+    "Total Liabilities":   ("Total Liabilities Net Minority Interest", 1e7),
+    "Fixed Assets":        ("Net PPE", 1e7),
+    "CWIP":                ("Construction In Progress", 1e7),
+    "Investments":         ("Investments And Advances", 1e7),
+    "Other Assets":        ("Other Current Assets", 1e7),
+    "Total Assets":        ("Total Assets", 1e7),
+}
+
+_SCREENER_CF_MAP = {
+    "Cash from Operating Activity":  ("Operating Cash Flow", 1e7),
+    "Cash from Investing Activity":  ("Investing Cash Flow", 1e7),
+    "Cash from Financing Activity":  ("Financing Cash Flow", 1e7),
+    "Free Cash Flow":                ("Free Cash Flow", 1e7),
+}
+
+
+def _screener_section_to_df(headers, raw_data, mapping):
+    """Convert (headers, raw rows) + label-mapping -> pandas DataFrame in
+    yfinance shape (rows = financial line items, cols = period labels).
+    Excludes 'TTM'/'Trailing' columns from annual frames; caller can re-include.
+    """
+    if not headers or not raw_data:
+        return None
+    # Filter to annual columns (drop TTM)
+    keep_cols = [(i, h) for i, h in enumerate(headers)
+                 if h.upper() not in ("TTM", "TRAILING")]
+    if not keep_cols:
+        return None
+    col_labels = [h for _, h in keep_cols]
+    # Build dict-of-dicts: {col_label: {yf_row_name: value}}
+    out = {h: {} for h in col_labels}
+    for screener_label, vals in raw_data.items():
+        if screener_label not in mapping:
+            continue
+        yf_name, mult = mapping[screener_label]
+        for (idx, h) in keep_cols:
+            if idx >= len(vals):
+                continue
+            v = vals[idx]
+            if not _nan(v):
+                out[h][yf_name] = v * mult
+    df = pd.DataFrame(out)
+    if df.empty:
+        return None
+    # Reverse columns so newest is first (matches yfinance convention)
+    df = df[df.columns[::-1]]
+    # Add derived rows: Stockholders Equity = Equity Capital + Reserves; EBIT = EBITDA - Dep; Tax Provision = PBT - NI; Gross Profit = Sales - Expenses
+    if mapping is _SCREENER_BS_MAP and "Common Stock" in df.index and "Retained Earnings" in df.index:
+        df.loc["Stockholders Equity"] = df.loc["Common Stock"].fillna(0) + df.loc["Retained Earnings"].fillna(0)
+        df.loc["Common Stock Equity"] = df.loc["Stockholders Equity"]
+    if mapping is _SCREENER_PNL_MAP:
+        if "EBITDA" in df.index and "Reconciled Depreciation" in df.index:
+            df.loc["EBIT"] = df.loc["EBITDA"].fillna(0) - df.loc["Reconciled Depreciation"].fillna(0)
+            df.loc["Operating Income"] = df.loc["EBIT"]
+        if "Pretax Income" in df.index and "Net Income" in df.index:
+            df.loc["Tax Provision"] = df.loc["Pretax Income"].fillna(0) - df.loc["Net Income"].fillna(0)
+        if "Total Revenue" in df.index and "Total Expenses" in df.index:
+            df.loc["Gross Profit"] = df.loc["Total Revenue"].fillna(0) - df.loc["Total Expenses"].fillna(0)
+    return df
+
+
+def _screener_period_to_ts(period_str):
+    """Convert 'Mar 2025' -> pd.Timestamp at month-end."""
+    try:
+        return pd.Timestamp(datetime.datetime.strptime(period_str, "%b %Y")) + pd.offsets.MonthEnd(0)
+    except Exception:
+        try:
+            # Try '202503' or other formats
+            return pd.Timestamp(period_str)
+        except Exception:
+            return period_str
+
+
+def fetch_screener_financials(symbol):
+    """Fetch full P&L, BS, CF, Quarterly tables from Screener.in.
+    Returns dict with keys: income_annual, balance_annual, cashflow_annual,
+    income_quarterly, fy_labels, q_labels, source_url, periods.
+    All numeric values converted to absolute INR (yfinance scale).
+    """
+    print("  [Screener.in] fetching universal financials backup...")
+    url = _screener_resolve_url(symbol)
+    if not url:
+        print("    Could not resolve symbol on Screener")
+        return {}
+
+    s = _screener_session()
+    cache_key = "screener_html_%s" % symbol
+    html = _cache_get(cache_key)
+    if html is None:
+        # Try consolidated first
+        cons_url = url.rstrip("/") + "/consolidated/"
+        try:
+            r = s.get(cons_url, timeout=20)
+            html_cons = r.text if r.status_code == 200 else ""
+        except Exception:
+            html_cons = ""
+        # Standalone
+        try:
+            r2 = s.get(url, timeout=20)
+            html_std = r2.text if r2.status_code == 200 else ""
+        except Exception:
+            html_std = ""
+        # Choose whichever has more populated data cells
+        cons_cells = html_cons.count('<td class="">') if html_cons else 0
+        std_cells = html_std.count('<td class="">') if html_std else 0
+        if cons_cells >= max(std_cells, 30):
+            html = html_cons
+            chosen = "consolidated"
+        elif std_cells >= 10:
+            html = html_std
+            chosen = "standalone"
+        else:
+            print("    Screener page has insufficient data")
+            return {}
+        # Don't cache as JSON (too big); store separately
+        try:
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            with open(os.path.join(_CACHE_DIR, "screener_%s.html" % hashlib.md5(symbol.encode()).hexdigest()), "w") as f:
+                f.write("<!--CHOSEN=%s-->\n" % chosen + html)
+        except Exception:
+            pass
+    else:
+        chosen = "cached"
+
+    # Re-load from disk if just written
+    try:
+        path = os.path.join(_CACHE_DIR, "screener_%s.html" % hashlib.md5(symbol.encode()).hexdigest())
+        if not html and os.path.exists(path):
+            with open(path) as f:
+                html = f.read()
+    except Exception:
+        pass
+
+    if not html:
+        return {}
+
+    out = {"source_url": url, "view": chosen}
+
+    # Profit & Loss (annual)
+    pl_heads, pl_rows = _screener_parse_table(html, "profit-loss")
+    pl_df = _screener_section_to_df(pl_heads, pl_rows, _SCREENER_PNL_MAP)
+    if pl_df is not None:
+        # Convert period labels to timestamps for yfinance compatibility
+        pl_df.columns = [_screener_period_to_ts(c) for c in pl_df.columns]
+        out["income_annual"] = pl_df
+        out["fy_labels"] = [_fy_label(c) if hasattr(c, "month") else str(c) for c in pl_df.columns]
+
+    # Balance Sheet (annual)
+    bs_heads, bs_rows = _screener_parse_table(html, "balance-sheet")
+    bs_df = _screener_section_to_df(bs_heads, bs_rows, _SCREENER_BS_MAP)
+    if bs_df is not None:
+        bs_df.columns = [_screener_period_to_ts(c) for c in bs_df.columns]
+        out["balance_annual"] = bs_df
+
+    # Cash Flow (annual)
+    cf_heads, cf_rows = _screener_parse_table(html, "cash-flow")
+    cf_df = _screener_section_to_df(cf_heads, cf_rows, _SCREENER_CF_MAP)
+    if cf_df is not None:
+        cf_df.columns = [_screener_period_to_ts(c) for c in cf_df.columns]
+        out["cashflow_annual"] = cf_df
+
+    # Quarterly Results
+    q_heads, q_rows = _screener_parse_table(html, "quarters")
+    q_df = _screener_section_to_df(q_heads, q_rows, _SCREENER_PNL_MAP)
+    if q_df is not None:
+        q_df.columns = [_screener_period_to_ts(c) for c in q_df.columns]
+        out["income_quarterly"] = q_df
+        out["q_labels"] = [c.strftime("%b-%Y") if hasattr(c, "strftime") else str(c) for c in q_df.columns]
+
+    n_pl = pl_df.shape[1] if pl_df is not None else 0
+    n_bs = bs_df.shape[1] if bs_df is not None else 0
+    n_cf = cf_df.shape[1] if cf_df is not None else 0
+    n_q  = q_df.shape[1] if q_df is not None else 0
+    print("    Screener (%s view): P&L=%d yrs, BS=%d yrs, CF=%d yrs, Qtr=%d" % (
+        chosen, n_pl, n_bs, n_cf, n_q))
+    return out
+
+
+def _merge_screener_into_data(data, sc):
+    """Backfill data.* with screener frames where yfinance gave less data.
+    Preserves yfinance values whenever they exist (yfinance is more granular for
+    main-board stocks); Screener fills gaps and adds missing years.
+    """
+    def _take_if_better(yf_df, sc_df):
+        """Use Screener df only if it has strictly more columns than yfinance,
+        OR yfinance is empty/None."""
+        if yf_df is None or (hasattr(yf_df, "empty") and yf_df.empty):
+            return sc_df
+        if sc_df is None:
+            return yf_df
+        # yf has data — only augment by union of indices, prefer yf values
+        merged = sc_df.copy()
+        # Align on column timestamps where possible: just keep both column sets,
+        # preferring yfinance columns for overlapping months
+        for col in yf_df.columns:
+            merged[col] = yf_df[col]
+        # Sort cols newest-first
+        try:
+            merged = merged[sorted(merged.columns, reverse=True)]
+        except Exception:
+            pass
+        # Fill missing rows from screener
+        for idx in sc_df.index:
+            if idx not in merged.index:
+                merged.loc[idx] = sc_df.loc[idx]
+        # Prefer yfinance values where present
+        for col in merged.columns:
+            if col in yf_df.columns:
+                for idx in yf_df.index:
+                    if idx in merged.index and pd.notna(yf_df.loc[idx, col]):
+                        merged.loc[idx, col] = yf_df.loc[idx, col]
+        return merged
+
+    if "income_annual" in sc:
+        data.income_annual = _take_if_better(data.income_annual, sc["income_annual"])
+        if data.income_annual is not None and not data.income_annual.empty:
+            data.years = data.income_annual.shape[1]
+            data.fy_labels = [_fy_label(c) for c in data.income_annual.columns]
+    if "balance_annual" in sc:
+        data.balance_annual = _take_if_better(data.balance_annual, sc["balance_annual"])
+    if "cashflow_annual" in sc:
+        data.cashflow_annual = _take_if_better(data.cashflow_annual, sc["cashflow_annual"])
+    if "income_quarterly" in sc:
+        data.income_quarterly = _take_if_better(data.income_quarterly, sc["income_quarterly"])
+        if data.income_quarterly is not None and not data.income_quarterly.empty:
+            data.quarters = data.income_quarterly.shape[1]
+            data.q_labels = [c.strftime("%b-%Y") if hasattr(c, "strftime") else str(c)
+                             for c in data.income_quarterly.columns]
+
+
+# ── Auto-Fetch: Financial Results Filings (NSE corporate-announcements) ─────
+#    Pulls quarterly/annual financial-result PDFs filed by the company directly
+#    with the exchange. These are independent of yfinance and work for any
+#    listed stock (incl. SME, via the index=sme retry in _nse_get_json).
+
+def fetch_financial_results_filings(symbol, max_filings=12):
+    """Fetch quarterly/annual financial result filings (PDFs) from NSE.
+    Returns list of dicts: {date, subject, pdf_url, period_hint}.
+    """
+    print("  Fetching financial result filings (P&L/BS/CF PDFs)...")
+    results = []
+    seen = set()
+    subjects = [
+        "Financial Results",
+        "Financial Result",
+        "Outcome of Board Meeting",
+        "Outcome of Meeting",
+    ]
+    try:
+        session = _nse_session()
+        url = "https://www.nseindia.com/api/corporate-announcements"
+        for subject in subjects:
+            cache_key = "fr_%s_%s" % (symbol, subject.replace(" ", "_"))
+            filings = _nse_get_json(session, url, params={
+                "index": "equities", "symbol": symbol, "subject": subject,
+            }, cache_key=cache_key)
+            if not filings or not isinstance(filings, list):
+                continue
+            for item in filings:
+                pdf_url = item.get("attchmntFile", "")
+                if not pdf_url or pdf_url in seen:
+                    continue
+                seen.add(pdf_url)
+                results.append({
+                    "date": item.get("an_dt", "")[:11],
+                    "subject": item.get("desc") or subject,
+                    "pdf_url": pdf_url,
+                    "period_hint": _quarter_from_date(item.get("an_dt", "")),
+                })
+                if len(results) >= max_filings:
+                    break
+            if len(results) >= max_filings:
+                break
+        if results:
+            print("    Found %d financial-result filings (latest: %s)" % (
+                len(results), results[0]["date"]))
+        else:
+            print("    No financial-result filings found")
+    except Exception as e:
+        print("    Financial-results fetch failed: %s" % e)
+    return results
+
+
+def fetch_annual_report_filings(symbol, max_filings=5):
+    """Fetch annual report PDFs from NSE corporate-announcements / annual-reports."""
+    print("  Fetching annual report filings...")
+    results = []
+    seen = set()
+    try:
+        session = _nse_session()
+        # Approach 1: corporate-announcements with relevant subjects
+        for subject in ("Annual Report", "Notice of Annual General Meeting", "Annual Return"):
+            cache_key = "ar_%s_%s" % (symbol, subject.replace(" ", "_"))
+            filings = _nse_get_json(session,
+                "https://www.nseindia.com/api/corporate-announcements",
+                params={"index": "equities", "symbol": symbol, "subject": subject},
+                cache_key=cache_key,
+            )
+            if not filings or not isinstance(filings, list):
+                continue
+            for item in filings:
+                pdf_url = item.get("attchmntFile", "")
+                if not pdf_url or pdf_url in seen:
+                    continue
+                seen.add(pdf_url)
+                results.append({
+                    "date": item.get("an_dt", "")[:11],
+                    "subject": item.get("desc") or subject,
+                    "pdf_url": pdf_url,
+                    "year": _year_from_date(item.get("an_dt", "")),
+                })
+                if len(results) >= max_filings:
+                    break
+            if len(results) >= max_filings:
+                break
+
+        # Approach 2: dedicated annual-reports endpoint
+        if len(results) < max_filings:
+            cache_key = "ar_dedicated_%s" % symbol
+            ar_data = _nse_get_json(session,
+                "https://www.nseindia.com/api/annual-reports",
+                params={"index": "equities", "symbol": symbol},
+                cache_key=cache_key,
+            )
+            if ar_data and isinstance(ar_data, dict):
+                for item in (ar_data.get("data") or [])[:max_filings]:
+                    pdf_url = item.get("fileName") or item.get("attchmntFile", "")
+                    if not pdf_url or pdf_url in seen:
+                        continue
+                    seen.add(pdf_url)
+                    results.append({
+                        "date": item.get("submissionDate", "")[:11],
+                        "subject": "Annual Report",
+                        "pdf_url": pdf_url,
+                        "year": item.get("fromYr") or item.get("toYr") or "",
+                    })
+
+        if results:
+            print("    Found %d annual report filings (latest: %s)" % (
+                len(results), results[0].get("date", "?")))
+        else:
+            print("    No annual report filings found")
+    except Exception as e:
+        print("    Annual report fetch failed: %s" % e)
+    return results
+
+
+# ── Last-resort: parse a financial-results PDF for headline numbers ─────────
+
+_FR_REVENUE_RE = re.compile(
+    r'(?:total\s+(?:income|revenue)|revenue\s+from\s+operations|net\s+sales|total\s+revenue\s+from\s+operations)'
+    r'[^\d\n\-]{0,40}([\-\(]?[\d,]+(?:\.\d+)?[\)]?)',
+    re.IGNORECASE)
+_FR_PAT_RE = re.compile(
+    r'(?:profit\s+(?:after|for\s+the\s+period)|net\s+profit|profit\s*\(loss\)\s*for\s+the\s+period)'
+    r'[^\d\n\-]{0,60}([\-\(]?[\d,]+(?:\.\d+)?[\)]?)',
+    re.IGNORECASE)
+_FR_EBITDA_RE = re.compile(
+    r'(?:ebitda|operating\s+profit)[^\d\n\-]{0,40}([\-\(]?[\d,]+(?:\.\d+)?[\)]?)',
+    re.IGNORECASE)
+
+
+def _parse_pdf_money(s):
+    """Parse a money-like number string (handles commas, parentheses for negatives)."""
+    if not s:
+        return float("nan")
+    s = s.strip().replace(",", "")
+    neg = s.startswith("(") and s.endswith(")")
+    s = s.strip("()-")
+    try:
+        v = float(s)
+        return -v if neg else v
+    except ValueError:
+        return float("nan")
+
+
+def _augment_financials_from_filings(data):
+    """If yfinance returned no annual data, try to extract revenue/PAT/EBITDA
+    from the most recent financial-results PDF. Builds a 1-column synthetic
+    income_annual DataFrame so downstream analyzers have something to chew on.
+    Values are best-effort; the unit (lakhs vs crores) is heuristic.
+    """
+    print("\n  No yfinance financials available \u2014 attempting to parse latest result PDF...")
+    try:
+        session = _nse_session()
+        for filing in data.financial_results_filings[:3]:
+            pdf_url = filing.get("pdf_url")
+            if not pdf_url:
+                continue
+            pdf_bytes = _nse_download_pdf(session, pdf_url)
+            if not pdf_bytes:
+                continue
+            try:
+                reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+                text = ""
+                for page in reader.pages[:6]:
+                    text += (page.extract_text() or "") + "\n"
+            except Exception:
+                continue
+            rev_m = _FR_REVENUE_RE.search(text)
+            pat_m = _FR_PAT_RE.search(text)
+            if not rev_m and not pat_m:
+                continue
+            rev = _parse_pdf_money(rev_m.group(1)) if rev_m else float("nan")
+            pat = _parse_pdf_money(pat_m.group(1)) if pat_m else float("nan")
+            ebitda_m = _FR_EBITDA_RE.search(text)
+            ebitda = _parse_pdf_money(ebitda_m.group(1)) if ebitda_m else float("nan")
+            # Heuristic: PDF figures are usually in Rs. Lakhs or Rs. Crores.
+            # Default assume Lakhs (10^5) -> convert to absolute INR (10^5).
+            unit_mult = 1e5
+            if "in crore" in text.lower() or "rs. in crore" in text.lower() or "(rs. crore" in text.lower():
+                unit_mult = 1e7
+            elif "in million" in text.lower():
+                unit_mult = 1e6
+            row_label = filing.get("period_hint") or filing.get("date") or "Latest"
+            df = pd.DataFrame(
+                {row_label: {
+                    "Total Revenue": rev * unit_mult if not _nan(rev) else float("nan"),
+                    "Net Income":   pat * unit_mult if not _nan(pat) else float("nan"),
+                    "EBITDA":       ebitda * unit_mult if not _nan(ebitda) else float("nan"),
+                }}
+            )
+            data.income_annual = df
+            data.years = 1
+            data.fy_labels = [row_label]
+            print("    Parsed from filing %s: Revenue=%s | PAT=%s | EBITDA=%s (unit_mult=%g)" % (
+                filing.get("date"),
+                fmt_cr(rev * unit_mult) if not _nan(rev) else "N/A",
+                fmt_cr(pat * unit_mult) if not _nan(pat) else "N/A",
+                fmt_cr(ebitda * unit_mult) if not _nan(ebitda) else "N/A",
+                unit_mult))
+            return
+        print("    Could not extract numbers from any result PDF.")
+    except Exception as e:
+        print("    Filing-PDF parse failed: %s" % e)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4554,7 +5357,7 @@ class DeepFundamentalAnalyzer:
         high_roce_years = sum(1 for r in roce_series if not _nan(r) and r > 15)
         if high_roce_years >= 4:
             score += 2
-            components["ROCE consistency"] = "Strong (>15% for %d/%d years)" % (high_roce_years, len(roce_series))
+            components["ROCE consistency"] = "Strong (>15%% for %d/%d years)" % (high_roce_years, len(roce_series))
         elif high_roce_years >= 2:
             score += 1
             components["ROCE consistency"] = "Moderate"
@@ -5664,13 +6467,74 @@ class ForensicReport(FPDF):
                   align="C")
 
     def _section(self, title):
-        """Add a coloured section header."""
+        """Add a coloured section header (dark navy bar — distinct from
+        blue table headers below it to avoid visual confusion).
+        Also registers the section in the PDF outline / TOC so it can be
+        clicked from the Table of Contents."""
+        # Register with fpdf2's outline (powers both TOC and PDF bookmarks)
+        try:
+            self.start_section(_latin(title), level=0)
+        except Exception:
+            pass
         self.set_font("Helvetica", "B", 13)
-        self.set_fill_color(*C_BLUE)
+        self.set_fill_color(*C_DARK)
         self.set_text_color(*C_WHITE)
         self.cell(0, 9, _latin("  " + title), fill=True, new_x="LMARGIN", new_y="NEXT")
         self.ln(3)
         self.set_text_color(0, 0, 0)
+
+    def _render_toc(self, pdf, outline):
+        """Render the Table of Contents using fpdf2's outline list.
+        Each entry is auto-linked to its target page by fpdf2."""
+        toc_pages_reserved = getattr(self, "_toc_pages_reserved", 2)
+        start_page = pdf.page_no()
+
+        # Title bar
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_fill_color(*C_DARK)
+        pdf.set_text_color(*C_WHITE)
+        pdf.cell(0, 12, _latin("  Table of Contents"), fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+        pdf.set_text_color(0, 0, 0)
+
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*C_GRAY)
+        pdf.multi_cell(0, 4,
+            _latin("Click any entry below to jump directly to that section. "
+                   "All section headings throughout the report are also bookmarked "
+                   "in the PDF outline pane."),
+            new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+        # Entries
+        for entry in outline:
+            level = getattr(entry, "level", 0)
+            name = getattr(entry, "name", "")
+            page = getattr(entry, "page_number", 1)
+            indent = 6 + level * 6
+            if level == 0:
+                pdf.set_font("Helvetica", "B", 10)
+            else:
+                pdf.set_font("Helvetica", "", 9)
+
+            link = pdf.add_link()
+            pdf.set_link(link, page=page)
+
+            pdf.set_x(indent)
+            title_w = pdf._w - indent - 15
+            pdf.cell(title_w, 6, _latin(name), border=0, link=link, align="L")
+            pdf.set_text_color(*C_BLUE)
+            pdf.cell(15, 6, str(page), border=0, link=link, align="R",
+                     new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+
+        # Pad with blank pages so TOC spans exactly the reserved page count
+        # (fpdf2 requires this).
+        used = pdf.page_no() - start_page + 1
+        while used < toc_pages_reserved:
+            pdf.add_page()
+            used += 1
 
     def _subsection(self, title):
         self.set_font("Helvetica", "B", 11)
@@ -5678,6 +6542,15 @@ class ForensicReport(FPDF):
         self.cell(0, 7, _latin(title), new_x="LMARGIN", new_y="NEXT")
         self.ln(1)
         self.set_text_color(0, 0, 0)
+
+    def _intro(self, text):
+        """Plain-English one-paragraph explainer placed under a section heading
+        so a non-finance reader can grasp what the section is about."""
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(*C_GRAY)
+        self.multi_cell(0, 4, _latin(text), new_x="LMARGIN", new_y="NEXT")
+        self.set_text_color(0, 0, 0)
+        self.ln(2)
 
     def _table(self, headers, rows, col_widths=None, align=None):
         """Render a data table with alternating row colours."""
@@ -6857,6 +7730,14 @@ class ForensicReport(FPDF):
         print("\n[4/5] Generating PDF report...")
 
         self.add_cover_page()
+        # Reserve a clickable Table of Contents — rendered after the rest of
+        # the report is built so page numbers are accurate. fpdf2 trims unused
+        # placeholder pages automatically.
+        try:
+            self._toc_pages_reserved = 3
+            self.insert_toc_placeholder(self._render_toc, pages=self._toc_pages_reserved)
+        except Exception as e:
+            print("  TOC placeholder failed: %s" % e)
         self.add_key_red_flags_summary()
         self.add_executive_summary()
         self.add_company_overview()
@@ -6921,8 +7802,14 @@ class ForensicReport(FPDF):
         dr = self.deep_analyzer.results.get("dcf", {})
         if dr.get("status") != "computed":
             return
-        self.add_page()
+        self._check_page_break(90)
         self._section("DCF VALUATION (3-Stage Model)")
+        self._intro(
+            "What it is: A discounted-cash-flow model that projects the company's free "
+            "cash flows over a high-growth phase, a fade phase and a terminal phase, "
+            "discounts them back at WACC, and compares the result to the current price. "
+            "A positive Margin of Safety means the stock trades below estimated intrinsic value."
+        )
         self.set_font("Helvetica", "", 9)
 
         # Key metrics
@@ -6964,6 +7851,10 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(80)
         self._section("VALUATION BANDS & RELATIVE METRICS")
+        self._intro(
+            "What it is: Where today's PE sits inside its own 5-year high-low band. "
+            "A percentile near 0% = historically cheap; near 100% = historically expensive."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -6990,6 +7881,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(70)
         self._section("CAPITAL ALLOCATION & ROCE")
+        self._intro(
+            "What it is: How efficiently management converts every rupee of capital into "
+            "profit. ROCE > WACC means value is being created; ROCE < WACC means "
+            "reinvestment is destroying shareholder value."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7017,6 +7913,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("EARNINGS QUALITY ANALYSIS")
+        self._intro(
+            "What it is: Are reported profits backed by real cash? CFO/PAT close to or "
+            "above 1.0 = high quality; persistently low = profits exist on paper but "
+            "cash isn't following, often a precursor to write-downs."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7046,6 +7947,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("WORKING CAPITAL EFFICIENCY")
+        self._intro(
+            "What it is: How many days cash is locked in receivables (DSO) and inventory "
+            "(DIO) net of supplier credit (DPO). A shrinking Cash Conversion Cycle frees "
+            "up cash; a stretching one signals tightening operations or aggressive sales."
+        )
         self.set_font("Helvetica", "", 9)
 
         headers = ["Metric"] + ["Y%d" % (i+1) for i in range(len(wc.get("dso_series", [])))]
@@ -7068,6 +7974,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(70)
         self._section("DEBT STRESS TEST")
+        self._intro(
+            "What it is: Can the company still pay interest if rates double, triple, or "
+            "if EBITDA drops 30%? Interest-Coverage Ratio (ICR) above 3x in stress "
+            "scenarios = resilient; below 1.5x = vulnerable."
+        )
         self.set_font("Helvetica", "", 9)
 
         icr = ds.get("icr_current", 0)
@@ -7103,8 +8014,13 @@ class ForensicReport(FPDF):
         moat = self.deep_analyzer.results.get("moat_score", {})
         if not moat:
             return
-        self.add_page()
+        self._check_page_break(90)
         self._section("COMPETITIVE MOAT ASSESSMENT")
+        self._intro(
+            "What it is: A 0-10 score of the company's durable competitive advantage, "
+            "derived from sustained high ROCE, gross margins, market position and "
+            "pricing power. Higher = harder for rivals to erode profitability."
+        )
         self.set_font("Helvetica", "", 9)
 
         score = moat.get("score", 0)
@@ -7139,6 +8055,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("QUARTERLY MOMENTUM")
+        self._intro(
+            "What it is: Is the business accelerating or decelerating right now? Compares "
+            "the latest quarter's YoY revenue and PAT growth to recent quarters to detect "
+            "a turn before it shows up in annual numbers."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7154,8 +8075,13 @@ class ForensicReport(FPDF):
         cn = self.deep_analyzer.results.get("concall_nlp", {})
         if cn.get("status") != "analyzed":
             return
-        self.add_page()
+        self._check_page_break(100)
         self._section("CONCALL TRANSCRIPT ANALYSIS (NLP)")
+        self._intro(
+            "What it is: NLP scoring of management's tone across earnings concalls. "
+            "Sentiment > 0 = optimistic, < 0 = cautious. Trend matters more than the "
+            "absolute number; a downshift quarter-over-quarter is a leading warning sign."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7209,6 +8135,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(70)
         self._section("ANNUAL REPORT ANALYSIS (NLP)")
+        self._intro(
+            "What it is: Automated scan of annual reports for governance red flags - "
+            "auditor caveats, related-party transactions, contingent liabilities and "
+            "accounting-policy changes. 'YES' on any of these warrants deeper reading."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7242,6 +8173,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("COMPREHENSIVE RISK ASSESSMENT")
+        self._intro(
+            "What it is: A 0-10 aggregate risk score combining financial, operational, "
+            "governance and market risks. Below 4 = low risk; 4-7 = moderate; above 7 = "
+            "high. Use the breakdown to see which risk type dominates."
+        )
         self.set_font("Helvetica", "", 9)
 
         risk_sc = ra.get("risk_score", 5)
@@ -7273,6 +8209,11 @@ class ForensicReport(FPDF):
             return
         self.add_page()
         self._section("DEEP FUNDAMENTAL SCORE")
+        self._intro(
+            "What it is: The blended 0-100 score from valuation, quality, growth, "
+            "earnings quality and risk - each weighted as shown below. This is the "
+            "single number to glance at; the recommendation is derived directly from it."
+        )
         self.set_font("Helvetica", "", 9)
 
         final = ds.get("final_score", 0)
@@ -7313,8 +8254,13 @@ class ForensicReport(FPDF):
         dr = self.deep_analyzer.results.get("shareholding_trend", {})
         if dr.get("status") != "computed":
             return
-        self.add_page()
+        self._check_page_break(90)
         self._section("SHAREHOLDING PATTERN TREND")
+        self._intro(
+            "What it is: Quarter-on-quarter movement in promoter and public holding. "
+            "Rising promoter stake signals insider confidence; falling stake (especially "
+            "alongside pledges) is a major red flag."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7342,6 +8288,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("INSIDER TRADING (SAST DISCLOSURES)")
+        self._intro(
+            "What it is: SEBI-mandated disclosures of share dealings by promoters and "
+            "key insiders. Net buying = insider confidence; net selling, especially "
+            "clustered, deserves scrutiny against business fundamentals."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7367,18 +8318,23 @@ class ForensicReport(FPDF):
         dr = self.deep_analyzer.results.get("peer_comparison", {})
         if dr.get("status") != "computed":
             return
-        self.add_page()
+        self._check_page_break(100)
         self._section("PEER COMPARISON & RELATIVE VALUATION")
+        self._intro(
+            "What it is: Side-by-side valuation against same-sector peers. A material "
+            "discount to peer average PE/PB usually means either undervaluation or "
+            "market-recognised weakness; cross-check with the moat and growth sections."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
             ["Sector", dr.get("sector", "N/A")],
             ["Sector Index", dr.get("sector_index", "N/A")],
-            ["Sector PE", "%.1f" % dr.get("sector_pe", 0)],
+            ["Sector PE", "%.1f" % _parse_float(dr.get("sector_pe", 0)) if not _nan(_parse_float(dr.get("sector_pe", 0))) else "N/A"],
             ["Own PE", "%.1f" % dr.get("own_pe", 0) if not _nan(dr.get("own_pe", 0)) else "N/A"],
-            ["Peer Avg PE", "%.1f" % dr.get("avg_peer_pe", 0)],
-            ["PE Discount to Peers", "%+.0f%%" % dr.get("pe_discount_to_peers_pct", 0)],
-            ["Own 1Y Return", "%.1f%%" % dr.get("own_1y_return_pct", 0)],
+            ["Peer Avg PE", "%.1f" % _parse_float(dr.get("avg_peer_pe", 0)) if not _nan(_parse_float(dr.get("avg_peer_pe", 0))) else "N/A"],
+            ["PE Discount to Peers", "%+.0f%%" % _parse_float(dr.get("pe_discount_to_peers_pct", 0)) if not _nan(_parse_float(dr.get("pe_discount_to_peers_pct", 0))) else "N/A"],
+            ["Own 1Y Return", "%.1f%%" % _parse_float(dr.get("own_1y_return_pct", 0)) if not _nan(_parse_float(dr.get("own_1y_return_pct", 0))) else "N/A"],
         ]
         self._table(["Metric", "Value"], rows, col_widths=[80, 80])
 
@@ -7400,6 +8356,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("RELATIVE STRENGTH VS NIFTY 50")
+        self._intro(
+            "What it is: How the stock has performed against the Nifty 50 over 1M / 3M / "
+            "6M / 1Y. 'Alpha' is the excess return over the index. Persistent positive "
+            "alpha = market is rewarding the story."
+        )
         self.set_font("Helvetica", "", 9)
 
         periods = dr.get("periods", {})
@@ -7427,6 +8388,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("TECHNICAL STRUCTURE")
+        self._intro(
+            "What it is: A snapshot of price action - moving averages, RSI, golden cross "
+            "and volume/delivery trend. Helps time entries: even a great fundamental "
+            "story is best bought when the technical trend confirms."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7449,6 +8415,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("GRAHAM NUMBER & MAGIC FORMULA")
+        self._intro(
+            "What it is: Two classic value screens. Graham Number = sqrt(22.5 * EPS * "
+            "BVPS) is the maximum price a defensive investor should pay. Magic Formula "
+            "combines Earnings Yield + ROIC; higher is better on both."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7469,6 +8440,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("CAPEX CYCLE & ASSET EFFICIENCY")
+        self._intro(
+            "What it is: Splits capex into 'maintenance' (just to keep the lights on) and "
+            "'growth' (adding capacity). Heavy growth capex paired with rising asset "
+            "turnover = expansion paying off; rising capex with falling turnover = warning."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7495,6 +8471,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(60)
         self._section("INSTITUTIONAL & MUTUAL FUND HOLDINGS")
+        self._intro(
+            "What it is: How much 'smart money' (FIIs, MFs, insurers) holds the stock and "
+            "who the top holders are. Concentrated quality holders = validation; sudden "
+            "exits across funds = institutional sell-signal."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7527,6 +8508,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("CORPORATE ACTIONS HISTORY")
+        self._intro(
+            "What it is: Track-record of dividends, splits and bonuses. A long, growing "
+            "dividend record signals consistent cash generation and shareholder-friendly "
+            "capital allocation."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7561,6 +8547,11 @@ class ForensicReport(FPDF):
             return
         self._check_page_break(50)
         self._section("CREDIT RATING INTELLIGENCE")
+        self._intro(
+            "What it is: Combined view of all credit-rating agencies covering the company "
+            "plus their trajectory (upgrades / downgrades / stable). Investment-grade = "
+            "BBB- and above; below that, debt repayment capacity is materially weaker."
+        )
         self.set_font("Helvetica", "", 9)
 
         rows = [
@@ -7609,10 +8600,23 @@ def run(symbol=None, documents_dir=None):
     # Step 1: Fetch data
     data = fetch_financial_data(symbol)
 
-    if data.years < 2:
-        print("\nCannot proceed — insufficient financial data.")
-        print("Check if '%s' is a valid NSE symbol with at least 2 years of filings." % symbol)
+    has_any_data = (
+        data.years >= 1
+        or (data.quarters or 0) >= 1
+        or (data.historical_prices is not None and len(data.historical_prices) >= 30)
+        or bool(data.info.get("longName") or data.info.get("shortName"))
+    )
+    if not has_any_data:
+        print("\nCannot proceed — no usable data found for '%s'." % symbol)
+        print("Tried .NS, .BO and yfinance search — no financials, no quarterly,")
+        print("no price history and no company info were returned.")
         return
+    if data.years < 2:
+        print("\nProceeding with limited data (%d annual yr(s), %d qtr(s), %s price days)." % (
+            data.years, data.quarters or 0,
+            len(data.historical_prices) if data.historical_prices is not None else 0))
+        print("Some forensic checks (Beneish, Piotroski trends) need t vs t-1 and will")
+        print("degrade gracefully to neutral defaults where prior-year values are missing.")
 
     # Step 2: Forensic Analysis
     analyzer = ForensicAnalyzer(data)
@@ -7630,6 +8634,25 @@ def run(symbol=None, documents_dir=None):
     data.corporate_actions = fetch_corporate_actions(symbol)
     data.related_party_filings = fetch_related_party_filings(symbol)
     data.mf_institutional_data = fetch_mutual_fund_data(symbol)
+
+    # Filings library (independent of yfinance — works for SME via index=sme retry)
+    data.financial_results_filings = fetch_financial_results_filings(symbol)
+    data.annual_report_filings = fetch_annual_report_filings(symbol)
+    data.filings_summary = {
+        "concalls": len(data.concall_texts or []),
+        "investor_pres": len(data.annual_report_texts or []),
+        "financial_results": len(data.financial_results_filings or []),
+        "annual_reports": len(data.annual_report_filings or []),
+        "sast": len(data.sast_disclosures or []),
+        "rpt": len(data.related_party_filings or []),
+        "credit_ratings": len(data.credit_ratings or []),
+    }
+    print("\n  Filings library summary: %s" % ", ".join(
+        "%s=%d" % (k, v) for k, v in data.filings_summary.items() if v))
+
+    # If yfinance gave us nothing numeric, try parsing the latest results PDF for revenue/PAT
+    if data.years == 0 and data.financial_results_filings:
+        _augment_financials_from_filings(data)
 
     # Step 4: Deep Fundamental Analysis
     deep_analyzer = DeepFundamentalAnalyzer(data, forensic_analyzer=analyzer)
