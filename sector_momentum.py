@@ -73,11 +73,26 @@ START_DATE = datetime.date(2024, 1, 1)
 def fetch_benchmark(start_date, end_date):
     """Fetch Nifty 50 proxy via NIFTYBEES ETF.
 
-    Primary: jugaad-data.  Fallback: yfinance.
+    Primary: Angel One (via data_provider).  Fallback: jugaad-data, yfinance.
     """
     print("\n  Fetching benchmark (NIFTYBEES)...")
 
-    # ── Primary: jugaad-data ──
+    # ── Primary: Angel One via data_provider ──
+    try:
+        from data_provider import _fetch_one, _resolve_period
+        s, e = _resolve_period(str(start_date), str(end_date), None)
+        dp_df = _fetch_one("NIFTYBEES.NS", s, e)
+        if dp_df is not None and not dp_df.empty and "Close" in dp_df.columns:
+            series = dp_df["Close"].copy()
+            series.index = pd.to_datetime(series.index).normalize()
+            series = series[~series.index.duplicated(keep="last")]
+            series = pd.to_numeric(series, errors="coerce")
+            print("    NIFTYBEES: %d days" % len(series))
+            return series
+    except Exception as e:
+        print("    NIFTYBEES: data_provider failed (%s), trying jugaad-data ..." % e)
+
+    # ── Fallback 1: jugaad-data ──
     try:
         df = stock_df(
             symbol="NIFTYBEES",
@@ -96,12 +111,12 @@ def fetch_benchmark(start_date, end_date):
             series = df.set_index("Date")["Close"]
             series = series[~series.index.duplicated(keep="last")]
             series = pd.to_numeric(series, errors="coerce")
-            print("    NIFTYBEES: %d days" % len(series))
+            print("    NIFTYBEES: %d days (jugaad)" % len(series))
             return series
     except Exception as e:
         print("    NIFTYBEES: jugaad-data failed (%s), trying yfinance ..." % e)
 
-    # ── Fallback: yfinance ──
+    # ── Fallback 2: yfinance ──
     try:
         import yfinance as yf
         yf_df = yf.download(

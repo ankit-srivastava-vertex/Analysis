@@ -136,12 +136,11 @@ COLORS = [
 def fetch_all_prices():
     """Download 1Y daily close for benchmark + all sector indices/ETFs.
 
+    Primary: Angel One (via data_provider).  Fallback: jugaad-data, yfinance.
+
     Returns:
         DataFrame with Date index and one column per sector + benchmark.
     """
-    if not _HAS_YFINANCE:
-        raise RuntimeError("yfinance is required for RRG chart")
-
     tickers = {BENCHMARK_NAME: BENCHMARK_TICKER}
     tickers.update(ALL_SECTORS)
 
@@ -149,10 +148,17 @@ def fetch_all_prices():
     name_by_ticker = {v: k for k, v in tickers.items()}
 
     print("  Downloading 1Y daily data for %d tickers ..." % len(ticker_list))
-    raw = yf.download(ticker_list, period="1y", progress=False)
+    try:
+        import data_provider as dp
+        raw = dp.download(ticker_list, period="1y", progress=False)
+    except Exception as e:
+        print("  data_provider failed (%s), falling back to yfinance ..." % e)
+        if not _HAS_YFINANCE:
+            raise RuntimeError("yfinance is required for RRG chart")
+        raw = yf.download(ticker_list, period="1y", progress=False)
 
     if raw is None or raw.empty:
-        print("  ERROR: yfinance returned no data")
+        print("  ERROR: no data returned")
         return pd.DataFrame()
 
     # Extract Close prices
@@ -209,14 +215,21 @@ def _build_custom_indices(benchmark_series):
     print("  Downloading %d constituent stocks for %d custom indices ..." % (
         len(all_tickers), len(index_defs)))
 
-    # Download in batches to avoid yfinance timeouts
+    # Download in batches via data_provider (Angel One primary, yfinance fallback)
     ticker_list = sorted(all_tickers)
     batch_size = 40
     all_close = []
     for start in range(0, len(ticker_list), batch_size):
         batch = ticker_list[start:start + batch_size]
         try:
-            raw = yf.download(batch, period="1y", progress=False)
+            import data_provider as dp
+            raw = dp.download(batch, period="1y", progress=False)
+        except Exception:
+            try:
+                raw = yf.download(batch, period="1y", progress=False) if _HAS_YFINANCE else None
+            except Exception:
+                raw = None
+        try:
             if raw is not None and not raw.empty:
                 if isinstance(raw.columns, pd.MultiIndex):
                     batch_close = raw["Close"]

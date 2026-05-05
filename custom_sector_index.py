@@ -114,9 +114,26 @@ def _build_constituents_table_html():
 def fetch_close_prices(symbol, start_date, end_date):
     """Fetch historical close prices.
 
-    Primary: jugaad-data.  Fallback: yfinance.
+    Primary: Angel One (via data_provider).  Fallback: jugaad-data, yfinance.
     """
-    # ── Primary: jugaad-data ──
+    # ── Primary: Angel One via data_provider ──
+    try:
+        from data_provider import _fetch_one, _resolve_period
+        s, e = _resolve_period(str(start_date), str(end_date), None)
+        dp_df = _fetch_one(symbol + ".NS", s, e)
+        if dp_df is not None and not dp_df.empty and "Close" in dp_df.columns:
+            result = dp_df[["Close"]].copy()
+            result = result.reset_index()
+            result.columns = ["Date", "Close"]
+            result["Date"] = pd.to_datetime(result["Date"]).dt.normalize()
+            result = result.sort_values("Date").drop_duplicates(subset="Date", keep="first").reset_index(drop=True)
+            result["Close"] = pd.to_numeric(result["Close"], errors="coerce")
+            print("    %s: %d days" % (symbol, len(result)))
+            return result
+    except Exception as e:
+        print("    %s: data_provider failed (%s), trying jugaad-data ..." % (symbol, e))
+
+    # ── Fallback 1: jugaad-data ──
     try:
         df = stock_df(symbol=symbol, from_date=start_date, to_date=end_date, series="EQ")
         if df is not None and not df.empty:
@@ -124,12 +141,12 @@ def fetch_close_prices(symbol, start_date, end_date):
             df["Date"] = pd.to_datetime(df["Date"]).dt.normalize()
             df = df[["Date", "Close"]].sort_values("Date").drop_duplicates(subset="Date", keep="first").reset_index(drop=True)
             df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-            print("    %s: %d days" % (symbol, len(df)))
+            print("    %s: %d days (jugaad)" % (symbol, len(df)))
             return df
     except Exception as e:
         print("    %s: jugaad-data failed (%s), trying yfinance ..." % (symbol, e))
 
-    # ── Fallback: yfinance ──
+    # ── Fallback 2: yfinance ──
     try:
         import yfinance as yf
         yf_df = yf.download(
