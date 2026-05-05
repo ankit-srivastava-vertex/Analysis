@@ -554,7 +554,15 @@ class BSEScraper:
 'VENKATA NAGARAJU PADALA',
 'VINOD  KUMAR',
 'Valuequest S C A L E Fund',
-'VQ FASTERCAP FUND'
+'VQ FASTERCAP FUND',
+# ── New variations discovered from 1Y historical analysis (May 2026) ──
+'ABAKKUS EMERGING OPPORTUNITIES FUND-1',        # variant of "FUND - 1"
+'ABAKKUS DIVERSIFIED ALPHA FUND - 2',           # variant of "FUND-2"
+'SINGULARITY LARGE VALUE FUND I',               # Fund I (II & III already listed)
+'SURYA VANSHI COMMOTRADE PVT. LTD.',            # spacing/punctuation variant
+'CHARTERED FINANCE & LEASI NG LIMITED',          # typo in exchange data
+'BENGAL FINANCE & INVESTMENT PRIVATE LIMITED',   # name variant of Bengal Fin
+'VALUEQUEST INVESTMENT ADVISORS PVT LTD',        # Valuequest entity
         ]
 
         # Guard against empty NSE DataFrames (e.g. nsepython unavailable)
