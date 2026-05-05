@@ -62,6 +62,53 @@ CONSTITUENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "in
 BASE_VALUE = 1000  # Starting value for each custom index
 
 
+def _build_constituents_table_html():
+    """Build an HTML table showing constituents of each custom sector."""
+    if not os.path.exists(CONSTITUENTS_FILE):
+        return ""
+    with open(CONSTITUENTS_FILE, "r") as f:
+        raw = json.load(f)
+    if not raw:
+        return ""
+
+    sectors = {}
+    for name, val in raw.items():
+        if isinstance(val, dict) and "constituents" in val:
+            sectors[name] = val["constituents"]
+        elif isinstance(val, list):
+            sectors[name] = val
+    if not sectors:
+        return ""
+
+    max_len = max(len(v) for v in sectors.values())
+    header = "".join(
+        '<th style="padding:6px 10px;text-align:left;border:1px solid #ccc;'
+        'background:#e3f2fd;font-size:12px;white-space:nowrap">%s (%d)</th>' % (name, len(tickers))
+        for name, tickers in sectors.items()
+    )
+    rows = []
+    for i in range(max_len):
+        cells = []
+        for name in sectors:
+            constituents = sectors[name]
+            val = constituents[i] if i < len(constituents) else ""
+            cells.append(
+                '<td style="padding:4px 8px;border:1px solid #ddd;font-size:11px'
+                '%s">%s</td>' % (";background:#f9f9f9" if i % 2 else "", val)
+            )
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    return (
+        '<div style="margin-top:24px;padding:12px;background:#fafafa;'
+        'border:1px solid #e0e0e0;border-radius:6px;overflow-x:auto">'
+        '<h3 style="margin:0 0 10px 0;font-size:15px;color:#333">'
+        'Sector Constituents</h3>'
+        '<table style="border-collapse:collapse;width:100%">'
+        '<tr>' + header + '</tr>' + "".join(rows) +
+        '</table></div>'
+    )
+
+
 # ─── Data fetching ───────────────────────────────────────────────────────────
 
 def fetch_close_prices(symbol, start_date, end_date):
@@ -219,19 +266,20 @@ def create_chart(all_indices, title="Custom Sector Indices"):
         color = colors[i % len(colors)]
         current = series.iloc[-1]
         change_pct = ((current / BASE_VALUE) - 1) * 100
+        pct_series = ((series / BASE_VALUE) - 1) * 100
 
         hover_tpl = (
             "<b>" + name + "</b><br>"
             "Date: %{x|%d-%b-%Y}<br>"
-            "Value: %{y:.2f}<br>"
+            "Change: %{y:+.1f}%<br>"
             "<extra></extra>"
         )
 
         fig.add_trace(go.Scatter(
-            x=series.index,
-            y=series.values,
+            x=pct_series.index,
+            y=pct_series.values,
             mode="lines",
-            name="%s (%.1f%%)" % (name, change_pct),
+            name="%s (%+.1f%%)" % (name, change_pct),
             line=dict(width=2, color=color),
             hovertemplate=hover_tpl,
         ))
@@ -250,17 +298,19 @@ def create_chart(all_indices, title="Custom Sector Indices"):
                 ],
             ),
         ),
-        yaxis=dict(title="Index Value (Base=%d)" % BASE_VALUE, rangemode="tozero"),
+        yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=25),
         hovermode="closest",
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=1.06,
             xanchor="right",
             x=1,
+            font=dict(size=11),
         ),
         template="plotly_white",
-        height=600,
+        height=700,
+        margin=dict(t=120),
     )
 
     return fig
@@ -287,24 +337,26 @@ def create_individual_charts(all_indices):
         current = series.iloc[-1]
         change_pct = ((current / BASE_VALUE) - 1) * 100
 
+        pct_series = ((series / BASE_VALUE) - 1) * 100
+
         hover_tpl = (
             "<b>" + name + "</b><br>"
             "Date: %{x|%d-%b-%Y}<br>"
-            "Value: %{y:.2f}<br>"
+            "Change: %{y:+.1f}%<br>"
             "<extra></extra>"
         )
 
         fig.add_trace(go.Scatter(
-            x=series.index,
-            y=series.values,
+            x=pct_series.index,
+            y=pct_series.values,
             mode="lines",
-            name="%s (%.1f%%)" % (name, change_pct),
+            name="%s (%+.1f%%)" % (name, change_pct),
             line=dict(width=2, color=color),
             hovertemplate=hover_tpl,
         ))
 
         fig.update_layout(
-            title=dict(text="%s — %.2f (%+.1f%%)" % (name, current, change_pct), font=dict(size=16)),
+            title=dict(text="%s (%+.1f%%)" % (name, change_pct), font=dict(size=16)),
             xaxis=dict(
                 title="Date",
                 rangeslider=dict(visible=True),
@@ -318,7 +370,7 @@ def create_individual_charts(all_indices):
                     ],
                 ),
             ),
-            yaxis=dict(title="Index Value (Base=%d)" % BASE_VALUE, rangemode="tozero"),
+            yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=25),
             hovermode="x",
             template="plotly_white",
             height=400,
@@ -366,13 +418,17 @@ def save_chart_html(fig, output_file, individual_figs=None):
         for ifig in individual_figs:
             individual_html += ifig.to_html(full_html=False, include_plotlyjs=False)
 
+    # Build constituents table
+    constituents_table = _build_constituents_table_html()
+
     full_html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Custom Sector Indices</title>
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </head><body style="margin:20px;">
 %s
 %s
-</body></html>""" % (combined_html, individual_html)
+%s
+</body></html>""" % (combined_html, individual_html, constituents_table)
 
     with open(output_file, "w") as f:
         f.write(full_html)

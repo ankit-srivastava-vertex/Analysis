@@ -208,27 +208,44 @@ def _build_custom_indices(benchmark_series):
 
     print("  Downloading %d constituent stocks for %d custom indices ..." % (
         len(all_tickers), len(index_defs)))
-    raw = yf.download(list(all_tickers), period="1y", progress=False)
-    if raw is None or raw.empty:
+
+    # Download in batches to avoid yfinance timeouts
+    ticker_list = sorted(all_tickers)
+    batch_size = 40
+    all_close = []
+    for start in range(0, len(ticker_list), batch_size):
+        batch = ticker_list[start:start + batch_size]
+        try:
+            raw = yf.download(batch, period="1y", progress=False)
+            if raw is not None and not raw.empty:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    batch_close = raw["Close"]
+                else:
+                    batch_close = raw[["Close"]]
+                    batch_close.columns = [batch[0]]
+                all_close.append(batch_close)
+        except Exception as e:
+            print("  WARNING: Batch download failed: %s" % e)
+
+    if not all_close:
         print("  WARNING: Could not fetch custom index constituent prices")
         return pd.DataFrame()
 
-    if isinstance(raw.columns, pd.MultiIndex):
-        close = raw["Close"]
-    else:
-        close = raw[["Close"]]
-        close.columns = [list(all_tickers)[0]]
+    close = pd.concat(all_close, axis=1)
+    # Remove duplicate columns
+    close = close.loc[:, ~close.columns.duplicated()]
 
     # Build each index
     result = pd.DataFrame(index=close.index)
     for index_name, info in index_defs.items():
         tickers = [s + ".NS" for s in info["constituents"]]
-        available = [t for t in tickers if t in close.columns]
+        available = [t for t in tickers if t in close.columns and close[t].notna().sum() > 5]
         if len(available) < 2:
-            print("  [C:%s] Skipped — only %d stocks available" % (index_name, len(available)))
+            print("  [C: %s] Skipped — only %d stocks with data" % (index_name, len(available)))
             continue
-        prices = close[available].ffill().dropna()
-        if prices.empty or len(prices) < 20:
+        prices = close[available].ffill().bfill().dropna(how="all")
+        if prices.empty or len(prices) < 10:
+            print("  [C: %s] Skipped — only %d trading days" % (index_name, len(prices)))
             continue
 
         # Equal-weighted: daily returns → average → cumulative
@@ -491,10 +508,11 @@ def create_rrg_chart(all_timeframe_data, title="Relative Rotation Graph \u2014 I
                     range=[y_lo, y_hi]),
         hovermode="closest",
         template="plotly_white",
-        height=700,
-        width=950,
+        height=900,
+        width=None,
         annotations=annotations,
         showlegend=False,
+        margin=dict(l=60, r=60, t=80, b=60),
     )
 
     return fig, trace_meta, sorted_sectors
@@ -508,7 +526,7 @@ _RRG_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <style>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-#rrg-wrap{max-width:1100px;margin:0 auto;padding:10px}
+#rrg-wrap{margin:0 auto;padding:10px}
 #controls{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;
   padding:8px 12px;background:#fafafa;border:1px solid #e0e0e0;
   border-radius:6px;margin-bottom:6px}
@@ -540,7 +558,7 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,san
    <div id="sboxes"></div>
   </div>
  </div>
- <div id="rrg-chart"></div>
+ <div id="rrg-chart" style="min-height:85vh"></div>
  <details style="margin-top:12px;padding:8px 12px;background:#fafafa;border:1px solid #e0e0e0;border-radius:6px">
   <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#555">Timeframe Reference</summary>
   <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:12px">
@@ -564,7 +582,7 @@ var D=__FIG_DATA__,
     S=__SECTORS__,
     T=__TIMEFRAMES__,
     C=__COLORS__,
-    N=D.length,aT=T[0],sel=new Set(S);
+    N=D.length,aT=T[0],sel=new Set(S.filter(function(s){return s.startsWith('C: ')}));
 Plotly.newPlot('rrg-chart',D,L,{responsive:true,displayModeBar:true});
 var tD=document.getElementById('tf-btns');
 T.forEach(function(tf,i){
@@ -577,7 +595,7 @@ T.forEach(function(tf,i){
 var sD=document.getElementById('sboxes');
 S.forEach(function(s){
  var l=document.createElement('label'),c=document.createElement('input');
- c.type='checkbox';c.checked=true;
+ c.type='checkbox';c.checked=s.startsWith('C: ');
  c.onchange=function(){if(c.checked)sel.add(s);else sel.delete(s);upd()};
  var d=document.createElement('span');d.className='cd';
  d.style.background=C[s]||'#999';

@@ -225,19 +225,24 @@ def create_rs_chart(all_rs, all_indices, title="Sector Relative Strength vs Nift
     )
 
     fig.update_layout(
-        title=dict(text=title, font=dict(size=20)),
+        title=dict(text=title, font=dict(size=20), y=0.98, yanchor="top"),
         hovermode="closest",
         legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.08,
-            xanchor="right",
-            x=1,
+            orientation="v",
+            yanchor="top",
+            y=1.0,
+            xanchor="left",
+            x=1.02,
+            font=dict(size=10),
         ),
         template="plotly_white",
         height=900,
-        margin=dict(t=160),
+        margin=dict(t=100, r=200),
     )
+
+    # Y-axis tick scaling for both panels
+    fig.update_yaxes(dtick=25, row=1, col=1)
+    fig.update_yaxes(dtick=25, row=2, col=1)
 
     # Range selector on bottom panel
     fig.update_xaxes(

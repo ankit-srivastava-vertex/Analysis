@@ -315,7 +315,7 @@ def create_chart(sector_totals, detail_df, date_range_str):
         ),
         height=total_height,
         width=None,                              # fill browser width
-        margin=dict(l=320, r=60, t=90, b=120),
+        margin=dict(l=320, r=60, t=100, b=140),
         plot_bgcolor="#fafafa",
         hovermode="closest",                      # show only hovered sector
         dragmode="pan",                                # drag to pan, not select
@@ -349,6 +349,44 @@ def create_chart(sector_totals, detail_df, date_range_str):
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 
+def _build_sector_summary_table_html(sector_totals):
+    """Build an HTML table showing sectors used in the chart with their flows."""
+    if sector_totals is None or sector_totals.empty:
+        return ""
+
+    sorted_df = sector_totals.sort_values("Net_Cr", ascending=False)
+    total = sorted_df["Net_Cr"].sum()
+
+    rows_html = []
+    for idx, (_, row) in enumerate(sorted_df.iterrows()):
+        net = row["Net_Cr"]
+        color = "#26a69a" if net >= 0 else "#ef5350"
+        bg = ";background:#f9f9f9" if idx % 2 else ""
+        rows_html.append(
+            '<tr>'
+            '<td style="padding:5px 10px;border:1px solid #ddd;font-size:12px%s">%s</td>'
+            '<td style="padding:5px 10px;border:1px solid #ddd;font-size:12px;'
+            'text-align:right;color:%s;font-weight:600%s">'
+            '\u20B9%s Cr</td>'
+            '</tr>' % (bg, row["Sector"], color, bg, "{:,.0f}".format(net))
+        )
+
+    return (
+        '<div style="margin-top:24px;padding:12px;background:#fafafa;'
+        'border:1px solid #e0e0e0;border-radius:6px;overflow-x:auto">'
+        '<h3 style="margin:0 0 10px 0;font-size:15px;color:#333">'
+        'FII Sector-wise Net Flows Summary (%d Sectors)'
+        '  |  Total: \u20B9%s Cr</h3>'
+        '<table style="border-collapse:collapse;width:100%%">'
+        '<tr><th style="padding:6px 10px;text-align:left;border:1px solid #ccc;'
+        'background:#e3f2fd;font-size:12px">Sector (NSDL/SEBI Classification)</th>'
+        '<th style="padding:6px 10px;text-align:right;border:1px solid #ccc;'
+        'background:#e3f2fd;font-size:12px">Net FII Flow</th></tr>'
+        + "".join(rows_html) +
+        '</table></div>'
+    ) % (len(sorted_df), "{:,.0f}".format(total))
+
+
 def save_outputs(sector_totals, detail_df, chart_fig, prefix, chart_path=None):
     """Save HTML chart + Excel workbook."""
     if chart_path is None:
@@ -366,6 +404,7 @@ def save_outputs(sector_totals, detail_df, chart_fig, prefix, chart_path=None):
         default_width="100%",
         default_height="100%",
     )
+
     print("  Chart : %s" % chart_path)
 
     with pd.ExcelWriter(excel_path, engine="openpyxl") as w:
