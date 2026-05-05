@@ -249,5 +249,45 @@
             "CHANDAN",
             "LXMIDENTAL"
         ]
+    },
+    "Pharma": {
+        "description": "Pharmaceuticals & Specialty Chemicals",
+        "constituents": [
+            "LAURUSLABS",
+            "EMCURE",
+            "GLAND",
+            "SAILIFE",
+            "ACUTAAS",
+            "NEULANDLAB",
+            "NATCOPHARM",
+            "ONESOURCE",
+            "ERIS",
+            "JUBLPHARMA",
+            "CAPLIPOINT",
+            "JSLL",
+            "BLUEJET",
+            "SUDEEPPHRM",
+            "INNOVACAP",
+            "SENORES",
+            "NGLFINE"
+        ]
+    },
+    "Chemical": {
+        "description": "Specialty Chemicals & Explosives",
+        "constituents": [
+            "NAVINFLUOR",
+            "DEEPAKNTR",
+            "AETHER",
+            "FINEORG",
+            "PRIVISCL",
+            "ARCHEAN",
+            "EPIGRAL",
+            "TANFACIND",
+            "NEOGEN",
+            "TATVA",
+            "PREMEXPLN",
+            "BEEZAASAN",
+            "VINATIORGA"
+        ]
     }
 }
