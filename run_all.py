@@ -5,46 +5,95 @@ Master Report Runner (Orchestrator)
 SUMMARY
 -------
 Command-centre script that runs all market analysis scenarios in sequence,
-consolidates their outputs into unified Excel workbooks, and sends a single
-email with all reports + interactive HTML charts attached.
+consolidates their outputs into a single unified Excel workbook, and sends
+one email with the workbook + interactive HTML charts attached.
 
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 5 scenarios in order:
-   a. sector_index      → custom_sector_index.run()   — custom equal-weighted sector indices
-   b. fii_flows          → fii_flows.run()             — daily FII equity cash flows
-   c. fii_sector_flows   → fii_sector_flows.run()      — fortnightly FII sector-wise flows
-   d. sector_momentum    → sector_momentum.run()       — Mansfield RS per sector
-   e. rrg                → rrg_chart.run()             — Relative Rotation Graph
-3. Merge all scenario sheets into a unified Excel workbook
-   (market_analysis_report.xlsx).
-4. Collect all HTML chart files.
-5. Send consolidated email with Excel + HTML attachments (unless --no-email).
+2. Run 7 scenarios in order. The first two are intentionally placed at the
+   top so their sheets appear at the BEGINNING of the combined workbook:
+
+   a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
+                                                          filtered to a hardcoded
+                                                          "superstar" client list.
+                                                          Standalone Excel emission is
+                                                          SUPPRESSED via a _CapturingScraper
+                                                          subclass that overrides
+                                                          save_to_excel() to capture the
+                                                          DataFrames in-memory only. Sheets
+                                                          are renamed with prefix "BB "
+                                                          (BB NSE Bulk, BB NSE Block,
+                                                          BB BSE Bulk, BB BSE Block).
+   b. multi_pct_down    → multi_pct_down.run()          — Multi-universe pct-down screener
+                                                          (NSE / NSE-SME / BSE-SME) for
+                                                          stocks 2–21% off highs with RS,
+                                                          200-DMA, mcap and base-building
+                                                          filters. The screener writes a
+                                                          temp .xlsx + .txt; run_all reads
+                                                          the .xlsx back, prefixes sheets
+                                                          with "MPD ", then deletes both
+                                                          temp files.
+   c. sector_index      → custom_sector_index.run()     — Custom equal-weighted sector
+                                                          indices (Sector Idx Summary +
+                                                          Sector Idx Values).
+   d. fii_flows         → fii_flows.run()               — Daily FII equity cash flows
+                                                          (FII Flow Summary + FII Daily Data).
+   e. fii_sector_flows  → fii_sector_flows.run()        — Fortnightly FII sector-wise flows
+                                                          (FII Sector Net Flows + Detail).
+   f. sector_momentum   → sector_momentum.run()         — Mansfield RS per sector
+                                                          (RS Ranking + RS History).
+   g. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
+                                                          timeframes (RRG 3 Day … Quarterly).
+
+   Each scenario is wrapped in try/except so a single failure does not
+   abort the pipeline; failures are collected in `errors` and reported
+   in the email body + summary.
+
+3. Merge every scenario's sheets into one Excel workbook
+   (market_analysis_report.xlsx). Sub-module standalone Excel files are
+   removed after their data is captured, so only the unified workbook
+   remains on disk.
+
+4. Collect all HTML chart files (5 charts: sector_index, fii_flows,
+   fii_sector_flows, sector_momentum, rrg). Bulk/Block and Pct-Down do
+   not produce charts.
+
+5. Send consolidated email with the unified Excel + HTML charts attached
+   (unless --no-email).
 
 DATA SOURCES
 ------------
-All data is fetched by individual sub-modules (see each file's header).
-This script only orchestrates and consolidates.
+All data is fetched by the individual sub-modules (see each file's header).
+This script only orchestrates and consolidates — it does not call any
+external APIs directly.
 
 OUTPUT
 ------
-- market_analysis_report.xlsx    — Unified workbook (5+ sheets)
-- *_chart.html                   — 5 interactive Plotly charts
+- market_analysis_report.xlsx    — Unified workbook, typically ~23 sheets:
+                                    4 BB (bulk/block) + 3 MPD (screener,
+                                    one per universe) + 2 sector_index +
+                                    2 fii_flows + 2 fii_sector_flows +
+                                    2 sector_momentum + 8 RRG timeframes.
+- *_chart.html                   — 5 interactive Plotly charts.
 
 USAGE
 -----
 Individual run:
-    python3 run_all.py                              # run all + send email
-    python3 run_all.py --no-email                   # run all, skip email
-    python3 run_all.py --skip fii_flows rrg          # skip specific scenarios
+    python3 run_all.py                                       # run all + send email
+    python3 run_all.py --no-email                            # run all, skip email
+    python3 run_all.py --skip bulk_block multi_pct_down      # skip the slow ones
+    python3 run_all.py --skip fii_flows rrg                  # skip arbitrary scenarios
 
 Available scenario names for --skip:
-    sector_index, fii_flows, fii_sector_flows, sector_momentum, rrg
+    bulk_block, multi_pct_down, sector_index, fii_flows,
+    fii_sector_flows, sector_momentum, rrg
 
 DEPENDENCIES
 ------------
-pandas, openpyxl, email_sender, and all sub-module dependencies.
+pandas, openpyxl, email_sender, and all sub-module dependencies
+(BulkBlock requires requests + bs4; multi_pct_down requires yfinance +
+ angel_client + jugaad-data fallbacks).
 """
 
 import os
@@ -58,12 +107,92 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = datetime.date.today()
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# Scenario names for --skip
-ALL_SCENARIOS = ["sector_index", "fii_flows", "fii_sector_flows",
+# Scenario names for --skip (order = sheet order in unified Excel)
+ALL_SCENARIOS = ["bulk_block", "multi_pct_down", "sector_index",
+                 "fii_flows", "fii_sector_flows",
                  "sector_momentum", "rrg"]
 
 
-# ─── Scenario runners ───────────────────────────────────────────────────────
+# ─── Scenario runners ──────────────────────────────────────
+
+def run_bulk_block():
+    """Scrape NSE+BSE bulk/block deals filtered for superstar names.
+    Returns sheets dict + None (no chart).
+    Captures the scraped DataFrames in-memory; suppresses BulkBlock's
+    own standalone Excel file so we only emit the unified workbook.
+    """
+    from BulkBlock import BSEScraper
+    captured = {}
+
+    class _CapturingScraper(BSEScraper):
+        def save_to_excel(self, dataframes_dict, filename):
+            # Capture only — do not write a standalone file.
+            captured.update(dataframes_dict)
+            print("  (run_all) captured %d BulkBlock sheet(s); standalone Excel suppressed."
+                  % len(dataframes_dict))
+
+    scraper = _CapturingScraper()
+    scraper.run()
+
+    # Normalise sheet names: prefix with "BB " so they group together
+    # at the top of the unified workbook.
+    sheets = {}
+    name_map = {
+        "nse_bulk": "BB NSE Bulk",
+        "nse_block": "BB NSE Block",
+        "BSE Bulk Deals": "BB BSE Bulk",
+        "BSE Block Deals": "BB BSE Block",
+    }
+    for raw_name, df in captured.items():
+        clean = name_map.get(raw_name, "BB " + str(raw_name))
+        if df is None or (hasattr(df, "empty") and df.empty):
+            df = pd.DataFrame({"Note": ["No matching deals"]})
+        sheets[clean[:31]] = df
+    return sheets, None
+
+
+def run_multi_pct_down():
+    """Run Multi-Universe Pct-Down Screener. Returns sheets dict + None.
+    The screener writes its own .xlsx + .txt files to disk; we read the
+    Excel back into memory, prefix sheet names, and clean up the temp
+    files so only the unified workbook persists.
+    """
+    from multi_pct_down import run as mpd_run
+    prefix = os.path.join(SCRIPT_DIR, "_mpd_tmp_%s" % TIMESTAMP)
+    out_xlsx = mpd_run(
+        out_dir=SCRIPT_DIR,
+        skip=set(),
+        min_pct=2.0,
+        max_pct=21.0,
+        max_symbols=0,
+        workers=4,
+        output_prefix=prefix,
+    )
+
+    sheets = {}
+    if out_xlsx and os.path.exists(out_xlsx):
+        try:
+            all_dfs = pd.read_excel(out_xlsx, sheet_name=None)
+            for name, df in all_dfs.items():
+                # Prefix with "MPD " so all screener sheets group together.
+                clean = ("MPD " + name)[:31]
+                sheets[clean] = df
+        finally:
+            try:
+                os.remove(out_xlsx)
+            except OSError:
+                pass
+
+    # Also clean up the TradingView .txt sidecar.
+    txt_path = "%s.txt" % prefix
+    if os.path.exists(txt_path):
+        try:
+            os.remove(txt_path)
+        except OSError:
+            pass
+
+    return sheets, None
+
 
 def run_sector_index():
     """Run Custom Sector Index Builder. Returns sheets dict + chart path."""
@@ -262,10 +391,42 @@ def main():
     chart_files = []
     errors = []
 
-    # ── 1. Custom Sector Index ──────────────────────────────────
+    # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
+    if "bulk_block" not in skip:
+        print("\n" + "=" * 70)
+        print("  SCENARIO 1/7: Bulk & Block Deals (NSE + BSE)")
+        print("=" * 70)
+        try:
+            sheets, chart = run_bulk_block()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ Bulk & Block Deals complete (%d sheets)" % len(sheets))
+        except Exception as e:
+            errors.append("bulk_block: %s" % e)
+            print("  ✗ Bulk & Block Deals FAILED: %s" % e)
+            traceback.print_exc()
+
+    # ── 2. Multi-Universe Pct-Down Screener ────────────────────────
+    if "multi_pct_down" not in skip:
+        print("\n" + "=" * 70)
+        print("  SCENARIO 2/7: Multi-Universe Pct-Down Screener")
+        print("=" * 70)
+        try:
+            sheets, chart = run_multi_pct_down()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ Multi Pct-Down complete (%d sheets)" % len(sheets))
+        except Exception as e:
+            errors.append("multi_pct_down: %s" % e)
+            print("  ✗ Multi Pct-Down FAILED: %s" % e)
+            traceback.print_exc()
+
+    # ── 3. Custom Sector Index ─────────────────────────────────
     if "sector_index" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/5: Custom Sector Index")
+        print("  SCENARIO 3/7: Custom Sector Index")
         print("=" * 70)
         try:
             sheets, chart = run_sector_index()
@@ -278,10 +439,10 @@ def main():
             print("  ✗ Sector Index FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 2. FII Equity Flows ──────────────────────────────────────────────
+    # ── 4. FII Equity Flows ────────────────────────────────────
     if "fii_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 2/5: FII Equity Cash Market Flows")
+        print("  SCENARIO 4/7: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_flows()
@@ -294,10 +455,10 @@ def main():
             print("  ✗ FII Flows FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 3. FII Sector-wise Flows ─────────────────────────────────────────
+    # ── 5. FII Sector-wise Flows ─────────────────────────────────
     if "fii_sector_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 3/5: FII Sector-wise Flows")
+        print("  SCENARIO 5/7: FII Sector-wise Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_sector_flows()
@@ -310,10 +471,10 @@ def main():
             print("  ✗ FII Sector Flows FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 4. Sector Momentum ───────────────────────────────────────────────
+    # ── 6. Sector Momentum ─────────────────────────────────────
     if "sector_momentum" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 4/5: Sector Momentum & Relative Strength")
+        print("  SCENARIO 6/7: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
             sheets, chart = run_sector_momentum()
@@ -326,10 +487,10 @@ def main():
             print("  ✗ Sector Momentum FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 5. RRG Chart ─────────────────────────────────────────────────────
+    # ── 7. RRG Chart ────────────────────────────────────────────
     if "rrg" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 5/5: Relative Rotation Graph")
+        print("  SCENARIO 7/7: Relative Rotation Graph")
         print("=" * 70)
         try:
             sheets, chart = run_rrg()
