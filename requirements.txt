@@ -6,3 +6,5 @@ nsepython
 plotly
 jugaad-data
 yfinance
+xlrd>=2.0.1
+pdfplumber
