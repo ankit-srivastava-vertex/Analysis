@@ -681,7 +681,7 @@ def _notes_dataframe() -> pd.DataFrame:
     ]})
 
 
-def run(months: int = 15, limit: int = 0, fetch_anchors: bool = True,
+def run(months: int = 14, limit: int = 0, fetch_anchors: bool = True,
         tv_txt_path: str | Path | None = None) -> dict:
     """Programmatic entry-point for run_all.py.
 
@@ -747,8 +747,8 @@ def run(months: int = 15, limit: int = 0, fetch_anchors: bool = True,
 # ---------------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("--months", type=int, default=15,
-                    help="Look-back window in months (default: 15)")
+    ap.add_argument("--months", type=int, default=14,
+                    help="Look-back window in months (default: 14)")
     ap.add_argument("--limit", type=int, default=0,
                     help="Process only first N IPOs (debug; 0 = all)")
     ap.add_argument("--no-anchors", action="store_true",
