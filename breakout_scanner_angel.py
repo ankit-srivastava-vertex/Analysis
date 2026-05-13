@@ -132,6 +132,16 @@ SCREENER_URL_DEFAULT = "https://www.screener.in/screens/2877406/52w-15/"
 
 NIFTY50_BENCH = "^NSEI"  # Nifty 50 index (handled via Angel INDEX_OVERRIDES)
 
+
+def _yahoo_to_tv(ticker: str) -> str:
+    """Convert Yahoo-style ticker to TradingView format.
+    RELIANCE.NS -> NSE:RELIANCE, 543745.BO -> BSE:543745"""
+    if ticker.endswith(".NS"):
+        return f"NSE:{ticker[:-3]}"
+    elif ticker.endswith(".BO"):
+        return f"BSE:{ticker[:-3]}"
+    return ticker
+
 # ─── Defaults / thresholds (v4.1) ───────────────────────────────────────────
 LOOKBACK_DAYS = 252        # v4.1: only consider last ~1 year of daily history
 RES_LOOKBACK_DAYS = 252    # v4.1: pivot/resistance search restricted to 1y
@@ -1455,6 +1465,32 @@ def main():
     print(f"    Sheet 6: Unique to Each (MPD-only={len(only_mpd) if 'only_mpd' in dir() else 0},"
           f" Screener-only={len(only_scr) if 'only_scr' in dir() else 0})")
 
+    # ── TradingView TXT files ──
+    tv_dir = os.path.dirname(excel_out)
+    tag = f"_{args.out_tag}" if args.out_tag else ""
+
+    # 1. Combined breakouts (MPD + Screener, deduplicated)
+    bo_syms = sorted({r["symbol"] for r in mpd_rows + scr_rows})
+    _write_tv_file(os.path.join(tv_dir, f"tv_breakouts_combined{tag}.txt"), bo_syms)
+
+    # 2. Common MPD+Screener universe
+    _write_tv_file(os.path.join(tv_dir, f"tv_common{tag}.txt"),
+                   sorted(common_tickers))
+
+    # 3. Unique MPD
+    _write_tv_file(os.path.join(tv_dir, f"tv_unique_mpd{tag}.txt"),
+                   sorted(only_mpd))
+
+    # 4. Unique Screener
+    _write_tv_file(os.path.join(tv_dir, f"tv_unique_screener{tag}.txt"),
+                   sorted(only_scr))
+
+    print(f"  TradingView files written:")
+    print(f"    tv_breakouts_combined{tag}.txt  ({len(bo_syms)} symbols)")
+    print(f"    tv_common{tag}.txt              ({len(common_tickers)} symbols)")
+    print(f"    tv_unique_mpd{tag}.txt           ({len(only_mpd)} symbols)")
+    print(f"    tv_unique_screener{tag}.txt      ({len(only_scr)} symbols)")
+
     # Print combined top 10
     all_rows = mpd_rows + scr_rows
     if all_rows:
@@ -1470,6 +1506,13 @@ def main():
         print("\n  No breakout candidates found in either universe.")
 
     print("\nDONE.")
+
+
+def _write_tv_file(path: str, tickers: list):
+    """Write a TradingView-format watchlist file from Yahoo-style tickers."""
+    converted = [_yahoo_to_tv(t) for t in tickers if t]
+    with open(path, "w") as f:
+        f.write(",\n".join(converted))
 
 
 def _print_scan_stats(rows, drops, effective_min_score):

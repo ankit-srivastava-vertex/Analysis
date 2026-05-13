@@ -11,7 +11,7 @@ one email with the workbook + interactive HTML charts attached.
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 7 scenarios in order:
+2. Run 8 scenarios in order:
 
    a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
                                                           filtered to a hardcoded
@@ -30,7 +30,13 @@ WORKFLOW
                                                           (RS Ranking + RS History).
    f. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
                                                           timeframes (RRG 3 Day … Quarterly).
-   g. india_macro       → india_macro.main()            — India macro dashboard (33
+   g. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs (NSE + NSE SME)
+                                                          with listing-day +/- and watchlist
+                                                          anchor matches (sheets prefixed
+                                                          "IPO Anchor"). Also writes a
+                                                          standalone TradingView watchlist
+                                                          file ipo_anchor_report.txt.
+   h. india_macro       → india_macro.main()            — India macro dashboard (33
                                                           indicators). Produces its own
                                                           standalone Excel + HTML chart
                                                           (not merged into unified workbook).
@@ -77,7 +83,7 @@ USAGE
 
 Available scenario names for --skip:
     bulk_block, sector_index, fii_flows, fii_sector_flows,
-    sector_momentum, rrg, india_macro
+    sector_momentum, rrg, ipo_anchor, india_macro
 
 DEPENDENCIES
 ------------
@@ -99,7 +105,7 @@ TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 # Scenario names for --skip (order = sheet order in unified Excel)
 ALL_SCENARIOS = ["bulk_block", "sector_index",
                  "fii_flows", "fii_sector_flows",
-                 "sector_momentum", "rrg", "india_macro"]
+                 "sector_momentum", "rrg", "ipo_anchor", "india_macro"]
 
 
 # ─── Scenario runners ──────────────────────────────────────
@@ -295,6 +301,25 @@ def run_rrg():
     return sheets, html_path
 
 
+def run_ipo_anchor():
+    """Run IPO Anchor Tracker. Returns sheets dict + None (no chart).
+    Sheets: 'IPOs' (last-15-month listings + watchlist anchor matches) and
+    'Notes' (methodology). The TradingView .txt watchlist is written by
+    the underlying module to ipo_anchor_report.txt and is NOT merged into
+    the unified workbook (kept as a standalone file for upload).
+    """
+    from ipo_anchor_tracker import run as ipo_run
+    result = ipo_run()
+    sheets_in = result.get("sheets", {})
+    # Prefix sheets so they group together in the unified workbook.
+    sheets = {}
+    if "IPOs" in sheets_in:
+        sheets["IPO Anchor List"] = sheets_in["IPOs"]
+    if "Notes" in sheets_in:
+        sheets["IPO Anchor Notes"] = sheets_in["Notes"]
+    return sheets, None
+
+
 def run_india_macro():
     """Run India Macro Dashboard. Returns (excel_path, chart_path).
     This scenario produces its own standalone Excel + HTML chart and does NOT
@@ -362,7 +387,7 @@ def main():
     # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
     if "bulk_block" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/7: Bulk & Block Deals (NSE + BSE)")
+        print("  SCENARIO 1/8: Bulk & Block Deals (NSE + BSE)")
         print("=" * 70)
         try:
             sheets, chart = run_bulk_block()
@@ -378,7 +403,7 @@ def main():
     # ── 2. Custom Sector Index ─────────────────────────────────
     if "sector_index" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 2/7: Custom Sector Index")
+        print("  SCENARIO 2/8: Custom Sector Index")
         print("=" * 70)
         try:
             sheets, chart = run_sector_index()
@@ -394,7 +419,7 @@ def main():
     # ── 3. FII Equity Flows ────────────────────────────────────
     if "fii_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 3/7: FII Equity Cash Market Flows")
+        print("  SCENARIO 3/8: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_flows()
@@ -410,7 +435,7 @@ def main():
     # ── 4. FII Sector-wise Flows ─────────────────────────────────
     if "fii_sector_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 4/7: FII Sector-wise Flows")
+        print("  SCENARIO 4/8: FII Sector-wise Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_sector_flows()
@@ -426,7 +451,7 @@ def main():
     # ── 5. Sector Momentum ─────────────────────────────────────
     if "sector_momentum" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 5/7: Sector Momentum & Relative Strength")
+        print("  SCENARIO 5/8: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
             sheets, chart = run_sector_momentum()
@@ -442,7 +467,7 @@ def main():
     # ── 6. RRG Chart ────────────────────────────────────────────
     if "rrg" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 6/7: Relative Rotation Graph")
+        print("  SCENARIO 6/8: Relative Rotation Graph")
         print("=" * 70)
         try:
             sheets, chart = run_rrg()
@@ -455,12 +480,28 @@ def main():
             print("  ✗ RRG Chart FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 7. India Macro Dashboard ────────────────────────────────────────────
+    # ── 7. IPO Anchor Tracker ──────────────────────────────────
+    if "ipo_anchor" not in skip:
+        print("\n" + "=" * 70)
+        print("  SCENARIO 7/8: IPO Anchor Tracker")
+        print("=" * 70)
+        try:
+            sheets, chart = run_ipo_anchor()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ IPO Anchor Tracker complete")
+        except Exception as e:
+            errors.append("ipo_anchor: %s" % e)
+            print("  ✗ IPO Anchor Tracker FAILED: %s" % e)
+            traceback.print_exc()
+
+    # ── 8. India Macro Dashboard ─────────────────────────────────────────
     india_macro_excel = None
     india_macro_chart = None
     if "india_macro" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 7/7: India Macro Dashboard")
+        print("  SCENARIO 8/8: India Macro Dashboard")
         print("=" * 70)
         try:
             india_macro_excel, india_macro_chart = run_india_macro()
