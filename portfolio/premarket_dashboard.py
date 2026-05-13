@@ -448,12 +448,14 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     title = (f"Pre-Market Breadth Dashboard \u2014 NIFTY 500 "
              f"(last 6 months \u2014 as of {h['Date'].iloc[-1].strftime('%d-%b-%Y')})")
     fig.update_layout(
-        title=dict(text=title, font=dict(size=20)),
+        title=dict(text=title, font=dict(size=20), x=0.02, xanchor="left",
+                   y=0.98, yanchor="top"),
         hovermode="x unified",
         template="plotly_white",
-        height=1000,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1),
+        height=1100,
+        margin=dict(t=110, l=60, r=40, b=110),
+        legend=dict(orientation="h", yanchor="top", y=-0.08,
+                    xanchor="center", x=0.5),
     )
     fig.update_xaxes(
         rangeselector=dict(
