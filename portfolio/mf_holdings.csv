@@ -1,0 +1,5 @@
+# mf_holdings.csv  -- mutual-fund top holdings used for overlap analysis
+# Populate with whichever funds you care about (yours, peers', popular benchmarks).
+# Sources: AMFI monthly disclosures, Value Research, Tickertape, fund factsheets.
+# Format: Fund,Symbol,Weight%
+Fund,Symbol,Weight%
