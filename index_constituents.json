@@ -136,7 +136,9 @@
             "KRISHNADEF",
             "DCXINDIA",
             "NIBE",
-            "AZAD"
+            "AZAD",
+            "C2C",
+            "TECHERA"
         ]
     },
     "Electronics": {
@@ -168,7 +170,11 @@
             "RMC",
             "PARTH",
             "TECHNOE",
-            "ADVAIT"
+            "ADVAIT",
+            "TRANSRAILL",
+            "RISHABH",
+            "KECL",
+            "SAAKSHI"
         ]
     },
     "Renewable": {
@@ -186,7 +192,11 @@
             "SAATVIK",
             "VIKRAN",
             "VIVIANA",
-            "KPIGREEN"
+            "KPIGREEN",
+            "WAAREERTL",
+            "VIKRAMSOLR",
+            "SAATVIKGL",
+            "RELTD"
         ]
     },
     "Transformers": {
@@ -199,7 +209,8 @@
             "DANISH",
             "SHILCTECH",
             "YASHHV",
-            "VILASTRANS"
+            "VILASTRANS",
+            "INDOTECH"
         ]
     },
     "Exchange&Brokers": {

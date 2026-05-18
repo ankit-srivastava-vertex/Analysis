@@ -10,28 +10,29 @@ sequence, consolidates their sheets into one unified Excel workbook
 
 WORKFLOW
 --------
-1. Parse CLI args (--no-email, --skip <scenarios>, --no-breadth).
-2. Run 4 scenarios in order:
+1. Parse CLI args (--no-email).
+2. Run 9 scenarios in order:
 
-   a. portfolio_tracker   → portfolio_tracker.run()
-                            Sheets: Positions, Portfolio Summary,
-                                    Sector Exposure, Concentration
-   b. position_health     → position_health.run()
-                            Sheets: Position Health, Action List, Health Notes
-   c. events_calendar     → events_calendar.run()
-                            Sheets: Owned Board Meetings, Owned Corp Actions,
-                                    Owned Announcements, Events Notes
-   d. premarket_dashboard → premarket_dashboard.run()
-                            Sheets: Pre-Market Markets, FX & Commodities,
-                                    Breadth (NIFTY500), Breadth History,
-                                    Pre-Market Notes
-                            Chart : portfolio/premarket_dashboard_chart.html
-                                    (4-panel breadth dashboard)
+   1. portfolio_tracker    → P&L, sector exposure, concentration
+   2. position_health      → DMA/RSI/drawdown technical scan
+   3. sl_target_tracker    → user-defined SL/Target hit alerts
+                             (reads/maintains portfolio/holdings_meta.csv)
+   4. risk_metrics         → portfolio beta, VaR (1d/5d 95%), Sharpe,
+                             max drawdown, per-position vol & beta
+   5. correlation_clusters → return-correlation pairs & greedy clusters
+                             (hidden concentration vs. sector view)
+   6. pledge_promoter      → pledge % + promoter holding red flags
+                             (Tickertape screener API)
+   7. mf_overlap           → crowding from MF holdings overlap
+                             (reads portfolio/mf_holdings.csv)
+   8. events_calendar      → owned-name corp events (NSE)
+   9. premarket_dashboard  → global cues, FX/commodities, NIFTY 500
+                             breadth + 6-month chart
 
    Each scenario is wrapped in try/except — a single failure does not
    abort the pipeline; failures are reported in the email body + summary.
 
-3. Merge all sheets into portfolio_report.xlsx (project root).
+3. Merge all sheets into portfolio_report.xlsx (inside portfolio/).
 4. Send a consolidated email (unless --no-email) using the existing
    email_sender utility (same SMTP config as run_all.py).
 
@@ -120,6 +121,31 @@ def run_premarket():
     return res.get("sheets", {}), res.get("chart")
 
 
+def run_risk_metrics():
+    from portfolio.risk_metrics import run as r_run
+    return r_run().get("sheets", {})
+
+
+def run_correlation_clusters():
+    from portfolio.correlation_clusters import run as c_run
+    return c_run().get("sheets", {})
+
+
+def run_pledge_promoter():
+    from portfolio.pledge_promoter import run as pp_run
+    return pp_run().get("sheets", {})
+
+
+def run_sl_target():
+    from portfolio.sl_target_tracker import run as sl_run
+    return sl_run().get("sheets", {})
+
+
+def run_mf_overlap():
+    from portfolio.mf_overlap import run as mf_run
+    return mf_run().get("sheets", {})
+
+
 # ─── Unified Excel builder ─────────────────────────────────────
 
 def build_unified_excel(all_sheets: dict, output_path: Path):
@@ -153,13 +179,23 @@ def main():
     errors: list = []
 
     runners = [
-        ("portfolio_tracker", "1/4: Portfolio Tracker (P&L, exposure, concentration)",
+        ("portfolio_tracker",   "1/9: Portfolio Tracker (P&L, exposure, concentration)",
          run_portfolio_tracker),
-        ("position_health",   "2/4: Position Health (technical scan)",
+        ("position_health",     "2/9: Position Health (technical scan)",
          run_position_health),
-        ("events_calendar",   "3/4: Events Calendar (owned-name corp events)",
+        ("sl_target",           "3/9: Stop-Loss / Target Monitor",
+         run_sl_target),
+        ("risk_metrics",        "4/9: Risk Metrics (beta, VaR, Sharpe, MDD)",
+         run_risk_metrics),
+        ("correlation_clusters","5/9: Correlation & Cluster Concentration",
+         run_correlation_clusters),
+        ("pledge_promoter",     "6/9: Pledge & Promoter Holding Scan",
+         run_pledge_promoter),
+        ("mf_overlap",          "7/9: Mutual-Fund Overlap (crowding)",
+         run_mf_overlap),
+        ("events_calendar",     "8/9: Events Calendar (owned-name corp events)",
          run_events_calendar),
-        ("premarket",         "4/4: Pre-Market Dashboard (global cues + breadth)",
+        ("premarket",           "9/9: Pre-Market Dashboard (global cues + breadth)",
          run_premarket),
     ]
 

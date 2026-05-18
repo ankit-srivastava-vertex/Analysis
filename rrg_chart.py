@@ -595,7 +595,7 @@ var D=__FIG_DATA__,
     S=__SECTORS__,
     T=__TIMEFRAMES__,
     C=__COLORS__,
-    N=D.length,aT=T[0],sel=new Set(S.filter(function(s){return s.startsWith('C: ')}));
+    N=D.length,aT=T[0],sel=new Set();
 Plotly.newPlot('rrg-chart',D,L,{responsive:true,displayModeBar:true});
 var tD=document.getElementById('tf-btns');
 T.forEach(function(tf,i){
@@ -608,7 +608,7 @@ T.forEach(function(tf,i){
 var sD=document.getElementById('sboxes');
 S.forEach(function(s){
  var l=document.createElement('label'),c=document.createElement('input');
- c.type='checkbox';c.checked=s.startsWith('C: ');
+ c.type='checkbox';c.checked=false;
  c.onchange=function(){if(c.checked)sel.add(s);else sel.delete(s);upd()};
  var d=document.createElement('span');d.className='cd';
  d.style.background=C[s]||'#999';
@@ -623,6 +623,7 @@ function upd(){
  var m=M[aT]||{};
  sel.forEach(function(s){(m[s]||[]).forEach(function(j){v[j]=true})});
  Plotly.restyle('rrg-chart','visible',v)}
+upd();
 })();
 </script></body></html>"""
 

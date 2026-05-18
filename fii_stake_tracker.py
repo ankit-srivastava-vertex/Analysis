@@ -136,6 +136,8 @@ PROJECT_FIELDS = [
     "forInstHldng",      # current FII holding %
     "forInstHldng3M",    # change in FII holding over last 3 months (pp)
     "forInstHldng6M",    # change in FII holding over last 6 months (pp)
+    "forInstHldng9M",    # change in FII holding over last 9 months (pp) — may be None
+    "forInstHldng12M",   # change in FII holding over last 12 months (pp) — may be None
     "lastPrice",         # current close price
     "mrktCapf",          # market cap (₹ Cr)
     "ttmPe",             # TTM PE ratio
@@ -369,14 +371,31 @@ def fetch_fii_stake_data_screener():
 
     df = pd.DataFrame(all_rows)
 
-    # Classify — we only have QoQ change, no 6M change from Screener
-    for idx, row in df.iterrows():
-        fii_pct = row["FII Stake (%)"]
-        chg_3m = row["Change QoQ (pp)"]
-        chg_6m = 0  # not available from Screener
-        df.at[idx, "Category"] = _classify(fii_pct, chg_3m, chg_6m)
+    # Build _raw column so the shared enrichment can update history & classify.
+    # Screener.in only provides QoQ change \u2014 no 6M / 9M / 12M deltas.
+    df["_raw"] = df.apply(
+        lambda r: {
+            "ticker": r.get("Ticker"),
+            "fii_pct": r.get("FII Stake (%)"),
+            "chg_3m": r.get("Change QoQ (pp)"),
+            "chg_6m": None,
+            "chg_9m": None,
+            "chg_12m": None,
+        },
+        axis=1,
+    )
+    df["Change 6M (pp)"] = None
+    df["Change 9M (pp)"] = None
+    df["Change 12M (pp)"] = None
+    df = _enrich_with_streaks(df)
 
-    cat_order = {"New Entry": 0, "Multi-Quarter Increasing": 1, "Increased Stake": 2}
+    cat_order = {
+        "New Entry": 0,
+        "4-Quarter Increasing": 1,
+        "3-Quarter Increasing": 2,
+        "Multi-Quarter Increasing": 3,
+        "Increased Stake": 4,
+    }
     df["_sort"] = df["Category"].map(cat_order)
     df = df.sort_values(["_sort", "Change QoQ (pp)"], ascending=[True, False])
     df = df.drop(columns=["_sort"]).reset_index(drop=True)
@@ -386,25 +405,220 @@ def fetch_fii_stake_data_screener():
 
 # ─── Core logic ──────────────────────────────────────────────────────────────
 
-def _classify(fii_pct, chg_3m, chg_6m):
-    """Classify the FII stake change pattern.
+HISTORY_CSV = os.path.join(SCRIPT_DIR, ".cache", "fii_stake_history.csv")
+SHP_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache", "screener_shp")
+SHP_CACHE_TTL_DAYS = 7
+SHP_REQUEST_DELAY = 0.4
+
+_QTR_MONTH = {"Mar": (3, 31), "Jun": (6, 30), "Sep": (9, 30), "Dec": (12, 31)}
+
+
+def _parse_qtr_label(label):
+    """Convert 'Mar 2024' → datetime.date(2024, 3, 31). Returns None on failure."""
+    try:
+        parts = label.strip().split()
+        if len(parts) != 2:
+            return None
+        m, y = parts
+        mm, dd = _QTR_MONTH[m[:3]]
+        return datetime.date(int(y), mm, dd)
+    except Exception:
+        return None
+
+
+def _fetch_screener_shp(ticker, session):
+    """Fetch full quarterly FII shareholding history for a ticker from Screener.in.
+
+    Returns dict: {quarter_end_date: fii_pct}. Cached on disk for 7 days.
+    No login required — company pages are public.
+    """
+    import json
+    if not ticker:
+        return {}
+    cache_path = os.path.join(SHP_CACHE_DIR, f"{ticker}.json")
+    if os.path.exists(cache_path):
+        age = time.time() - os.path.getmtime(cache_path)
+        if age < SHP_CACHE_TTL_DAYS * 86400:
+            try:
+                with open(cache_path) as f:
+                    raw = json.load(f)
+                return {datetime.date.fromisoformat(k): float(v) for k, v in raw.items()}
+            except Exception:
+                pass
+
+    out = {}
+    for path in (f"/company/{ticker}/consolidated/", f"/company/{ticker}/"):
+        try:
+            r = session.get(f"https://www.screener.in{path}", timeout=15)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            sec = soup.find(id="quarterly-shp")
+            if not sec:
+                continue
+            table = sec.find("table")
+            if not table:
+                continue
+            thead = table.find("thead")
+            tbody = table.find("tbody")
+            if not thead or not tbody:
+                continue
+            headers = [th.get_text(strip=True) for th in thead.find_all("th")][1:]
+            for tr in tbody.find_all("tr"):
+                cells = tr.find_all("td")
+                if not cells:
+                    continue
+                label = cells[0].get_text(strip=True).rstrip("+").strip()
+                if not label.upper().startswith("FII"):
+                    continue
+                for h, c in zip(headers, cells[1:]):
+                    qe = _parse_qtr_label(h)
+                    if qe is None:
+                        continue
+                    v = c.get_text(strip=True).rstrip("%").replace(",", "")
+                    if v and v != "-":
+                        try:
+                            out[qe] = float(v)
+                        except ValueError:
+                            pass
+                break
+            if out:
+                break
+        except Exception:
+            continue
+
+    try:
+        os.makedirs(SHP_CACHE_DIR, exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump({k.isoformat(): v for k, v in out.items()}, f)
+    except Exception:
+        pass
+    return out
+
+
+def _current_quarter_end(today=None):
+    """Most recently completed calendar quarter end."""
+    today = today or datetime.date.today()
+    y, m = today.year, today.month
+    if m <= 3:
+        return datetime.date(y - 1, 12, 31)
+    if m <= 6:
+        return datetime.date(y, 3, 31)
+    if m <= 9:
+        return datetime.date(y, 6, 30)
+    return datetime.date(y, 9, 30)
+
+
+def _shift_quarter(qe, n):
+    """Shift a quarter-end date by n quarters (negative=backward)."""
+    return (pd.Timestamp(qe) + pd.tseries.offsets.QuarterEnd(n)).date()
+
+
+def _load_history():
+    if not os.path.exists(HISTORY_CSV):
+        return pd.DataFrame(columns=["Ticker", "AsOf", "FII_Pct"])
+    try:
+        df = pd.read_csv(HISTORY_CSV)
+        df["AsOf"] = pd.to_datetime(df["AsOf"]).dt.date
+        df["FII_Pct"] = pd.to_numeric(df["FII_Pct"], errors="coerce")
+        return df.dropna(subset=["FII_Pct"])
+    except Exception as e:
+        print(f"  Warning: history file unreadable ({e}); starting fresh.")
+        return pd.DataFrame(columns=["Ticker", "AsOf", "FII_Pct"])
+
+
+def _save_history(df):
+    os.makedirs(os.path.dirname(HISTORY_CSV), exist_ok=True)
+    df = df.sort_values(["Ticker", "AsOf"]).reset_index(drop=True)
+    df.to_csv(HISTORY_CSV, index=False)
+
+
+def _backfill_snapshots(raw_rows, asof_q0):
+    """Derive quarter-end FII% snapshots from current + 3M/6M/9M/12M deltas.
+
+    Each fetched row contributes up to 5 snapshots: Q0, Q-1, Q-2, Q-3, Q-4.
+    Q-3 and Q-4 only if 9M/12M deltas are present.
+    """
+    qe = {n: _shift_quarter(asof_q0, n) for n in (0, -1, -2, -3, -4)}
+    snaps = []
+    for r in raw_rows:
+        t = r.get("ticker")
+        if not t:
+            continue
+        fii = r.get("fii_pct")
+        if fii is None:
+            continue
+        snaps.append((t, qe[0], float(fii)))
+        c3 = r.get("chg_3m")
+        if c3 is not None:
+            snaps.append((t, qe[-1], max(0.0, float(fii) - float(c3))))
+        c6 = r.get("chg_6m")
+        if c6 is not None:
+            snaps.append((t, qe[-2], max(0.0, float(fii) - float(c6))))
+        c9 = r.get("chg_9m")
+        if c9 is not None:
+            snaps.append((t, qe[-3], max(0.0, float(fii) - float(c9))))
+        c12 = r.get("chg_12m")
+        if c12 is not None:
+            snaps.append((t, qe[-4], max(0.0, float(fii) - float(c12))))
+    return pd.DataFrame(snaps, columns=["Ticker", "AsOf", "FII_Pct"])
+
+
+def _merge_history(existing, new_snaps):
+    """Upsert new snapshots into existing history (newer rows win on dup keys)."""
+    if new_snaps.empty:
+        return existing
+    combined = pd.concat([existing, new_snaps], ignore_index=True)
+    combined = combined.sort_values(["Ticker", "AsOf"])
+    combined = combined.drop_duplicates(subset=["Ticker", "AsOf"], keep="last")
+    return combined.reset_index(drop=True)
+
+
+def _build_streak_lookup(history_df, asof_q0):
+    """Return dict: ticker -> streak length (consecutive QoQ increases ending at Q0).
+
+    Streak=1 means FII at Q0 > FII at Q-1.
+    Streak=N means N consecutive quarter-over-quarter increases.
+    """
+    out = {}
+    if history_df.empty:
+        return out
+    for ticker, grp in history_df.groupby("Ticker"):
+        sd = dict(zip(grp["AsOf"], grp["FII_Pct"]))
+        cur = asof_q0
+        streak = 0
+        while cur in sd:
+            prev = _shift_quarter(cur, -1)
+            if prev not in sd:
+                break
+            if sd[cur] > sd[prev]:
+                streak += 1
+                cur = prev
+            else:
+                break
+        out[ticker] = streak
+    return out
+
+
+def _classify(fii_pct, chg_3m, streak):
+    """Classify the FII stake change pattern using streak length.
 
     Returns one of:
-      'New Entry'                — FII had zero holding before this quarter
-      'Multi-Quarter Increasing' — FII has been increasing for > 1 quarter
-      'Increased Stake'          — FII increased stake this quarter only
+      'New Entry'                — FII had near-zero holding before this quarter
+      '4-Quarter Increasing'     — increased for 4+ consecutive quarters
+      '3-Quarter Increasing'     — increased for exactly 3 consecutive quarters
+      'Multi-Quarter Increasing' — increased for exactly 2 consecutive quarters
+      'Increased Stake'          — increased this quarter only
     """
-    # New entry: current holding roughly equals the 3M change
-    # (i.e. previous quarter holding was ~0)
-    prev_qtr = fii_pct - chg_3m
-    if prev_qtr < 0.05:  # practically zero before
+    prev_qtr = (fii_pct or 0) - (chg_3m or 0)
+    if prev_qtr < 0.05:
         return "New Entry"
-
-    # Multi-quarter: 6M change > 3M change AND both positive
-    # means they also increased in the quarter before last
-    if chg_6m > chg_3m and chg_3m > 0 and chg_6m > 0:
+    if streak >= 4:
+        return "4-Quarter Increasing"
+    if streak == 3:
+        return "3-Quarter Increasing"
+    if streak == 2:
         return "Multi-Quarter Increasing"
-
     return "Increased Stake"
 
 
@@ -466,6 +680,8 @@ def _fetch_fii_tickertape():
         fii_pct = ratios.get("forInstHldng", 0) or 0
         chg_3m = ratios.get("forInstHldng3M", 0) or 0
         chg_6m = ratios.get("forInstHldng6M", 0) or 0
+        chg_9m = ratios.get("forInstHldng9M")
+        chg_12m = ratios.get("forInstHldng12M")
         price = ratios.get("lastPrice", None)
         mcap = ratios.get("mrktCapf", None)
         pe = ratios.get("ttmPe", None)
@@ -481,8 +697,6 @@ def _fetch_fii_tickertape():
         de_ratio = ratios.get("dbtEqt", None)
         sma200 = ratios.get("sma200d", None)
         n_shareholders = ratios.get("nShareholders", None)
-
-        category = _classify(fii_pct, chg_3m, chg_6m)
 
         def _r(v, d=2):
             return round(v, d) if v is not None else None
@@ -508,18 +722,123 @@ def _fetch_fii_tickertape():
             "FII Stake (%)": round(fii_pct, 2),
             "Change QoQ (pp)": round(chg_3m, 2),
             "Change 6M (pp)": round(chg_6m, 2),
-            "Category": category,
+            "Change 9M (pp)": _r(chg_9m),
+            "Change 12M (pp)": _r(chg_12m),
             "Sector": sector,
+            "_raw": {
+                "ticker": ticker,
+                "fii_pct": fii_pct,
+                "chg_3m": chg_3m,
+                "chg_6m": chg_6m,
+                "chg_9m": chg_9m,
+                "chg_12m": chg_12m,
+            },
         })
 
     df = pd.DataFrame(rows)
+    df = _enrich_with_streaks(df)
 
-    # Sort: New Entry first, then Multi-Quarter Increasing, then Increased
-    cat_order = {"New Entry": 0, "Multi-Quarter Increasing": 1, "Increased Stake": 2}
+    # Sort: New Entry first, then longest streak, then by QoQ change
+    cat_order = {
+        "New Entry": 0,
+        "4-Quarter Increasing": 1,
+        "3-Quarter Increasing": 2,
+        "Multi-Quarter Increasing": 3,
+        "Increased Stake": 4,
+    }
     df["_sort"] = df["Category"].map(cat_order)
     df = df.sort_values(["_sort", "Change QoQ (pp)"], ascending=[True, False])
     df = df.drop(columns=["_sort"]).reset_index(drop=True)
 
+    return df
+
+
+def _enrich_with_streaks(df):
+    """Update history with new snapshots, fetch full FII history for candidates,
+    compute streak per ticker, classify, and populate 9M/12M deltas from history."""
+    if df.empty:
+        return df
+    asof_q0 = _current_quarter_end()
+    q3 = _shift_quarter(asof_q0, -3)
+    q4 = _shift_quarter(asof_q0, -4)
+
+    raw_rows = df["_raw"].tolist()
+    new_snaps = _backfill_snapshots(raw_rows, asof_q0)
+    history = _load_history()
+    merged = _merge_history(history, new_snaps)
+
+    # First-pass streak (using only Tickertape-derived snapshots + prior history)
+    streaks = _build_streak_lookup(merged, asof_q0)
+    df["Streak (Qtrs)"] = df["Ticker"].map(streaks).fillna(0).astype(int)
+
+    # For candidates with streak >= 2, fetch full quarterly FII history from
+    # Screener.in to determine whether the streak actually extends to 3 or 4+.
+    extend_targets = (
+        df.loc[df["Streak (Qtrs)"] >= 2, "Ticker"].dropna().unique().tolist()
+    )
+    if extend_targets:
+        print(
+            f"  Fetching Screener.in shareholding history for "
+            f"{len(extend_targets)} multi-quarter candidates ..."
+        )
+        shp_session = requests.Session()
+        shp_session.headers.update({"User-Agent": HEADERS["User-Agent"]})
+        extra_snaps = []
+        cached_hits = 0
+        for i, ticker in enumerate(extend_targets, 1):
+            cache_path = os.path.join(SHP_CACHE_DIR, f"{ticker}.json")
+            was_cached = (
+                os.path.exists(cache_path)
+                and (time.time() - os.path.getmtime(cache_path)) < SHP_CACHE_TTL_DAYS * 86400
+            )
+            shp = _fetch_screener_shp(ticker, shp_session)
+            if was_cached:
+                cached_hits += 1
+            else:
+                time.sleep(SHP_REQUEST_DELAY)
+            for qe, v in shp.items():
+                extra_snaps.append((ticker, qe, v))
+            if i % 50 == 0 or i == len(extend_targets):
+                print(f"    {i}/{len(extend_targets)}  (cache hits: {cached_hits})")
+        if extra_snaps:
+            merged = _merge_history(
+                merged,
+                pd.DataFrame(extra_snaps, columns=["Ticker", "AsOf", "FII_Pct"]),
+            )
+            streaks = _build_streak_lookup(merged, asof_q0)
+            df["Streak (Qtrs)"] = df["Ticker"].map(streaks).fillna(0).astype(int)
+
+    _save_history(merged)
+
+    # Populate 9M / 12M deltas from merged history when possible
+    hist_lookup = {(r.Ticker, r.AsOf): r.FII_Pct for r in merged.itertuples(index=False)}
+
+    def _delta(ticker, qn):
+        cur = hist_lookup.get((ticker, asof_q0))
+        prev = hist_lookup.get((ticker, qn))
+        if cur is None or prev is None:
+            return None
+        return round(cur - prev, 2)
+
+    df["Change 9M (pp)"] = df["Ticker"].apply(lambda t: _delta(t, q3))
+    df["Change 12M (pp)"] = df["Ticker"].apply(lambda t: _delta(t, q4))
+
+    df["Category"] = df.apply(
+        lambda r: _classify(
+            r["_raw"].get("fii_pct"),
+            r["_raw"].get("chg_3m"),
+            int(r["Streak (Qtrs)"]),
+        ),
+        axis=1,
+    )
+    df = df.drop(columns=["_raw"])
+    print(
+        f"  History snapshots stored: {len(merged)} "
+        f"({merged['Ticker'].nunique()} tickers, "
+        f"{merged['AsOf'].nunique()} quarter-ends)"
+    )
+    sd = df["Streak (Qtrs)"].value_counts().sort_index()
+    print("  Streak distribution: " + ", ".join(f"{int(k)}Q={int(v)}" for k, v in sd.items()))
     return df
 
 
@@ -529,31 +848,57 @@ def save_to_excel(df, output_prefix):
     """Save FII stake tracker results to Excel."""
     excel_path = os.path.join(SCRIPT_DIR, f"{output_prefix}.xlsx")
 
+    cat_list = [
+        "New Entry",
+        "4-Quarter Increasing",
+        "3-Quarter Increasing",
+        "Multi-Quarter Increasing",
+        "Increased Stake",
+    ]
+    # Per-sheet filters. Streak sheets are CUMULATIVE so a 4Q stock also
+    # appears in the 3Q and 2Q sheets.
+    SHEET_SPECS = [
+        ("New_Entry", lambda d: d[d["Category"] == "New Entry"],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("Multi-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 2],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("3-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 3],
+            ["Change 12M (pp)"]),
+        ("4-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 4],
+            []),
+        ("Increased_Stake", lambda d: d[d["Category"] == "Increased Stake"],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+    ]
+
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        # Summary counts
-        summary_data = {
-            "Category": ["New Entry", "Multi-Quarter Increasing",
-                         "Increased Stake", "Total"],
-            "Count": [
-                len(df[df["Category"] == "New Entry"]),
-                len(df[df["Category"] == "Multi-Quarter Increasing"]),
-                len(df[df["Category"] == "Increased Stake"]),
-                len(df),
-            ],
-        }
-        pd.DataFrame(summary_data).to_excel(
+        # Summary: exclusive Category counts + cumulative streak buckets
+        summary_rows = [(c, len(df[df["Category"] == c])) for c in cat_list]
+        summary_rows += [
+            ("Cumulative streak buckets:", ""),
+            ("Streak >= 2 quarters", int((df["Streak (Qtrs)"] >= 2).sum())),
+            ("Streak >= 3 quarters", int((df["Streak (Qtrs)"] >= 3).sum())),
+            ("Streak >= 4 quarters", int((df["Streak (Qtrs)"] >= 4).sum())),
+            ("Total", len(df)),
+        ]
+        pd.DataFrame(summary_rows, columns=["Category", "Count"]).to_excel(
             writer, sheet_name="Summary", index=False
         )
 
-        # All stocks — full detail
+        # All stocks — full detail (keep every column)
         df.to_excel(writer, sheet_name="FII Stake Increase", index=False)
 
-        # Separate sheets per category
-        for cat in ["New Entry", "Multi-Quarter Increasing", "Increased Stake"]:
-            cat_df = df[df["Category"] == cat]
-            if not cat_df.empty:
-                sheet_name = cat.replace(" ", "_")[:31]  # Excel 31-char limit
-                cat_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        # Per-sheet slices (cumulative for streak sheets) with column trimming
+        for sheet_name, selector, drop_cols in SHEET_SPECS:
+            sub = selector(df)
+            if sub.empty:
+                continue
+            if "Streak (Qtrs)" in sub.columns:
+                sub = sub.sort_values(
+                    ["Streak (Qtrs)", "Change QoQ (pp)"], ascending=[False, False]
+                )
+            drop = [c for c in drop_cols if c in sub.columns]
+            sub = sub.drop(columns=drop)
+            sub.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
         # Auto-fit column widths
         for ws in writer.book.worksheets:
@@ -585,7 +930,13 @@ def run(output_prefix="fii_stake_tracker"):
     print(f"\n{'='*60}")
     print("FII Stake Tracker — Summary")
     print(f"{'='*60}")
-    for cat in ["New Entry", "Multi-Quarter Increasing", "Increased Stake"]:
+    for cat in [
+        "New Entry",
+        "4-Quarter Increasing",
+        "3-Quarter Increasing",
+        "Multi-Quarter Increasing",
+        "Increased Stake",
+    ]:
         count = len(df[df["Category"] == cat])
         print(f"  {cat:30s}: {count:>5}")
     print(f"  {'Total':30s}: {len(df):>5}")

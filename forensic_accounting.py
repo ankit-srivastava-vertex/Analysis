@@ -87,8 +87,10 @@ OUTPUT
 USAGE
 -----
 Individual run:
+    python3 forensic_accounting.py TCS                 # any NSE symbol as argument
+    python3 forensic_accounting.py RELIANCE
     python3 forensic_accounting.py                     # uses COMPANY_SYMBOL set below
-    python3 -c "from forensic_accounting import run; run('RELIANCE')"  # any symbol
+    python3 -c "from forensic_accounting import run; run('RELIANCE')"  # programmatic
 
 Group run (via run_all.py):
     Not part of run_all.py — run independently.
@@ -514,6 +516,7 @@ class FinancialData:
         self.financial_results_filings = []  # quarterly P&L PDFs from NSE
         self.annual_report_filings = []      # annual report PDFs from NSE
         self.filings_summary = {}            # counts per source
+        self.order_book_history = []         # [{date, value_crore, type, context}]
 
 
 # ── Resolved-ticker cache so we only resolve once per symbol per process ───
@@ -2299,6 +2302,261 @@ def fetch_annual_report_filings(symbol, max_filings=5):
             print("    No annual report filings found")
     except Exception as e:
         print("    Annual report fetch failed: %s" % e)
+    return results
+
+
+# ── Order Book Extraction from NSE Filings ──────────────────────────────────
+# Companies in capital-goods, defence, infra, and EPC sectors report order-book
+# / order-inflow data in their press releases and investor presentations filed
+# with the exchange.  We scan those PDFs for order-book mentions and extract
+# the Rs Crore values to build a quarterly/annual time-series for YoY / QoQ
+# comparison.  Companies that don't report order books (IT, pharma, FMCG)
+# will simply return an empty list.
+
+# Note: ` (backtick) is included because some PDFs render ₹ as backtick.
+_OB_RUPEE = r'(?:Rs\.?|₹|`|INR)'
+
+_OB_LAKH_CRORE_RE = re.compile(
+    _OB_RUPEE + r'\s*([\d,.\s]+?)\s*lakh\s*crore', re.I)
+_OB_CRORE_RE = re.compile(
+    _OB_RUPEE + r'\s*([\d,.\s]+?)\s*(?:crores?|crs?\.?)\b', re.I)
+_OB_BILLION_RE = re.compile(
+    _OB_RUPEE + r'\s*([\d,.\s]+?)\s*(?:billion|bn\.?)\b', re.I)
+# "X lakh" (NOT "lakh crore") → divide by 100 to get crore
+_OB_LAKH_RE = re.compile(
+    _OB_RUPEE + r'\s*([\d,.\s]+?)\s*(?:lakh|lakhs)\b(?!\s*crore)', re.I)
+# Fallback: number + crore WITHOUT currency prefix (safe inside order-book context)
+# Use tighter pattern (no spaces in number) to avoid table artifacts
+_OB_CRORE_NOPFX_RE = re.compile(
+    r'([\d,.]{3,})\s*(?:crores?|crs?\.?)\b', re.I)
+_OB_LAKH_NOPFX_RE = re.compile(
+    r'([\d,.]{3,})\s*(?:lakh|lakhs)\b(?!\s*crore)', re.I)
+_OB_PLAIN_RE = re.compile(
+    r'(?:stood\s*at|of\s*(?:about|approx\.?|around|~)?|at\s*(?:about|approx\.?|around|~)?)\s*'
+    + _OB_RUPEE + r'?\s*([\d,.\s]{4,})', re.I)
+
+
+def _parse_ob_number(raw):
+    """Parse a number string that may have spaces inside (PDF artefact)."""
+    cleaned = re.sub(r'\s+', '', raw).replace(',', '')
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _extract_ob_value(text):
+    """Extract order-book value in Rs Crore from a text snippet."""
+    text = re.sub(r'\s+', ' ', text)
+
+    # "X,XX,XXX crore" — check BEFORE lakh crore to avoid false matches
+    m = _OB_CRORE_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and 10 < v < 500000:  # sanity: 10 – 5 lakh crore
+            return v
+
+    # "X.XX lakh crore" -> multiply by 1,00,000
+    m = _OB_LAKH_CRORE_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and v < 50:  # sanity: < 50 lakh crore (~$600B)
+            return v * 100000
+
+    # "X,XXX billion" (LT style) -> ×100 to get approx crore
+    m = _OB_BILLION_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and v > 1:
+            return v * 100  # 1 billion ≈ 100 crore
+
+    # "X,XX,XXX lakh" (NOT lakh crore) → ÷100 to get crore
+    m = _OB_LAKH_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and v > 100:  # sanity: at least 100 lakh = 1 crore
+            return v / 100
+
+    # Fallback: "X,XXX crore" without currency prefix (safe in OB context)
+    m = _OB_CRORE_NOPFX_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and 10 < v < 500000:  # tighter bounds for no-prefix match
+            return v
+
+    # Fallback: "X,XX,XXX lakh" without currency prefix → ÷100
+    m = _OB_LAKH_NOPFX_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and v > 100:
+            return v / 100
+
+    # Plain large number near "stood at" / "of"
+    m = _OB_PLAIN_RE.search(text)
+    if m:
+        v = _parse_ob_number(m.group(1))
+        if v and 100 < v < 500000:
+            return v
+
+    return None
+
+
+def _extract_order_book_from_pdf(pdf_bytes):
+    """Extract order-book values from a single PDF.
+    Returns list of dicts: {value_crore, type, context}.
+    """
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        text = ""
+        for page in reader.pages[:15]:
+            text += (page.extract_text() or "") + "\n"
+    except Exception:
+        return []
+
+    # Normalize line breaks that split words
+    text = re.sub(r'(\w)\n(\w)', r'\1 \2', text)
+    text = re.sub(r'\n+', '\n', text)
+
+    results = []
+    seen_vals = set()
+
+    # Order Book / Order Backlog mentions
+    for m in re.finditer(
+        r'(?i)((?:order\s*book|order\s*backlog|unexecuted\s*order).{0,300})', text
+    ):
+        context = m.group(1)
+        val = _extract_ob_value(context)
+        if val and val not in seen_vals:
+            seen_vals.add(val)
+            results.append({
+                "value_crore": val,
+                "type": "book",
+                "context": re.sub(r'\s+', ' ', context[:200]).strip(),
+            })
+
+    # Order Inflow mentions (separate metric)
+    for m in re.finditer(r'(?i)(order\s*inflow.{0,300})', text):
+        context = m.group(1)
+        val = _extract_ob_value(context)
+        if val and val not in seen_vals:
+            seen_vals.add(val)
+            results.append({
+                "value_crore": val,
+                "type": "inflow",
+                "context": re.sub(r'\s+', ' ', context[:200]).strip(),
+            })
+
+    return results
+
+
+def fetch_order_book_from_filings(symbol, max_pdfs=60):
+    """Fetch order-book history from NSE filings (press releases, investor
+    presentations, financial results, credit ratings, annual reports, board
+    meeting outcomes).
+    Returns list of dicts: {date, value_crore, type, context} sorted newest-first.
+    """
+    print("  Fetching order book data from NSE filings...")
+    all_filings = []
+    seen_urls = set()
+    try:
+        session = _nse_session()
+        # Collect filing metadata from ALL categories (metadata is cheap)
+        for subject in ("Press Release", "Investor Presentation",
+                        "Outcome of Board Meeting", "Financial Results",
+                        "Credit Rating", "Annual Report",
+                        "Investor/Analyst Meet", "Updates"):
+            cache_key = "ob_%s_%s" % (symbol, subject.replace(" ", "_"))
+            filings = _nse_get_json(session,
+                "https://www.nseindia.com/api/corporate-announcements",
+                params={"index": "equities", "symbol": symbol, "subject": subject},
+                cache_key=cache_key,
+            )
+            if not filings or not isinstance(filings, list):
+                continue
+            for item in filings[:10]:
+                pdf_url = item.get("attchmntFile", "")
+                if not pdf_url or pdf_url in seen_urls:
+                    continue
+                seen_urls.add(pdf_url)
+                all_filings.append({
+                    "date": item.get("an_dt", "")[:11],
+                    "subject": item.get("desc", subject)[:60],
+                    "pdf_url": pdf_url,
+                })
+
+        # Also scan annual reports from the dedicated endpoint
+        ar_data = _nse_get_json(session,
+            "https://www.nseindia.com/api/annual-reports",
+            params={"index": "equities", "symbol": symbol},
+            cache_key="ob_ar_%s" % symbol,
+        )
+        if ar_data and isinstance(ar_data, dict):
+            for item in (ar_data.get("data") or [])[:3]:
+                pdf_url = item.get("fileName") or ""
+                if pdf_url and pdf_url not in seen_urls:
+                    seen_urls.add(pdf_url)
+                    year = item.get("fromYr") or item.get("toYr") or ""
+                    all_filings.append({
+                        "date": "01-Apr-%s" % year if year else "",
+                        "subject": "Annual Report FY%s" % year,
+                        "pdf_url": pdf_url,
+                    })
+    except Exception as e:
+        print("    Order book fetch failed: %s" % e)
+        return []
+
+    if not all_filings:
+        print("    No filings to scan for order book")
+        return []
+
+    # Sort newest-first before scanning (prioritise recent filings)
+    def _filing_sort(f):
+        try:
+            return datetime.datetime.strptime(f["date"].strip(), "%d-%b-%Y")
+        except Exception:
+            return datetime.datetime(1970, 1, 1)
+    all_filings.sort(key=_filing_sort, reverse=True)
+
+    results = []
+    seen_values = set()
+    pdfs_scanned = 0
+    for filing in all_filings:
+        if pdfs_scanned >= max_pdfs:
+            break
+        try:
+            pdf_bytes = _nse_download_pdf(session, filing["pdf_url"])
+            if not pdf_bytes:
+                continue
+            pdfs_scanned += 1
+            ob_entries = _extract_order_book_from_pdf(pdf_bytes)
+            for entry in ob_entries:
+                # De-duplicate: skip if we already have this exact value
+                # (same filing may be scanned twice via different subjects)
+                val_key = (round(entry["value_crore"], -1), entry["type"])
+                if val_key in seen_values:
+                    continue
+                seen_values.add(val_key)
+                entry["date"] = filing["date"]
+                entry["source"] = filing["subject"]
+                results.append(entry)
+        except Exception:
+            continue
+
+    # Sort newest-first by date
+    def _date_sort_key(d):
+        try:
+            return datetime.datetime.strptime(d["date"].strip(), "%d-%b-%Y")
+        except Exception:
+            return datetime.datetime(1970, 1, 1)
+    results.sort(key=_date_sort_key, reverse=True)
+
+    if results:
+        book_entries = [r for r in results if r["type"] == "book"]
+        inflow_entries = [r for r in results if r["type"] == "inflow"]
+        print("    Order book: %d data points (%d book, %d inflow)" % (
+            len(results), len(book_entries), len(inflow_entries)))
+    else:
+        print("    No order book data found in filings")
     return results
 
 
@@ -6366,6 +6624,110 @@ class DeepFundamentalAnalyzer:
         print("    Agencies: %d | Trajectory: %s | Inv. Grade: %s" % (len(agencies), trajectory, is_ig))
 
     # ─────────────────────────────────────────────────────────────────────────
+    # ORDER BOOK ANALYSIS (YoY / QoQ)
+    # ─────────────────────────────────────────────────────────────────────────
+    def order_book_analysis(self):
+        """Analyse order-book history extracted from NSE filings.
+        Computes YoY and QoQ changes for both order-book position and
+        order inflows (when available).
+        """
+        print("  Order Book Analysis...")
+        ob = self.d.order_book_history
+        if not ob:
+            self.results["order_book"] = {"status": "no_data"}
+            return
+
+        book_entries = [e for e in ob if e.get("type") == "book"]
+        inflow_entries = [e for e in ob if e.get("type") == "inflow"]
+
+        def _parse_date(d):
+            try:
+                return datetime.datetime.strptime(d.strip(), "%d-%b-%Y")
+            except Exception:
+                return None
+
+        def _compute_changes(entries):
+            """Given a newest-first list, compute YoY & QoQ where possible."""
+            if not entries:
+                return {}
+            latest = entries[0]
+            latest_dt = _parse_date(latest.get("date", ""))
+            latest_val = latest["value_crore"]
+
+            result = {
+                "latest_value": latest_val,
+                "latest_date": latest.get("date", ""),
+                "n_datapoints": len(entries),
+                "entries": entries[:8],
+            }
+
+            if len(entries) < 2:
+                return result
+
+            qoq_pct = None
+            yoy_pct = None
+            prev_entry = None
+            yoy_entry = None
+
+            for e in entries[1:]:
+                e_dt = _parse_date(e.get("date", ""))
+                if not e_dt or not latest_dt:
+                    continue
+                diff_days = (latest_dt - e_dt).days
+                # QoQ: 60-150 days apart
+                if 60 <= diff_days <= 150 and qoq_pct is None:
+                    if e["value_crore"] > 0:
+                        qoq_pct = (latest_val / e["value_crore"] - 1) * 100
+                        prev_entry = e
+                # YoY: 300-450 days apart
+                if 300 <= diff_days <= 450 and yoy_pct is None:
+                    if e["value_crore"] > 0:
+                        yoy_pct = (latest_val / e["value_crore"] - 1) * 100
+                        yoy_entry = e
+
+            result["qoq_pct"] = qoq_pct
+            result["qoq_prev"] = prev_entry
+            result["yoy_pct"] = yoy_pct
+            result["yoy_prev"] = yoy_entry
+            return result
+
+        result = {"status": "computed"}
+        if book_entries:
+            result["book"] = _compute_changes(book_entries)
+        if inflow_entries:
+            result["inflow"] = _compute_changes(inflow_entries)
+
+        # Generate signals
+        for key, label in [("book", "Order Book"), ("inflow", "Order Inflow")]:
+            info = result.get(key, {})
+            yoy = info.get("yoy_pct")
+            if yoy is not None:
+                if yoy > 15:
+                    self.moat_signals.append("%s growing %+.0f%% YoY" % (label, yoy))
+                elif yoy < -10:
+                    self.risk_factors.append("%s declining %+.0f%% YoY" % (label, yoy))
+
+        self.results["order_book"] = result
+
+        # Print summary
+        bk = result.get("book", {})
+        if bk:
+            parts = ["Book: ₹%.0f Cr" % bk.get("latest_value", 0)]
+            if bk.get("yoy_pct") is not None:
+                parts.append("YoY %+.1f%%" % bk["yoy_pct"])
+            if bk.get("qoq_pct") is not None:
+                parts.append("QoQ %+.1f%%" % bk["qoq_pct"])
+            print("    %s" % " | ".join(parts))
+        inf = result.get("inflow", {})
+        if inf:
+            parts = ["Inflow: ₹%.0f Cr" % inf.get("latest_value", 0)]
+            if inf.get("yoy_pct") is not None:
+                parts.append("YoY %+.1f%%" % inf["yoy_pct"])
+            print("    %s" % " | ".join(parts))
+        if not bk and not inf:
+            print("    No order book data available")
+
+    # ─────────────────────────────────────────────────────────────────────────
     # RUN ALL DEEP ANALYSES
     # ─────────────────────────────────────────────────────────────────────────
     def run_all(self, documents_dir=None):
@@ -6400,6 +6762,7 @@ class DeepFundamentalAnalyzer:
         self.institutional_holding_analysis()
         self.corporate_actions_analysis()
         self.credit_rating_intelligence()
+        self.order_book_analysis()
 
         # Qualitative / NLP analysis
         self.analyze_concall_transcripts()
@@ -6438,6 +6801,9 @@ def _latin(text):
 class ForensicReport(FPDF):
     """Generate the forensic accounting PDF report."""
 
+    # Font paths (Arial as Calibri substitute — metrically similar)
+    _FONT_DIR = "/System/Library/Fonts/Supplemental"
+
     def __init__(self, company, data, analyzer):
         super().__init__()
         self.company = company
@@ -6447,39 +6813,71 @@ class ForensicReport(FPDF):
         self.info = data.info
         self.set_auto_page_break(auto=True, margin=15)
         self._w = 190  # effective page width (A4 - margins)
+        self._last_section_title = ""  # track section name for end separator
+        self._section_num = 0  # auto-increment section numbering
+        self._subsection_num = 0  # resets per section
+
+        # Register Calibri font family (using Arial TTF as metric-compatible substitute)
+        self.add_font("Calibri", "", os.path.join(self._FONT_DIR, "Arial.ttf"))
+        self.add_font("Calibri", "B", os.path.join(self._FONT_DIR, "Arial Bold.ttf"))
+        self.add_font("Calibri", "I", os.path.join(self._FONT_DIR, "Arial Italic.ttf"))
+        self.add_font("Calibri", "BI", os.path.join(self._FONT_DIR, "Arial Bold Italic.ttf"))
 
     def header(self):
         if self.page_no() > 1:
-            self.set_font("Helvetica", "I", 8)
+            self.set_font("Calibri", "I", 8)
             self.set_text_color(*C_GRAY)
             name = self.info.get("shortName", self.company)
-            self.cell(0, 5, _latin("Forensic Analysis: %s" % name), align="L")
-            self.cell(0, 5, _latin("Page %d" % self.page_no()), align="R", new_x="LMARGIN", new_y="NEXT")
+            self.cell(0, 5, _latin("Fundamental & Forensic Analysis: %s" % name), align="R", new_x="LMARGIN", new_y="NEXT")
             self.line(10, self.get_y(), 200, self.get_y())
             self.ln(3)
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("Helvetica", "I", 7)
+        self.set_font("Calibri", "I", 7)
         self.set_text_color(*C_GRAY)
         self.cell(0, 5, _latin("Generated on %s | Data sourced from BSE/NSE via yfinance | For research purposes only" %
                                 datetime.datetime.now().strftime("%d-%b-%Y %H:%M")),
-                  align="C")
+                  align="L")
+        self.cell(0, 5, _latin("Page %d" % self.page_no()), align="R")
+
+    def _section_end(self):
+        """Draw a prominent separator marking the end of the previous section."""
+        if self._last_section_title:
+            self.ln(4)
+            y = self.get_y()
+            # Bold dark separator line
+            self.set_fill_color(44, 62, 80)
+            self.rect(10, y, 190, 1.2, 'F')
+            self.set_text_color(0, 0, 0)
+            self.ln(8)
 
     def _section(self, title):
-        """Add a coloured section header (dark navy bar — distinct from
-        blue table headers below it to avoid visual confusion).
-        Also registers the section in the PDF outline / TOC so it can be
-        clicked from the Table of Contents."""
+        """Add a numbered section header with clear visual hierarchy.
+        Each section starts on a new page with a prominent header bar.
+        Also registers the section in the PDF outline / TOC."""
+        # Increment section number, reset subsection counter
+        self._section_num += 1
+        self._subsection_num = 0
+        self._last_section_title = title
+        # Start a new page for each major section (skip if already at top of page)
+        if self.get_y() > 25:
+            self.add_page()
         # Register with fpdf2's outline (powers both TOC and PDF bookmarks)
+        numbered_title = "%d. %s" % (self._section_num, title)
         try:
-            self.start_section(_latin(title), level=0)
+            self.start_section(_latin(numbered_title), level=0)
         except Exception:
             pass
-        self.set_font("Helvetica", "B", 13)
+        # Dark navy full-width header bar with number
         self.set_fill_color(*C_DARK)
         self.set_text_color(*C_WHITE)
-        self.cell(0, 9, _latin("  " + title), fill=True, new_x="LMARGIN", new_y="NEXT")
+        self.set_font("Calibri", "B", 11)
+        self.cell(0, 5.5, _latin("  %d.  %s" % (self._section_num, title)),
+                  fill=True, new_x="LMARGIN", new_y="NEXT")
+        # Accent underline
+        self.set_fill_color(*C_BLUE)
+        self.rect(10, self.get_y(), 190, 0.5, 'F')
         self.ln(3)
         self.set_text_color(0, 0, 0)
 
@@ -6488,118 +6886,170 @@ class ForensicReport(FPDF):
         Each entry is auto-linked to its target page by fpdf2."""
         toc_pages_reserved = getattr(self, "_toc_pages_reserved", 2)
         start_page = pdf.page_no()
+        # Disable auto page break — we'll handle manually
+        pdf.set_auto_page_break(auto=False)
+        max_y = 287  # hard limit before footer area
 
         # Title bar
-        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_font("Calibri", "B", 11)
         pdf.set_fill_color(*C_DARK)
         pdf.set_text_color(*C_WHITE)
-        pdf.cell(0, 12, _latin("  Table of Contents"), fill=True, new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(4)
+        pdf.cell(0, 5.5, _latin("  TABLE OF CONTENTS"), fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
         pdf.set_text_color(0, 0, 0)
 
-        pdf.set_font("Helvetica", "I", 9)
-        pdf.set_text_color(*C_GRAY)
-        pdf.multi_cell(0, 4,
-            _latin("Click any entry below to jump directly to that section. "
-                   "All section headings throughout the report are also bookmarked "
-                   "in the PDF outline pane."),
-            new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(3)
-
-        # Entries
-        for entry in outline:
+        # Hierarchical entries with numbering — compact to fit in reserved pages
+        for i, entry in enumerate(outline):
             level = getattr(entry, "level", 0)
             name = getattr(entry, "name", "")
             page = getattr(entry, "page_number", 1)
-            indent = 6 + level * 6
+
+            # Indentation and sizing based on level
             if level == 0:
-                pdf.set_font("Helvetica", "B", 10)
+                indent = 12
+                pdf.set_font("Calibri", "B", 8.5)
+                row_h = 5
             else:
-                pdf.set_font("Helvetica", "", 9)
+                indent = 20
+                pdf.set_font("Calibri", "", 7.5)
+                row_h = 4.2
+
+            # Manual page break if near bottom
+            if pdf.get_y() + row_h > max_y:
+                pdf.add_page()
+
+            # Light background for main sections
+            if level == 0:
+                pdf.set_fill_color(240, 243, 247)
+                pdf.rect(10, pdf.get_y(), 190, row_h, 'F')
 
             link = pdf.add_link()
             pdf.set_link(link, page=page)
 
             pdf.set_x(indent)
-            title_w = pdf._w - indent - 15
-            pdf.cell(title_w, 6, _latin(name), border=0, link=link, align="L")
-            pdf.set_text_color(*C_BLUE)
-            pdf.cell(15, 6, str(page), border=0, link=link, align="R",
+            title_w = 165 - indent
+            pdf.set_text_color(*C_DARK)
+            pdf.cell(title_w, row_h, _latin(name), border=0, link=link, align="L")
+            pdf.set_font("Calibri", "B" if level == 0 else "", 8.5 if level == 0 else 7.5)
+            pdf.set_text_color(*C_BLUE if level == 0 else (120, 120, 120))
+            pdf.cell(15, row_h, str(page), border=0, link=link, align="R",
                      new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(0, 0, 0)
 
+        # Restore auto page break
+        pdf.set_auto_page_break(auto=True, margin=15)
+
         # Pad with blank pages so TOC spans exactly the reserved page count
-        # (fpdf2 requires this).
         used = pdf.page_no() - start_page + 1
         while used < toc_pages_reserved:
             pdf.add_page()
             used += 1
 
     def _subsection(self, title):
-        self.set_font("Helvetica", "B", 11)
+        # Ensure space for subsection header
+        remaining = self.h - self.get_y() - self.b_margin
+        if remaining < 30:
+            self.add_page()
+        self._subsection_num += 1
+        sub_num = "%d.%d" % (self._section_num, self._subsection_num)
+        # Register subsection in TOC
+        try:
+            self.start_section(_latin("%s %s" % (sub_num, title)), level=1)
+        except Exception:
+            pass
+        self.ln(2)
+        y = self.get_y()
+        # Light background strip for subsection
+        self.set_fill_color(235, 240, 248)
+        self.rect(10, y, 190, 5.5, 'F')
+        # Blue left accent bar
+        self.set_fill_color(*C_BLUE)
+        self.rect(10, y, 3, 5.5, 'F')
+        # Numbered subsection title
+        self.set_xy(15, y + 0.2)
+        self.set_font("Calibri", "B", 9)
+        self.set_text_color(41, 128, 185)
+        self.cell(12, 5, _latin(sub_num), align="L")
         self.set_text_color(*C_DARK)
-        self.cell(0, 7, _latin(title), new_x="LMARGIN", new_y="NEXT")
-        self.ln(1)
+        self.cell(0, 5, _latin(title), new_x="LMARGIN", new_y="NEXT")
+        self.ln(2)
         self.set_text_color(0, 0, 0)
 
     def _intro(self, text):
         """Plain-English one-paragraph explainer placed under a section heading
         so a non-finance reader can grasp what the section is about."""
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(*C_GRAY)
-        self.multi_cell(0, 4, _latin(text), new_x="LMARGIN", new_y="NEXT")
+        # Light background box for the intro text
+        self.set_fill_color(245, 248, 250)
+        self.set_font("Calibri", "I", 8)
+        self.set_text_color(80, 90, 100)
+        x = self.get_x()
+        y = self.get_y()
+        self.set_x(12)
+        self.multi_cell(186, 4, _latin(text), new_x="LMARGIN", new_y="NEXT", fill=True)
         self.set_text_color(0, 0, 0)
-        self.ln(2)
+        self.ln(3)
 
     def _table(self, headers, rows, col_widths=None, align=None):
-        """Render a data table with alternating row colours."""
+        """Render a data table with clean modern styling."""
         if col_widths is None:
             col_widths = [self._w / len(headers)] * len(headers)
         if align is None:
             align = ["C"] * len(headers)
 
-        # Header row
-        self.set_font("Helvetica", "B", 8)
-        self.set_fill_color(*C_BLUE)
+        # Header row - dark background, white text
+        self.set_font("Calibri", "B", 8)
+        self.set_fill_color(52, 73, 94)
         self.set_text_color(*C_WHITE)
+        self.set_draw_color(52, 73, 94)
         for i, h in enumerate(headers):
-            self.cell(col_widths[i], 7, _latin(h), border=1, fill=True, align="C")
+            self.cell(col_widths[i], 5.5, _latin(h), border=1, fill=True, align="C")
         self.ln()
 
-        # Data rows
-        self.set_font("Helvetica", "", 8)
-        self.set_text_color(0, 0, 0)
+        # Data rows - alternating with subtle borders
+        self.set_font("Calibri", "", 8)
+        self.set_text_color(30, 30, 30)
+        self.set_draw_color(200, 200, 200)
         for r, row in enumerate(rows):
             fill = r % 2 == 0
             if fill:
-                self.set_fill_color(*C_LIGHT)
+                self.set_fill_color(248, 249, 250)
+            else:
+                self.set_fill_color(255, 255, 255)
             for i, val in enumerate(row):
-                self.cell(col_widths[i], 6, _latin(str(val)), border=1,
-                          fill=fill, align=align[i])
+                self.cell(col_widths[i], 6, _latin(str(val)), border="LR" if r < len(rows)-1 else 1,
+                          fill=True, align=align[i])
             self.ln()
-        self.ln(2)
+        # Bottom border
+        self.set_draw_color(52, 73, 94)
+        self.line(self.l_margin, self.get_y(), self.l_margin + sum(col_widths), self.get_y())
+        self.set_draw_color(0, 0, 0)
+        self.set_text_color(0, 0, 0)
+        self.ln(3)
 
     def _metric(self, label, value, color=None):
         """Single metric row."""
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
         self.set_text_color(0, 0, 0)
         self.cell(80, 6, _latin(label))
         if color:
             self.set_text_color(*color)
-        self.set_font("Helvetica", "B", 9)
+        self.set_font("Calibri", "B", 9)
         self.cell(0, 6, _latin(str(value)), new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
 
     def _score_box(self, label, score_text, color):
-        """Coloured score box."""
-        x = self.get_x(); y = self.get_y()
+        """Coloured score box — full width, modern pill-style design."""
         self.set_fill_color(*color)
         self.set_text_color(*C_WHITE)
-        self.set_font("Helvetica", "B", 10)
-        self.cell(60, 10, _latin(label), fill=True, align="C")
-        self.cell(30, 10, _latin(score_text), fill=True, align="C",
-                  new_x="LMARGIN", new_y="NEXT")
+        self.set_font("Calibri", "B", 9)
+        # Full-width bar
+        y = self.get_y()
+        self.rect(10, y, 190, 5.5, 'F')
+        self.set_xy(12, y + 0.2)
+        self.cell(95, 5, _latin(label), align="L")
+        self.set_font("Calibri", "B", 10)
+        self.cell(83, 5, _latin(score_text), align="R")
+        self.set_xy(10, y + 5.5)
         self.set_text_color(0, 0, 0)
         self.ln(2)
 
@@ -6611,7 +7061,7 @@ class ForensicReport(FPDF):
         else:
             self.set_text_color(*C_GREEN)
             prefix = "[+] "
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
         self.multi_cell(0, 5, _latin(prefix + text), new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
 
@@ -6621,7 +7071,7 @@ class ForensicReport(FPDF):
         if remaining < min_space:
             self.add_page()
         else:
-            self.ln(4)
+            self.ln(2)
 
     # ── PAGE BUILDERS ────────────────────────────────────────────────────────
 
@@ -6629,26 +7079,24 @@ class ForensicReport(FPDF):
         """Title page."""
         self.add_page()
         self.ln(40)
-        self.set_font("Helvetica", "B", 28)
+        self.set_font("Calibri", "B", 24)
         self.set_text_color(*C_DARK)
-        self.cell(0, 15, "FORENSIC ACCOUNTING", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_font("Helvetica", "B", 22)
-        self.cell(0, 12, "ANALYSIS REPORT", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 15, "Fundamental & Forensic Analysis Report", align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(10)
 
         # Company name
         name = self.info.get("longName", self.info.get("shortName", self.company))
-        self.set_font("Helvetica", "B", 20)
+        self.set_font("Calibri", "B", 20)
         self.set_text_color(*C_BLUE)
         self.cell(0, 12, _latin(name), align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_font("Helvetica", "", 14)
+        self.set_font("Calibri", "", 14)
         self.set_text_color(*C_GRAY)
         self.cell(0, 8, _latin("NSE: %s" % self.company), align="C", new_x="LMARGIN", new_y="NEXT")
         self.ln(10)
 
         # Key info
         self.set_text_color(*C_DARK)
-        self.set_font("Helvetica", "", 11)
+        self.set_font("Calibri", "", 11)
         lines = [
             "Sector: %s" % self.info.get("sectorDisp", "N/A"),
             "Industry: %s" % self.info.get("industryDisp", "N/A"),
@@ -6668,13 +7116,13 @@ class ForensicReport(FPDF):
         color = C_GREEN if score >= 60 else C_YELLOW if score >= 45 else C_RED
         self.set_fill_color(*color)
         self.set_text_color(*C_WHITE)
-        self.set_font("Helvetica", "B", 16)
-        self.cell(0, 14, _latin("  Overall Score: %.0f / 100   |   Recommendation: %s  " % (score, rec)),
+        self.set_font("Calibri", "B", 10)
+        self.cell(0, 5.5, _latin("  Overall Score: %.0f / 100   |   Recommendation: %s  " % (score, rec)),
                   fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
 
         self.ln(15)
-        self.set_font("Helvetica", "I", 8)
+        self.set_font("Calibri", "I", 8)
         self.set_text_color(*C_GRAY)
         self.cell(0, 5, "DISCLAIMER: This report is for educational/research purposes only. Not financial advice.",
                   align="C", new_x="LMARGIN", new_y="NEXT")
@@ -6689,16 +7137,18 @@ class ForensicReport(FPDF):
         if not important:
             return
 
-        self.add_page()
+        # Only add page if we're not already at the top of a fresh page
+        if self.get_y() > 30:
+            self.add_page()
         self.set_fill_color(*C_RED)
         self.set_text_color(*C_WHITE)
-        self.set_font("Helvetica", "B", 13)
-        self.cell(0, 9, _latin("  KEY RED FLAGS — READ FIRST"), fill=True,
+        self.set_font("Calibri", "B", 9)
+        self.cell(0, 5.5, _latin("  KEY RED FLAGS — READ FIRST"), fill=True,
                   new_x="LMARGIN", new_y="NEXT")
-        self.ln(4)
+        self.ln(3)
         self.set_text_color(0, 0, 0)
 
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
         self.multi_cell(0, 5, _latin(
             "The following critical and major red flags were detected. "
             "These are the most important concerns an investor should evaluate "
@@ -6708,102 +7158,203 @@ class ForensicReport(FPDF):
 
         for flag_text, severity in critical:
             self.set_text_color(*C_RED)
-            self.set_font("Helvetica", "B", 10)
+            self.set_font("Calibri", "B", 10)
             self.multi_cell(0, 6, _latin("[CRITICAL] " + flag_text),
                             new_x="LMARGIN", new_y="NEXT")
         for flag_text, severity in major:
             self.set_text_color(200, 80, 0)
-            self.set_font("Helvetica", "B", 9)
+            self.set_font("Calibri", "B", 9)
             self.multi_cell(0, 5, _latin("[MAJOR] " + flag_text),
                             new_x="LMARGIN", new_y="NEXT")
 
         self.set_text_color(0, 0, 0)
         self.ln(3)
-        self.set_font("Helvetica", "I", 8)
+        self.set_font("Calibri", "I", 8)
         self.set_text_color(*C_GRAY)
         self.cell(0, 5, _latin("Detailed analysis of each concern follows in subsequent sections."),
                   new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
 
     def add_executive_summary(self):
-        """Page 2: Executive summary with scores and flags overview."""
-        self._check_page_break(80)
+        """Comprehensive executive summary — complete A-Z snapshot of the company.
+        A reader should get full understanding without reading the rest."""
         self._section("EXECUTIVE SUMMARY")
 
         overall = self.results.get("overall", {})
+        info = self.info
+        score = overall.get("final_score", 0)
+        rec = overall.get("recommendation", "N/A")
 
-        # Score boxes
+        # ── 1. Verdict Banner ──
+        color = C_GREEN if score >= 60 else C_YELLOW if score >= 45 else C_RED
+        self._score_box("OVERALL FORENSIC SCORE", "%.0f / 100  |  %s" % (score, rec), color)
+        self.ln(2)
+
+        # ── 2. Company Snapshot ──
+        self._subsection("Company Snapshot")
+        name = info.get("longName", info.get("shortName", self.company))
+        sector = info.get("sectorDisp", "N/A")
+        industry = info.get("industryDisp", "N/A")
+        mcap = info.get("marketCap", 0)
+        mcap_str = "Rs. {:,.0f} Cr".format(mcap / 1e7) if mcap else "N/A"
+        cmp = info.get("currentPrice", 0)
+        pe = info.get("trailingPE", 0)
+        pb = info.get("priceToBook", 0)
+        ev_ebitda = info.get("enterpriseToEbitda", 0)
+        hi52 = info.get("fiftyTwoWeekHigh", 0)
+        lo52 = info.get("fiftyTwoWeekLow", 0)
+        self.set_font("Calibri", "", 9)
+        snap = "%s | %s | %s | MCap: %s | CMP: Rs.%.0f | PE: %.1f | PB: %.1f | EV/EBITDA: %.1f" % (
+            name, sector, industry, mcap_str, cmp, pe or 0, pb or 0, ev_ebitda or 0)
+        self.multi_cell(0, 5, _latin(snap), new_x="LMARGIN", new_y="NEXT")
+        if hi52 and lo52 and cmp:
+            pct_from_hi = ((cmp - hi52) / hi52) * 100 if hi52 else 0
+            self.set_font("Calibri", "", 8)
+            self.cell(0, 4, _latin("52W Range: Rs.%.0f - Rs.%.0f | CMP is %.0f%% from 52W High" % (
+                lo52, hi52, pct_from_hi)), new_x="LMARGIN", new_y="NEXT")
+        self.ln(2)
+
+        # ── 3. Financial Health At-a-Glance ──
+        self._subsection("Financial Health At-a-Glance")
         b = self.results.get("beneish", {})
         a = self.results.get("altman", {})
         p = self.results.get("piotroski", {})
+        cf = self.results.get("cashflow", {})
+        dt = self.results.get("debt", {})
+        sp = self.results.get("springate", {})
+        oh = self.results.get("ohlson", {})
+        mc = self.results.get("montier", {})
+        bf = self.results.get("benford", {})
 
         def _color_for(score_10):
             if score_10 >= 7: return C_GREEN
             if score_10 >= 4: return C_YELLOW
             return C_RED
 
+        # Manipulation checks
         if b:
-            self._score_box("Beneish M-Score (Manipulation)", "%.2f  %s" % (
+            self._score_box("Beneish M-Score (Earnings Manipulation)", "%.2f  %s" % (
                 b["m_score"], b["verdict"]), _color_for(b["score_10"]))
-        if a:
-            self._score_box("Altman Z-Score (Bankruptcy)", "%.2f  %s" % (
-                a["z_score"], a["zone"]), _color_for(a["score_10"]))
-        if p:
-            self._score_box("Piotroski F-Score (Strength)", "%d / 9  %s" % (
-                p["f_score"], p["verdict"]), _color_for(p["score_10"]))
-
-        cf = self.results.get("cashflow", {})
-        if cf:
-            self._score_box("Cash Flow Quality", "Score: %d/10" % cf["score_10"],
-                            _color_for(cf["score_10"]))
-        dt = self.results.get("debt", {})
-        if dt:
-            self._score_box("Debt Health", "Score: %d/10" % dt["score_10"],
-                            _color_for(dt["score_10"]))
-
-        # Springate S-Score
-        sp = self.results.get("springate", {})
-        if sp:
-            self._score_box("Springate S-Score (Bankruptcy)", "%.2f  %s" % (
-                sp["s_score"], sp["verdict"]), _color_for(sp["score_10"]))
-
-        # Ohlson O-Score
-        oh = self.results.get("ohlson", {})
-        if oh:
-            self._score_box("Ohlson O-Score (Bankruptcy Prob)", "%.0f%%  %s" % (
-                oh["probability"] * 100, oh["verdict"]), _color_for(oh["score_10"]))
-
-        # Montier C-Score
-        mc = self.results.get("montier", {})
         if mc:
-            self._score_box("Montier C-Score (Manipulation)", "%d/6  %s" % (
+            self._score_box("Montier C-Score (Creative Accounting)", "%d/6  %s" % (
                 mc["c_score"], mc["verdict"]), _color_for(mc["score_10"]))
-
-        # Benford's Law
-        bf = self.results.get("benford", {})
         if bf and bf.get("available"):
             self._score_box("Benford's Law (Number Integrity)",
                             bf["conformity"],
                             C_GREEN if bf["conformity"] == "PASS" else
                             C_YELLOW if bf["conformity"] == "MARGINAL" else C_RED)
+        # Bankruptcy checks
+        if a:
+            self._score_box("Altman Z-Score (Bankruptcy Risk)", "%.2f  %s" % (
+                a["z_score"], a["zone"]), _color_for(a["score_10"]))
+        if sp:
+            self._score_box("Springate S-Score (Distress)", "%.2f  %s" % (
+                sp["s_score"], sp["verdict"]), _color_for(sp["score_10"]))
+        if oh:
+            self._score_box("Ohlson O-Score (Failure Probability)", "%.0f%%  %s" % (
+                oh["probability"] * 100, oh["verdict"]), _color_for(oh["score_10"]))
+        # Quality checks
+        if p:
+            self._score_box("Piotroski F-Score (Financial Strength)", "%d / 9  %s" % (
+                p["f_score"], p["verdict"]), _color_for(p["score_10"]))
+        if cf:
+            self._score_box("Cash Flow Quality", "Score: %d/10" % cf["score_10"],
+                            _color_for(cf["score_10"]))
+        if dt:
+            self._score_box("Debt Sustainability", "Score: %d/10" % dt["score_10"],
+                            _color_for(dt["score_10"]))
 
-        # ESM Status
+        # ── 4. Key Financials (most recent year) ──
+        self._subsection("Key Financial Metrics (Latest Year)")
+        prof = self.results.get("profitability", [])
+        if prof:
+            latest = prof[0]
+            self._metric("Revenue", "Rs. {:,.0f} Cr".format(latest.get("revenue", 0) / 1e7) if latest.get("revenue") else "N/A")
+            self._metric("Net Income", "Rs. {:,.0f} Cr".format(latest.get("net_income", 0) / 1e7) if latest.get("net_income") else "N/A")
+            self._metric("Operating Margin", "%.1f%%" % (latest.get("opr_margin", 0) * 100) if latest.get("opr_margin") else "N/A")
+            self._metric("Net Margin", "%.1f%%" % (latest.get("net_margin", 0) * 100) if latest.get("net_margin") else "N/A")
+        debt_data = self.results.get("debt_details", [])
+        if debt_data:
+            d0 = debt_data[0]
+            self._metric("Debt/Equity", "%.2f" % d0.get("de_ratio", 0) if d0.get("de_ratio") is not None else "N/A")
+            self._metric("Interest Coverage", "%.1fx" % d0.get("int_cov", 0) if d0.get("int_cov") else "N/A")
+
+        # ── 5. Promoter & Governance ──
+        self._subsection("Promoter & Governance")
+        promo = self.results.get("promoter_holding", {})
+        if promo:
+            self._metric("Promoter Holding", "%.1f%%" % promo.get("latest_pct", 0))
+            chg = promo.get("change_1y", 0)
+            self._metric("Promoter Change (1Y)", "%+.1f%%" % chg,
+                         C_RED if chg < -2 else C_GREEN if chg > 0 else C_DARK)
+            pledge = promo.get("pledge_pct", 0)
+            self._metric("Shares Pledged", "%.1f%%" % pledge,
+                         C_RED if pledge > 20 else C_GREEN if pledge == 0 else C_YELLOW)
         esm = self.results.get("esm", {})
         if esm.get("in_esm"):
-            self._score_box("ESM Status", "IN ESM %s" % esm.get("stage", ""), C_RED)
+            self._metric("ESM Status", "IN ESM — %s" % esm.get("stage", ""), C_RED)
         else:
-            self._score_box("ESM Status", "Not in ESM (Normal)", C_GREEN)
+            self._metric("ESM Status", "Not in ESM (Normal)", C_GREEN)
 
-        self.ln(3)
-        self._metric("Red Flags Detected", "%d" % len(self.analyzer.red_flags), C_RED if self.analyzer.red_flags else C_GREEN)
-        self._metric("Green Flags Detected", "%d" % len(self.analyzer.green_flags), C_GREEN)
-        self._metric("Overall Score", "%.0f / 100" % overall.get("final_score", 0))
-        self._metric("Recommendation", overall.get("recommendation", "N/A"),
-                     C_GREEN if overall.get("final_score", 0) >= 60 else C_RED)
+        # ── 6. Deep Analysis Summary (if available) ──
+        if hasattr(self, "deep_analyzer") and self.deep_analyzer:
+            da = self.deep_analyzer.results
+            self._subsection("Deep Analysis Highlights")
+            # Moat
+            moat = da.get("moat_score", {})
+            if moat:
+                self._metric("Competitive Moat", "%d/10 — %s" % (
+                    moat.get("total_score", 0), moat.get("verdict", "")),
+                    C_GREEN if moat.get("total_score", 0) >= 6 else C_YELLOW if moat.get("total_score", 0) >= 4 else C_RED)
+            # Risk
+            risk = da.get("risk_assessment", {})
+            if risk:
+                self._metric("Risk Score", "%.1f/10 — %s" % (
+                    risk.get("risk_score", 0), risk.get("risk_level", "")),
+                    C_GREEN if risk.get("risk_score", 0) <= 3 else C_RED if risk.get("risk_score", 0) >= 7 else C_YELLOW)
+            # Deep Fundamental Score
+            ds = da.get("deep_score", {})
+            if ds:
+                self._metric("Deep Fundamental Score", "%.0f/100 — %s" % (
+                    ds.get("total_score", 0), ds.get("recommendation", "")),
+                    C_GREEN if ds.get("total_score", 0) >= 60 else C_RED if ds.get("total_score", 0) < 40 else C_YELLOW)
+            # Technical
+            tech = da.get("technical", {})
+            if tech:
+                self._metric("Trend & Technical", "%s | RSI: %.0f | Delivery: %.0f%%" % (
+                    tech.get("trend", "N/A"), tech.get("rsi", 0), tech.get("delivery_pct", 0) * 100 if tech.get("delivery_pct", 0) < 1 else tech.get("delivery_pct", 0)))
+            # Order Book
+            ob = da.get("order_book", {})
+            if ob and ob.get("order_book_cr"):
+                yoy = ob.get("yoy_growth_pct", 0)
+                self._metric("Order Book", "Rs.%.0f Cr | YoY %+.0f%%" % (
+                    ob.get("order_book_cr", 0), yoy),
+                    C_GREEN if yoy > 20 else C_RED if yoy < -10 else C_YELLOW)
 
-        self.ln(3)
-        self.set_font("Helvetica", "", 9)
-        self.multi_cell(0, 5, _latin(overall.get("rec_detail", "")), new_x="LMARGIN", new_y="NEXT")
+        # ── 7. Red & Green Flags Count ──
+        self._subsection("Flags Summary")
+        crit = sum(1 for f, s in self.analyzer.red_flags if s == "critical")
+        major = sum(1 for f, s in self.analyzer.red_flags if s == "major")
+        minor = sum(1 for f, s in self.analyzer.red_flags if s == "minor")
+        self._metric("Critical Red Flags", "%d" % crit, C_RED if crit else C_GREEN)
+        self._metric("Major Red Flags", "%d" % major, C_RED if major else C_GREEN)
+        self._metric("Minor Red Flags", "%d" % minor, C_YELLOW if minor else C_GREEN)
+        self._metric("Green Flags", "%d" % len(self.analyzer.green_flags), C_GREEN)
+
+        # ── 8. Top Red Flags (quick view) ──
+        if self.analyzer.red_flags:
+            self._subsection("Top Concerns (Red Flags)")
+            self.set_font("Calibri", "", 8)
+            shown = 0
+            for flag, severity in self.analyzer.red_flags:
+                if shown >= 8:
+                    break
+                marker = "[CRITICAL]" if severity == "critical" else "[MAJOR]" if severity == "major" else "[MINOR]"
+                col = C_RED if severity in ("critical", "major") else C_YELLOW
+                self.set_text_color(*col)
+                self.multi_cell(0, 4, _latin("%s %s" % (marker, flag)), new_x="LMARGIN", new_y="NEXT")
+                shown += 1
+            self.set_text_color(0, 0, 0)
 
     def add_company_overview(self):
         """Company overview section."""
@@ -6838,7 +7389,7 @@ class ForensicReport(FPDF):
         if summary:
             self.ln(4)
             self._subsection("Business Description")
-            self.set_font("Helvetica", "", 8)
+            self.set_font("Calibri", "", 8)
             self.multi_cell(0, 4, _latin(summary[:1500]), new_x="LMARGIN", new_y="NEXT")
 
     def add_financial_tables(self):
@@ -6935,7 +7486,7 @@ class ForensicReport(FPDF):
         b = self.results.get("beneish", {})
         if b:
             self._subsection("Beneish M-Score (Earnings Manipulation Detector)")
-            self.set_font("Helvetica", "", 8)
+            self.set_font("Calibri", "", 8)
             self.multi_cell(0, 4, _latin(
                 "The Beneish M-Score uses 8 financial variables to detect whether a company "
                 "is likely manipulating its reported earnings. A score > -1.78 suggests likely "
@@ -6966,7 +7517,7 @@ class ForensicReport(FPDF):
         a = self.results.get("altman", {})
         if a:
             self._subsection("Altman Z-Score (Bankruptcy Risk Predictor)")
-            self.set_font("Helvetica", "", 8)
+            self.set_font("Calibri", "", 8)
             self.multi_cell(0, 4, _latin(
                 "The Altman Z-Score predicts the probability of a company going bankrupt "
                 "within 2 years. Z > 2.99 = Safe zone, 1.81-2.99 = Grey zone (caution), "
@@ -6993,7 +7544,7 @@ class ForensicReport(FPDF):
         p = self.results.get("piotroski", {})
         if p:
             self._subsection("Piotroski F-Score (Financial Strength: 0-9)")
-            self.set_font("Helvetica", "", 8)
+            self.set_font("Calibri", "", 8)
             self.multi_cell(0, 4, _latin(
                 "The Piotroski F-Score rates financial strength from 0-9 based on 9 binary "
                 "tests across profitability, leverage/liquidity, and operating efficiency. "
@@ -7014,7 +7565,7 @@ class ForensicReport(FPDF):
         if not dp:
             return
         self._subsection("DuPont ROE Decomposition")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "ROE = Net Margin x Asset Turnover x Equity Multiplier. This shows whether ROE "
             "is driven by profitability (good), efficiency (good), or excessive leverage (risky)."),
@@ -7031,7 +7582,7 @@ class ForensicReport(FPDF):
         if not wc:
             return
         self._subsection("Working Capital & Efficiency (days)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "DSO = Days Sales Outstanding (receivable collection speed). "
             "DIO = Days Inventory Outstanding. DPO = Days Payable Outstanding. "
@@ -7055,7 +7606,7 @@ class ForensicReport(FPDF):
                 sev_label = {"critical": "[CRITICAL]", "major": "[MAJOR]", "minor": "[MINOR]"}.get(severity, "")
                 self._flag("%s %s" % (sev_label, flag_text), is_red=True)
         else:
-            self.set_font("Helvetica", "I", 9)
+            self.set_font("Calibri", "I", 9)
             self.cell(0, 6, "No red flags detected.", new_x="LMARGIN", new_y="NEXT")
 
         self.ln(5)
@@ -7064,7 +7615,7 @@ class ForensicReport(FPDF):
             for flag_text in self.analyzer.green_flags:
                 self._flag(flag_text, is_red=False)
         else:
-            self.set_font("Helvetica", "I", 9)
+            self.set_font("Calibri", "I", 9)
             self.cell(0, 6, "No green flags detected.", new_x="LMARGIN", new_y="NEXT")
 
     def add_growth_section(self):
@@ -7096,7 +7647,7 @@ class ForensicReport(FPDF):
         self._check_page_break(60)
         self._section("CREDIT RATINGS (from NSE Filings)")
 
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "Credit ratings are sourced from mandatory exchange filings on NSE. "
             "Companies must disclose every rating action (new/reaffirmed/upgraded/downgraded) "
@@ -7143,7 +7694,7 @@ class ForensicReport(FPDF):
         self._check_page_break(60)
         self._section("ENHANCED FORENSIC CHECKS")
 
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "Additional deep-dive checks covering asset quality, capital allocation, "
             "dividend sustainability, and liquidity. These complement the core forensic "
@@ -7212,7 +7763,7 @@ class ForensicReport(FPDF):
         self._check_page_break(60)
         self._section("BENFORD'S LAW ANALYSIS (First-Digit Fraud Detection)")
 
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "Benford's Law states that in naturally occurring datasets, the leading digit 1 "
             "appears ~30.1% of the time, digit 2 ~17.6%, etc. following log10(1 + 1/d). "
@@ -7247,7 +7798,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Montier C-Score (6-Variable Manipulation Detector)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "James Montier's C-Score uses 6 binary signals to detect manipulation. "
             "Unlike Beneish (continuous ratios), Montier uses simple yes/no flags. "
@@ -7272,7 +7823,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Ohlson O-Score (Logistic Bankruptcy Probability)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "The Ohlson O-Score (1980) uses logistic regression with 9 variables to compute "
             "the probability of bankruptcy within 2 years. Unlike Altman (linear discriminant) "
@@ -7311,7 +7862,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Sustainable Growth Rate (SGR)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "SGR = ROE x (1 - Payout Ratio). This is the maximum rate a company can grow "
             "using only internal funds (retained earnings). If actual growth exceeds SGR, "
@@ -7342,7 +7893,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Earnings Volatility & Persistence")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "Coefficient of Variation (CV) of earnings measures stability. "
             "CV < 15% = highly stable/persistent (high quality). "
@@ -7368,7 +7919,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Degree of Operating Leverage (DOL)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "DOL = %change in EBIT / %change in Revenue. Measures how sensitive operating "
             "profit is to revenue changes. DOL of 3x means a 10% revenue drop causes "
@@ -7400,7 +7951,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Springate S-Score (Alternative Bankruptcy Model)")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "The Springate S-Score is an alternative to the Altman Z-Score for predicting "
             "bankruptcy. S = 1.03*A + 3.07*B + 0.66*C + 0.40*D where A=WC/TA, B=EBIT/TA, "
@@ -7431,7 +7982,7 @@ class ForensicReport(FPDF):
             return
 
         self._subsection("Promoter Shareholding")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "Promoter holding indicates insider confidence. Declining promoter stake "
             "or high pledge levels are warning signs. Data sourced from NSE shareholding "
@@ -7473,7 +8024,7 @@ class ForensicReport(FPDF):
         esm = self.results.get("esm", {})
 
         self._subsection("ESM (Enhanced Surveillance Measure) Status")
-        self.set_font("Helvetica", "", 8)
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "The ESM framework was introduced by NSE/BSE to enhance market integrity. "
             "Stocks placed under ESM have additional surveillance due to concerns about "
@@ -7487,12 +8038,12 @@ class ForensicReport(FPDF):
             stage = esm.get("stage", "Unknown")
             self.set_fill_color(*C_RED)
             self.set_text_color(*C_WHITE)
-            self.set_font("Helvetica", "B", 12)
-            self.cell(0, 10, _latin("  WARNING: STOCK IS IN ESM %s  " % stage),
+            self.set_font("Calibri", "B", 9)
+            self.cell(0, 5.5, _latin("  WARNING: STOCK IS IN ESM %s  " % stage),
                       fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(0, 0, 0)
             self.ln(3)
-            self.set_font("Helvetica", "", 9)
+            self.set_font("Calibri", "", 9)
             if "Stage II" in str(stage):
                 self.multi_cell(0, 5, _latin(
                     "ESM Stage II means: Trade-to-trade settlement (no intraday), "
@@ -7508,8 +8059,8 @@ class ForensicReport(FPDF):
         else:
             self.set_fill_color(*C_GREEN)
             self.set_text_color(*C_WHITE)
-            self.set_font("Helvetica", "B", 11)
-            self.cell(0, 9, _latin("  Stock is NOT in any ESM stage (Normal Trading)  "),
+            self.set_font("Calibri", "B", 9)
+            self.cell(0, 5.5, _latin("  Stock is NOT in any ESM stage (Normal Trading)  "),
                       fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(0, 0, 0)
         self.ln(3)
@@ -7527,7 +8078,7 @@ class ForensicReport(FPDF):
         self.ln(3)
 
         self._subsection("Sector Context")
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
         self.multi_cell(0, 5, _latin(
             "The company operates in the %s sector, specifically in the %s industry. "
             "Investors should evaluate: (a) sector growth trajectory, (b) regulatory environment, "
@@ -7566,12 +8117,12 @@ class ForensicReport(FPDF):
 
         if moat_signals:
             for sig in moat_signals:
-                self.set_font("Helvetica", "", 9)
+                self.set_font("Calibri", "", 9)
                 self.set_text_color(*C_GREEN)
                 self.multi_cell(0, 5, _latin("[+] " + sig), new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(0, 0, 0)
         else:
-            self.set_font("Helvetica", "I", 9)
+            self.set_font("Calibri", "I", 9)
             self.cell(0, 6, "No clear moat signals from financial data alone.", new_x="LMARGIN", new_y="NEXT")
 
         self.ln(3)
@@ -7589,58 +8140,165 @@ class ForensicReport(FPDF):
             self._metric(label, value)
 
     def add_recommendation_page(self):
-        """Final recommendation page with score breakdown and weight table."""
-        self.add_page()
-        self._section("INVESTMENT RECOMMENDATION")
+        """Comprehensive investment recommendation — detailed verdict with full context.
+        Should give complete understanding of whether to invest and why."""
+        self._section("INVESTMENT RECOMMENDATION & VERDICT")
 
         overall = self.results.get("overall", {})
+        info = self.info
         score = overall.get("final_score", 0)
         rec = overall.get("recommendation", "N/A")
 
-        self.ln(5)
+        # ── Big Verdict Banner ──
+        self.ln(3)
         color = C_GREEN if score >= 60 else C_YELLOW if score >= 45 else C_RED
         self.set_fill_color(*color)
         self.set_text_color(*C_WHITE)
-        self.set_font("Helvetica", "B", 18)
-        self.cell(0, 16, _latin("  OVERALL SCORE: %.0f / 100  " % score),
+        self.set_font("Calibri", "B", 10)
+        self.cell(0, 5.5, _latin("  OVERALL SCORE: %.0f / 100  " % score),
                   fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
-        self.ln(3)
-        self.cell(0, 14, _latin("  RECOMMENDATION: %s  " % rec),
+        self.ln(1)
+        self.cell(0, 5.5, _latin("  RECOMMENDATION: %s  " % rec),
                   fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
+        self.ln(3)
 
-        self.ln(8)
-        self.set_font("Helvetica", "", 10)
-        self.multi_cell(0, 6, _latin(overall.get("rec_detail", "")), new_x="LMARGIN", new_y="NEXT")
+        # ── Detailed Recommendation Narrative ──
+        self._subsection("Investment Thesis")
+        self.set_font("Calibri", "", 9)
+        self.multi_cell(0, 5, _latin(overall.get("rec_detail", "")), new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
 
-        self.ln(5)
+        # ── Valuation Assessment ──
+        self._subsection("Valuation Assessment")
+        pe = info.get("trailingPE", 0)
+        pb = info.get("priceToBook", 0)
+        ev_ebitda = info.get("enterpriseToEbitda", 0)
+        fwd_pe = info.get("forwardPE", 0)
+        cmp = info.get("currentPrice", 0)
+        self._metric("Current Price", "Rs. %.2f" % cmp if cmp else "N/A")
+        self._metric("Trailing P/E", "%.1f" % pe if pe else "N/A")
+        self._metric("Forward P/E", "%.1f" % fwd_pe if fwd_pe else "N/A")
+        self._metric("P/B Ratio", "%.1f" % pb if pb else "N/A")
+        self._metric("EV/EBITDA", "%.1f" % ev_ebitda if ev_ebitda else "N/A")
+
+        # DCF and Graham from deep analyzer
+        if hasattr(self, "deep_analyzer") and self.deep_analyzer:
+            da = self.deep_analyzer.results
+            dcf = da.get("dcf", {})
+            if dcf and dcf.get("intrinsic_value"):
+                iv = dcf["intrinsic_value"]
+                upside = ((iv - cmp) / cmp * 100) if cmp else 0
+                self._metric("DCF Intrinsic Value", "Rs. %.0f (%.0f%% %s)" % (
+                    iv, abs(upside), "upside" if upside > 0 else "downside"),
+                    C_GREEN if upside > 20 else C_RED if upside < -20 else C_YELLOW)
+            graham = da.get("graham_magic", {})
+            if graham and graham.get("graham_number"):
+                gn = graham["graham_number"]
+                self._metric("Graham Number", "Rs. %.0f" % gn,
+                    C_GREEN if cmp < gn else C_RED)
+            peer = da.get("peer_comparison", {})
+            if peer and peer.get("pe_discount_pct") is not None:
+                self._metric("PE Discount vs Peers", "%.0f%%" % peer["pe_discount_pct"],
+                    C_GREEN if peer["pe_discount_pct"] > 20 else C_RED if peer["pe_discount_pct"] < -20 else C_YELLOW)
+
+        # ── Growth Outlook ──
+        self._subsection("Growth & Profitability Outlook")
+        prof = self.results.get("profitability", [])
+        if len(prof) >= 2:
+            rev_curr = prof[0].get("revenue", 0)
+            rev_prev = prof[1].get("revenue", 0)
+            rev_growth = ((rev_curr - rev_prev) / rev_prev * 100) if rev_prev else 0
+            ni_curr = prof[0].get("net_income", 0)
+            ni_prev = prof[1].get("net_income", 0)
+            ni_growth = ((ni_curr - ni_prev) / ni_prev * 100) if ni_prev else 0
+            self._metric("Revenue Growth (YoY)", "%+.1f%%" % rev_growth,
+                         C_GREEN if rev_growth > 10 else C_RED if rev_growth < 0 else C_YELLOW)
+            self._metric("Net Income Growth (YoY)", "%+.1f%%" % ni_growth,
+                         C_GREEN if ni_growth > 10 else C_RED if ni_growth < 0 else C_YELLOW)
+            opm = prof[0].get("opr_margin", 0)
+            npm = prof[0].get("net_margin", 0)
+            if opm:
+                self._metric("Operating Margin", "%.1f%%" % (opm * 100))
+            if npm:
+                self._metric("Net Margin", "%.1f%%" % (npm * 100))
+
+        if hasattr(self, "deep_analyzer") and self.deep_analyzer:
+            da = self.deep_analyzer.results
+            ob = da.get("order_book", {})
+            if ob and ob.get("order_book_cr"):
+                self._metric("Order Book", "Rs.%.0f Cr (YoY %+.0f%%)" % (
+                    ob["order_book_cr"], ob.get("yoy_growth_pct", 0)))
+
+        # ── Risk Summary ──
+        self._subsection("Risk Factors")
+        crit = [(f, s) for f, s in self.analyzer.red_flags if s == "critical"]
+        major = [(f, s) for f, s in self.analyzer.red_flags if s == "major"]
+        if crit:
+            self.set_font("Calibri", "B", 9)
+            self.set_text_color(*C_RED)
+            self.cell(0, 5, _latin("CRITICAL RISKS (%d):" % len(crit)), new_x="LMARGIN", new_y="NEXT")
+            self.set_font("Calibri", "", 8)
+            for flag, _ in crit[:5]:
+                self.multi_cell(0, 4, _latin("  - %s" % flag), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(0, 0, 0)
+            self.ln(2)
+        if major:
+            self.set_font("Calibri", "B", 9)
+            self.set_text_color(192, 100, 43)
+            self.cell(0, 5, _latin("MAJOR RISKS (%d):" % len(major)), new_x="LMARGIN", new_y="NEXT")
+            self.set_font("Calibri", "", 8)
+            for flag, _ in major[:5]:
+                self.multi_cell(0, 4, _latin("  - %s" % flag), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(0, 0, 0)
+            self.ln(2)
+
+        # ── Positive Signals ──
+        if self.analyzer.green_flags:
+            self._subsection("Positive Signals")
+            self.set_font("Calibri", "", 8)
+            self.set_text_color(*C_GREEN)
+            for flag in self.analyzer.green_flags[:8]:
+                self.multi_cell(0, 4, _latin("  + %s" % flag), new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(0, 0, 0)
+            self.ln(2)
+
+        # ── Score Breakdown ──
         self._subsection("Score Breakdown")
-        self._metric("Base Score (from weighted analysis)", "%.1f / 100" % overall.get("base_score", 0))
+        self._metric("Base Score (weighted analysis)", "%.1f / 100" % overall.get("base_score", 0))
         self._metric("Red Flag Penalty", "-%.1f" % overall.get("penalty", 0), C_RED)
         self._metric("Green Flag Bonus", "+%.1f" % overall.get("bonus", 0), C_GREEN)
         self._metric("Final Score", "%.0f / 100" % score)
 
-        # ── SCORING METHODOLOGY TABLE ──
-        self.ln(5)
-        self._subsection("Scoring Methodology — Technique Weightages")
-        self.set_font("Helvetica", "", 8)
+        # Deep Score if available
+        if hasattr(self, "deep_analyzer") and self.deep_analyzer:
+            ds = self.deep_analyzer.results.get("deep_score", {})
+            if ds:
+                self.ln(2)
+                self._metric("Deep Fundamental Score", "%.0f / 100" % ds.get("total_score", 0))
+                sub = ds.get("sub_scores", {})
+                if sub:
+                    for k, v in sub.items():
+                        self._metric("  " + k.replace("_", " ").title(), "%.0f" % v)
+
+        # ── Scoring Methodology ──
+        self.ln(3)
+        self._subsection("Scoring Methodology")
+        self.set_font("Calibri", "", 8)
         self.multi_cell(0, 4, _latin(
             "The overall score is computed as a weighted average of 14 forensic techniques "
             "across 4 categories: Manipulation Detection (25%), Bankruptcy/Distress (20%), "
             "Fundamental Quality (35%), and Deep Forensic Checks (20%). Each technique scores "
-            "0-10, weighted, scaled to 0-100, then adjusted by red flag penalties and green flag bonuses."),
+            "0-10, weighted, scaled to 0-100, then adjusted by red flag penalties (-6 critical, "
+            "-3 major, -1.5 minor) and green flag bonuses (+1.5 each, max +10)."),
             new_x="LMARGIN", new_y="NEXT")
-        self.ln(3)
+        self.ln(2)
 
         details = overall.get("score_details", [])
         if details:
-            headers = ["Technique", "Weight", "Raw Score (0-10)", "Contribution"]
+            headers = ["Technique", "Weight", "Score (0-10)", "Contribution"]
             rows = []
-            # Group by category
-            cat_a = []  # Manipulation Detection
-            cat_b = []  # Bankruptcy
-            cat_c = []  # Fundamental Quality
-            cat_d = []  # Deep Forensic
+            cat_a, cat_b, cat_c, cat_d = [], [], [], []
             for d in details:
                 name = d["technique"]
                 if "Manipulation" in name or "Benford" in name or "Integrity" in name:
@@ -7655,44 +8313,18 @@ class ForensicReport(FPDF):
             def _add_cat(label, items):
                 rows.append([label, "", "", ""])
                 for d in items:
-                    rows.append([
-                        "  " + d["technique"],
-                        "%.0f%%" % d["weight"],
-                        "%d / 10" % d["raw_score"],
-                        "%.1f" % d["weighted"],
-                    ])
+                    rows.append(["  " + d["technique"], "%.0f%%" % d["weight"],
+                                 "%d / 10" % d["raw_score"], "%.1f" % d["weighted"]])
 
             _add_cat("A. MANIPULATION DETECTION (25%)", cat_a)
             _add_cat("B. BANKRUPTCY / DISTRESS (20%)", cat_b)
             _add_cat("C. FUNDAMENTAL QUALITY (35%)", cat_c)
             _add_cat("D. DEEP FORENSIC CHECKS (20%)", cat_d)
-
-            # Totals
-            total_wt = sum(d["weight"] for d in details)
             total_contrib = sum(d["weighted"] for d in details)
-            rows.append(["TOTAL", "%.0f%%" % total_wt, "", "%.1f" % total_contrib])
+            rows.append(["TOTAL", "100%", "", "%.1f" % total_contrib])
+            self._table(headers, rows, [80, 28, 38, 34], align=["L", "C", "C", "C"])
 
-            self._table(headers, rows, [80, 28, 38, 34],
-                        align=["L", "C", "C", "C"])
-
-        # ── Flag penalty/bonus detail ──
-        self.ln(3)
-        self._subsection("Flag Adjustments")
-        self.set_font("Helvetica", "", 8)
-        self.multi_cell(0, 4, _latin(
-            "Red flags penalise the score: CRITICAL = -6 pts, MAJOR = -3 pts, MINOR = -1.5 pts. "
-            "Green flags add +1.5 pts each (capped at +10). This ensures that even a company "
-            "with good ratios gets penalised for specific danger signals."),
-            new_x="LMARGIN", new_y="NEXT")
-        self.ln(2)
-        self._metric("Critical flags", "%d  (x -6 pts each)" % sum(
-            1 for f, s in self.analyzer.red_flags if s == "critical"), C_RED)
-        self._metric("Major flags", "%d  (x -3 pts each)" % sum(
-            1 for f, s in self.analyzer.red_flags if s == "major"), C_RED)
-        self._metric("Minor flags", "%d  (x -1.5 pts each)" % sum(
-            1 for f, s in self.analyzer.red_flags if s == "minor"), C_RED)
-        self._metric("Green flags", "%d  (x +1.5 pts, max +10)" % len(self.analyzer.green_flags), C_GREEN)
-
+        # ── Final Verdict ──
         self.ln(5)
         self._subsection("Score Interpretation")
         scale = [
@@ -7703,26 +8335,10 @@ class ForensicReport(FPDF):
             ("0-29: STRONG AVOID", "Serious financial distress or manipulation risk."),
         ]
         for label, desc in scale:
-            self.set_font("Helvetica", "B", 9)
+            self.set_font("Calibri", "B", 9)
             self.cell(50, 5, _latin(label))
-            self.set_font("Helvetica", "", 9)
+            self.set_font("Calibri", "", 9)
             self.cell(0, 5, _latin(desc), new_x="LMARGIN", new_y="NEXT")
-
-        self.ln(5)
-        self._subsection("Key Considerations")
-        self.set_font("Helvetica", "", 9)
-        considerations = [
-            "1. This analysis is based on publicly reported financial statements only.",
-            "2. Review the annual report and auditor's notes for qualitative factors.",
-            "3. Check for related party transactions in the notes to accounts.",
-            "4. Monitor management commentary in earnings calls for forward guidance.",
-            "5. Consider macroeconomic factors and sector-specific headwinds/tailwinds.",
-            "6. Check for any pending litigation, regulatory actions, or SEBI orders.",
-            "7. Verify promoter pledge status from latest shareholding pattern.",
-            "8. Cross-reference with credit rating agency reports (CRISIL, ICRA, etc.).",
-        ]
-        for c in considerations:
-            self.multi_cell(0, 5, _latin(c), new_x="LMARGIN", new_y="NEXT")
 
     # ── GENERATE FULL REPORT ─────────────────────────────────────────────────
     def generate(self, output_path):
@@ -7730,24 +8346,31 @@ class ForensicReport(FPDF):
         print("\n[4/5] Generating PDF report...")
 
         self.add_cover_page()
-        # Reserve a clickable Table of Contents — rendered after the rest of
-        # the report is built so page numbers are accurate. fpdf2 trims unused
-        # placeholder pages automatically.
+        # Table of Contents — starts on its own page
+        self.add_page()
         try:
-            self._toc_pages_reserved = 3
+            self._toc_pages_reserved = 2
             self.insert_toc_placeholder(self._render_toc, pages=self._toc_pages_reserved)
         except Exception as e:
             print("  TOC placeholder failed: %s" % e)
         self.add_key_red_flags_summary()
         self.add_executive_summary()
+        self.add_recommendation_page()  # Section 2: right after executive summary
+
+        # ── SECTION ORDER: Logical analysis flow ──
+        # Phase 1: Company Background
         self.add_company_overview()
         self.add_financial_tables()
-        self.add_forensic_scores()
 
-        # Additional sections on current page (after forensic scores)
+        # Phase 2: Forensic & Manipulation Detection (most critical first)
+        self.add_forensic_scores()
+        self.add_benfords_law_section()
+        self.add_enhanced_checks_section()
         self.add_springate_section()
         self.add_ohlson_section()
         self.add_montier_section()
+
+        # Phase 3: Financial Quality & Efficiency
         self.add_dupont_section()
         self.add_working_capital_section()
         self.add_growth_section()
@@ -7755,12 +8378,11 @@ class ForensicReport(FPDF):
         self.add_volatility_section()
         self.add_operating_leverage_section()
 
-        self.add_benfords_law_section()
-        self.add_enhanced_checks_section()
+        # Phase 4: Governance & Promoter Integrity
         self.add_esm_section()
         self.add_promoter_section()
 
-        # ── Deep Fundamental Analysis Sections ──
+        # Phase 5: Deep Fundamental Analysis
         if hasattr(self, "deep_analyzer") and self.deep_analyzer:
             self.add_deep_dcf_section()
             self.add_deep_valuation_bands_section()
@@ -7774,7 +8396,7 @@ class ForensicReport(FPDF):
             self.add_deep_annual_report_nlp_section()
             self.add_deep_risk_section()
             self.add_deep_score_section()
-            # Extended analysis sections
+            # Phase 6: Market & Technical
             self.add_deep_shareholding_section()
             self.add_deep_insider_trading_section()
             self.add_deep_peer_comparison_section()
@@ -7785,11 +8407,13 @@ class ForensicReport(FPDF):
             self.add_deep_institutional_section()
             self.add_deep_corporate_actions_section()
             self.add_deep_credit_intelligence_section()
+            self.add_deep_order_book_section()
 
+        # Phase 7: Comparative & Sector Context
+        self.add_user_comparison_section()
         self.add_flags_page()
         self.add_credit_rating_page()
         self.add_sector_analysis()
-        self.add_recommendation_page()
 
         self.output(output_path)
         print("  PDF saved: %s" % output_path)
@@ -7810,7 +8434,7 @@ class ForensicReport(FPDF):
             "discounts them back at WACC, and compares the result to the current price. "
             "A positive Margin of Safety means the stock trades below estimated intrinsic value."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         # Key metrics
         rows = [
@@ -7855,7 +8479,7 @@ class ForensicReport(FPDF):
             "What it is: Where today's PE sits inside its own 5-year high-low band. "
             "A percentile near 0% = historically cheap; near 100% = historically expensive."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Trailing P/E", fmt_num(vb.get("pe_trailing", 0), 1)],
@@ -7886,7 +8510,7 @@ class ForensicReport(FPDF):
             "profit. ROCE > WACC means value is being created; ROCE < WACC means "
             "reinvestment is destroying shareholder value."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Avg ROCE", "%.1f%%" % ca.get("avg_roce_pct", 0)],
@@ -7901,7 +8525,7 @@ class ForensicReport(FPDF):
         roce_s = ca.get("roce_series_pct", [])
         if roce_s:
             self.ln(2)
-            self.set_font("Helvetica", "B", 9)
+            self.set_font("Calibri", "B", 9)
             self.cell(0, 5, _latin("ROCE Trend: " + " -> ".join(
                 ["%.1f%%" % r if not _nan(r) else "N/A" for r in roce_s])),
                 new_x="LMARGIN", new_y="NEXT")
@@ -7918,7 +8542,7 @@ class ForensicReport(FPDF):
             "above 1.0 = high quality; persistently low = profits exist on paper but "
             "cash isn't following, often a precursor to write-downs."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Avg CFO / PAT Ratio", "%.2f" % eq.get("avg_cfo_pat", 0)],
@@ -7952,7 +8576,7 @@ class ForensicReport(FPDF):
             "(DIO) net of supplier credit (DPO). A shrinking Cash Conversion Cycle frees "
             "up cash; a stretching one signals tightening operations or aggressive sales."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         headers = ["Metric"] + ["Y%d" % (i+1) for i in range(len(wc.get("dso_series", [])))]
         dso_row = ["DSO (days)"] + [fmt_num(d, 0) for d in wc.get("dso_series", [])]
@@ -7979,7 +8603,7 @@ class ForensicReport(FPDF):
             "if EBITDA drops 30%? Interest-Coverage Ratio (ICR) above 3x in stress "
             "scenarios = resilient; below 1.5x = vulnerable."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         icr = ds.get("icr_current", 0)
         icr_str = "%.1fx" % icr if icr != float("inf") else "No Debt"
@@ -8021,7 +8645,7 @@ class ForensicReport(FPDF):
             "derived from sustained high ROCE, gross margins, market position and "
             "pricing power. Higher = harder for rivals to erode profitability."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         score = moat.get("score", 0)
         max_sc = moat.get("max_score", 10)
@@ -8043,7 +8667,7 @@ class ForensicReport(FPDF):
             self.ln(3)
             self._subsection("Moat Signals Detected")
             for sig in signals[:8]:
-                self.set_font("Helvetica", "", 8)
+                self.set_font("Calibri", "", 8)
                 self.set_text_color(*C_GREEN)
                 self.multi_cell(0, 4, _latin("+ " + sig), new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(*C_DARK)
@@ -8060,7 +8684,7 @@ class ForensicReport(FPDF):
             "the latest quarter's YoY revenue and PAT growth to recent quarters to detect "
             "a turn before it shows up in annual numbers."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Revenue YoY Growth", fmt_pct(qm.get("revenue_yoy_pct", 0))],
@@ -8082,7 +8706,7 @@ class ForensicReport(FPDF):
             "Sentiment > 0 = optimistic, < 0 = cautious. Trend matters more than the "
             "absolute number; a downshift quarter-over-quarter is a leading warning sign."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Transcripts Analyzed", str(cn.get("n_transcripts", 0))],
@@ -8114,7 +8738,7 @@ class ForensicReport(FPDF):
             self.ln(3)
             self._subsection("Key Forward Guidance Statements")
             for g in guidance[:5]:
-                self.set_font("Helvetica", "", 7)
+                self.set_font("Calibri", "", 7)
                 self.multi_cell(0, 3.5, _latin(">> " + g[:200]), new_x="LMARGIN", new_y="NEXT")
 
         # Key risks from concalls
@@ -8123,7 +8747,7 @@ class ForensicReport(FPDF):
             self.ln(3)
             self._subsection("Risk Mentions from Concalls")
             for r in risks[:5]:
-                self.set_font("Helvetica", "", 7)
+                self.set_font("Calibri", "", 7)
                 self.set_text_color(*C_RED)
                 self.multi_cell(0, 3.5, _latin("!! " + r[:200]), new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(*C_DARK)
@@ -8140,7 +8764,7 @@ class ForensicReport(FPDF):
             "auditor caveats, related-party transactions, contingent liabilities and "
             "accounting-policy changes. 'YES' on any of these warrants deeper reading."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Years Analyzed", str(ar.get("years_analyzed", 0))],
@@ -8178,7 +8802,7 @@ class ForensicReport(FPDF):
             "governance and market risks. Below 4 = low risk; 4-7 = moderate; above 7 = "
             "high. Use the breakdown to see which risk type dominates."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         risk_sc = ra.get("risk_score", 5)
         category = ra.get("risk_category", "N/A")
@@ -8197,7 +8821,7 @@ class ForensicReport(FPDF):
             self.ln(3)
             self._subsection("Identified Risk Factors")
             for rf in risks[:8]:
-                self.set_font("Helvetica", "", 8)
+                self.set_font("Calibri", "", 8)
                 self.set_text_color(*C_RED)
                 self.multi_cell(0, 4, _latin("- " + rf), new_x="LMARGIN", new_y="NEXT")
             self.set_text_color(*C_DARK)
@@ -8214,7 +8838,7 @@ class ForensicReport(FPDF):
             "earnings quality and risk - each weighted as shown below. This is the "
             "single number to glance at; the recommendation is derived directly from it."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         final = ds.get("final_score", 0)
         rec = ds.get("recommendation", "N/A")
@@ -8229,7 +8853,7 @@ class ForensicReport(FPDF):
             color = C_RED
         self._score_box("Score: %.0f / 100" % final, rec, color)
         self.ln(3)
-        self.set_font("Helvetica", "I", 9)
+        self.set_font("Calibri", "I", 9)
         self.multi_cell(0, 4, _latin(detail), new_x="LMARGIN", new_y="NEXT")
         self.ln(3)
 
@@ -8261,7 +8885,7 @@ class ForensicReport(FPDF):
             "Rising promoter stake signals insider confidence; falling stake (especially "
             "alongside pledges) is a major red flag."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Current Promoter Holding", "%.1f%%" % dr["latest_promoter_pct"]],
@@ -8293,7 +8917,7 @@ class ForensicReport(FPDF):
             "key insiders. Net buying = insider confidence; net selling, especially "
             "clustered, deserves scrutiny against business fundamentals."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Total Disclosures", str(dr["total_disclosures"])],
@@ -8325,7 +8949,7 @@ class ForensicReport(FPDF):
             "discount to peer average PE/PB usually means either undervaluation or "
             "market-recognised weakness; cross-check with the moat and growth sections."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Sector", dr.get("sector", "N/A")],
@@ -8361,7 +8985,7 @@ class ForensicReport(FPDF):
             "6M / 1Y. 'Alpha' is the excess return over the index. Persistent positive "
             "alpha = market is rewarding the story."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         periods = dr.get("periods", {})
         rows = []
@@ -8377,7 +9001,7 @@ class ForensicReport(FPDF):
         avg_alpha = dr.get("avg_alpha", 0)
         status = "OUTPERFORMING" if avg_alpha > 0 else "UNDERPERFORMING"
         self.ln(3)
-        self.set_font("Helvetica", "B", 10)
+        self.set_font("Calibri", "B", 10)
         self.cell(0, 6, _latin("Average Alpha: %+.1f%% | %s" % (avg_alpha, status)),
                   new_x="LMARGIN", new_y="NEXT")
 
@@ -8393,7 +9017,7 @@ class ForensicReport(FPDF):
             "and volume/delivery trend. Helps time entries: even a great fundamental "
             "story is best bought when the technical trend confirms."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Current Price (CMP)", "Rs. %.0f" % dr["cmp"]],
@@ -8420,7 +9044,7 @@ class ForensicReport(FPDF):
             "BVPS) is the maximum price a defensive investor should pay. Magic Formula "
             "combines Earnings Yield + ROIC; higher is better on both."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Trailing EPS", "Rs. %.1f" % dr.get("eps", 0)],
@@ -8445,7 +9069,7 @@ class ForensicReport(FPDF):
             "'growth' (adding capacity). Heavy growth capex paired with rising asset "
             "turnover = expansion paying off; rising capex with falling turnover = warning."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Latest Capex", "Rs. %.0f Cr" % dr.get("capex_latest_cr", 0)],
@@ -8476,7 +9100,7 @@ class ForensicReport(FPDF):
             "who the top holders are. Concentrated quality holders = validation; sudden "
             "exits across funds = institutional sell-signal."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Total Institutional %", "%.1f%%" % dr.get("total_institutional_pct", 0)],
@@ -8513,7 +9137,7 @@ class ForensicReport(FPDF):
             "dividend record signals consistent cash generation and shareholder-friendly "
             "capital allocation."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Total Dividends", str(dr.get("dividend_count", 0))],
@@ -8552,7 +9176,7 @@ class ForensicReport(FPDF):
             "plus their trajectory (upgrades / downgrades / stable). Investment-grade = "
             "BBB- and above; below that, debt repayment capacity is materially weaker."
         )
-        self.set_font("Helvetica", "", 9)
+        self.set_font("Calibri", "", 9)
 
         rows = [
             ["Agencies Covering", str(dr.get("n_agencies", 0))],
@@ -8573,18 +9197,415 @@ class ForensicReport(FPDF):
                 arows.append([agency, ratings_str, info.get("outlook", "N/A"), info.get("date", "")[:11]])
             self._table(["Agency", "Ratings", "Outlook", "Date"], arows, col_widths=[40, 50, 35, 40])
 
+    def add_deep_order_book_section(self):
+        """Order book position & inflow YoY/QoQ section."""
+        dr = self.deep_analyzer.results.get("order_book", {})
+        if dr.get("status") != "computed":
+            return
+        book = dr.get("book", {})
+        inflow = dr.get("inflow", {})
+        if not book and not inflow:
+            return
+        self._check_page_break(80)
+        self._section("ORDER BOOK & INFLOW ANALYSIS")
+        self._intro(
+            "What it is: Order-book position and inflow data extracted from the "
+            "company's press releases and investor presentations filed with NSE. "
+            "Growing order books signal strong revenue visibility; declining books "
+            "are an early warning for future revenue slowdowns. Not all companies "
+            "report this metric \u2014 it is most common in defence, capital goods, "
+            "infra, and EPC sectors."
+        )
+        self.set_font("Calibri", "", 9)
+
+        # Summary metrics
+        rows = []
+        if book:
+            rows.append(["Order Book (Latest)",
+                         fmt_cr(book["latest_value"] * 1e7) if book.get("latest_value") else "N/A"])
+            rows.append(["  as of", book.get("latest_date", "N/A")])
+            if book.get("yoy_pct") is not None:
+                rows.append(["  YoY Change", fmt_pct(book["yoy_pct"])])
+            if book.get("qoq_pct") is not None:
+                rows.append(["  QoQ Change", fmt_pct(book["qoq_pct"])])
+            rows.append(["  Data Points", str(book.get("n_datapoints", 0))])
+        if inflow:
+            rows.append(["Order Inflow (Latest)",
+                         fmt_cr(inflow["latest_value"] * 1e7) if inflow.get("latest_value") else "N/A"])
+            rows.append(["  as of", inflow.get("latest_date", "N/A")])
+            if inflow.get("yoy_pct") is not None:
+                rows.append(["  YoY Change", fmt_pct(inflow["yoy_pct"])])
+            rows.append(["  Data Points", str(inflow.get("n_datapoints", 0))])
+        if rows:
+            self._table(["Metric", "Value"], rows, col_widths=[80, 80])
+
+        # Historical order book table
+        entries = book.get("entries", []) or inflow.get("entries", [])
+        if entries:
+            self.ln(3)
+            self._subsection("Order Book History")
+            hrows = []
+            for e in entries[:8]:
+                hrows.append([
+                    e.get("date", "")[:11],
+                    e.get("type", "").title(),
+                    fmt_cr(e["value_crore"] * 1e7) if e.get("value_crore") else "N/A",
+                    e.get("source", "")[:30],
+                ])
+            self._table(["Date", "Type", "Value", "Source"], hrows,
+                        col_widths=[35, 25, 50, 55])
+
+    # ── PEER COMPARISON SECTION (user-specified companies) ───────────────────
+
+    def add_user_comparison_section(self):
+        """Add a comprehensive comparison table with user-specified companies."""
+        comp_data = getattr(self.data, "comparison_data", None)
+        if not comp_data:
+            return
+
+        self.add_page()
+        self._section("COMPARATIVE ANALYSIS")
+        self._intro(
+            "Side-by-side comparison of key financial metrics across user-specified "
+            "companies. This helps assess relative valuation, profitability, growth, "
+            "and financial health. All data sourced from latest available filings via yfinance."
+        )
+
+        # --- Valuation Metrics ---
+        self._subsection("Valuation Metrics")
+        headers = ["Metric"] + [c["symbol"] for c in comp_data]
+        col_w = min(30, int(160 / len(comp_data)))
+        col_widths = [40] + [col_w] * len(comp_data)
+        align = ["L"] + ["C"] * len(comp_data)
+
+        val_rows = []
+        for metric, key, fmt in [
+            ("Market Cap (Cr)", "market_cap_cr", "%.0f"),
+            ("Trailing P/E", "trailing_pe", "%.1f"),
+            ("Forward P/E", "forward_pe", "%.1f"),
+            ("P/B Ratio", "pb", "%.2f"),
+            ("EV/EBITDA", "ev_ebitda", "%.1f"),
+            ("P/S Ratio", "ps", "%.2f"),
+            ("Dividend Yield %", "div_yield_pct", "%.2f"),
+        ]:
+            row = [metric]
+            for c in comp_data:
+                v = c.get(key)
+                row.append(fmt % v if v and not _nan(v) else "N/A")
+            val_rows.append(row)
+        self._table(headers, val_rows, col_widths=col_widths, align=align)
+
+        # --- Profitability Metrics ---
+        self._check_page_break(60)
+        self._subsection("Profitability & Returns")
+        prof_rows = []
+        for metric, key, fmt in [
+            ("ROE %", "roe_pct", "%.1f"),
+            ("ROA %", "roa_pct", "%.1f"),
+            ("ROCE %", "roce_pct", "%.1f"),
+            ("Operating Margin %", "opm_pct", "%.1f"),
+            ("Net Profit Margin %", "npm_pct", "%.1f"),
+            ("EPS (Rs)", "eps", "%.1f"),
+        ]:
+            row = [metric]
+            for c in comp_data:
+                v = c.get(key)
+                row.append(fmt % v if v and not _nan(v) else "N/A")
+            prof_rows.append(row)
+        self._table(headers, prof_rows, col_widths=col_widths, align=align)
+
+        # --- Growth Metrics ---
+        self._check_page_break(50)
+        self._subsection("Growth")
+        growth_rows = []
+        for metric, key, fmt in [
+            ("Revenue Growth %", "rev_growth_pct", "%.1f"),
+            ("Earnings Growth %", "earn_growth_pct", "%.1f"),
+            ("Revenue 3Y CAGR %", "rev_cagr_3y_pct", "%.1f"),
+            ("Profit 3Y CAGR %", "pat_cagr_3y_pct", "%.1f"),
+        ]:
+            row = [metric]
+            for c in comp_data:
+                v = c.get(key)
+                row.append(fmt % v if v and not _nan(v) else "N/A")
+            growth_rows.append(row)
+        self._table(headers, growth_rows, col_widths=col_widths, align=align)
+
+        # --- Financial Health ---
+        self._check_page_break(50)
+        self._subsection("Financial Health")
+        health_rows = []
+        for metric, key, fmt in [
+            ("Debt/Equity", "de_ratio", "%.2f"),
+            ("Current Ratio", "current_ratio", "%.2f"),
+            ("Interest Coverage", "interest_coverage", "%.1f"),
+            ("Promoter Holding %", "promoter_pct", "%.1f"),
+            ("Pledged %", "pledged_pct", "%.1f"),
+        ]:
+            row = [metric]
+            for c in comp_data:
+                v = c.get(key)
+                row.append(fmt % v if v and not _nan(v) else "N/A")
+            health_rows.append(row)
+        self._table(headers, health_rows, col_widths=col_widths, align=align)
+
+        # --- Price Performance ---
+        self._check_page_break(50)
+        self._subsection("Price Performance")
+        perf_rows = []
+        for metric, key, fmt in [
+            ("CMP (Rs)", "cmp", "%.0f"),
+            ("52W High (Rs)", "high_52w", "%.0f"),
+            ("52W Low (Rs)", "low_52w", "%.0f"),
+            ("1Y Return %", "return_1y_pct", "%.1f"),
+            ("Beta", "beta", "%.2f"),
+        ]:
+            row = [metric]
+            for c in comp_data:
+                v = c.get(key)
+                row.append(fmt % v if v and not _nan(v) else "N/A")
+            perf_rows.append(row)
+        self._table(headers, perf_rows, col_widths=col_widths, align=align)
+
+        # --- Summary verdict ---
+        self._check_page_break(30)
+        self._subsection("Quick Comparison Verdict")
+        self.set_font("Calibri", "", 9)
+        # Find cheapest PE, highest ROE, etc.
+        valid_pe = [(c["symbol"], c.get("trailing_pe", float("inf")))
+                    for c in comp_data if c.get("trailing_pe") and not _nan(c.get("trailing_pe", float("nan")))]
+        valid_roe = [(c["symbol"], c.get("roe_pct", 0))
+                     for c in comp_data if c.get("roe_pct") and not _nan(c.get("roe_pct", float("nan")))]
+        valid_growth = [(c["symbol"], c.get("rev_growth_pct", 0))
+                        for c in comp_data if c.get("rev_growth_pct") and not _nan(c.get("rev_growth_pct", float("nan")))]
+
+        verdicts = []
+        if valid_pe:
+            cheapest = min(valid_pe, key=lambda x: x[1])
+            verdicts.append("Cheapest P/E: %s (%.1f)" % cheapest)
+        if valid_roe:
+            best_roe = max(valid_roe, key=lambda x: x[1])
+            verdicts.append("Highest ROE: %s (%.1f%%)" % best_roe)
+        if valid_growth:
+            fastest = max(valid_growth, key=lambda x: x[1])
+            verdicts.append("Fastest Revenue Growth: %s (%.1f%%)" % fastest)
+
+        for v in verdicts:
+            self.cell(0, 5, _latin("  * %s" % v), new_x="LMARGIN", new_y="NEXT")
+        self.ln(3)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COMPARISON DATA FETCHER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fetch_comparison_metrics(symbols):
+    """Fetch key financial metrics for a list of symbols for comparison.
+    Returns list of dicts with standardised metrics per company.
+    """
+    print("\n  Fetching comparison data for: %s" % ", ".join(symbols))
+    results = []
+
+    for sym in symbols:
+        sym = sym.strip().upper()
+        print("    %s..." % sym, end=" ")
+        try:
+            ticker, yf_sym, resolved_info, _is_sme = _resolve_yf_ticker(sym)
+            info = ticker.info or {}
+
+            # Market cap in crore
+            mkt_cap = info.get("marketCap", 0) or 0
+            mkt_cap_cr = mkt_cap / 1e7 if mkt_cap else None
+
+            # Valuation
+            trailing_pe = info.get("trailingPE")
+            forward_pe = info.get("forwardPE")
+            pb = info.get("priceToBook")
+            ev_ebitda = info.get("enterpriseToEbitda")
+            ps = info.get("priceToSalesTrailing12Months")
+            div_yield = info.get("dividendYield")
+            div_yield_pct = div_yield * 100 if div_yield else None
+
+            # Profitability
+            roe = info.get("returnOnEquity")
+            roe_pct = roe * 100 if roe else None
+            roa = info.get("returnOnAssets")
+            roa_pct = roa * 100 if roa else None
+            opm = info.get("operatingMargins")
+            opm_pct = opm * 100 if opm else None
+            npm = info.get("profitMargins")
+            npm_pct = npm * 100 if npm else None
+            eps = info.get("trailingEps")
+
+            # Growth
+            rev_growth = info.get("revenueGrowth")
+            rev_growth_pct = rev_growth * 100 if rev_growth else None
+            earn_growth = info.get("earningsGrowth")
+            earn_growth_pct = earn_growth * 100 if earn_growth else None
+
+            # Financial health
+            de_ratio = info.get("debtToEquity")
+            de_ratio_val = de_ratio / 100 if de_ratio else None  # yfinance gives in %
+            current_ratio = info.get("currentRatio")
+
+            # Price performance
+            cmp = info.get("currentPrice") or info.get("regularMarketPrice")
+            high_52w = info.get("fiftyTwoWeekHigh")
+            low_52w = info.get("fiftyTwoWeekLow")
+            beta = info.get("beta")
+
+            # Promoter holding (from yfinance majorHolders if available)
+            promoter_pct = None
+            pledged_pct = None
+            try:
+                holders = ticker.major_holders
+                if holders is not None and not holders.empty:
+                    for _, row in holders.iterrows():
+                        desc = str(row.iloc[1]).lower() if len(row) > 1 else ""
+                        if "insider" in desc or "promoter" in desc:
+                            promoter_pct = float(row.iloc[0])
+            except Exception:
+                pass
+
+            # ROCE — compute from financials if possible
+            roce_pct = None
+            try:
+                inc = ticker.financials
+                bs = ticker.balance_sheet
+                if inc is not None and bs is not None and not inc.empty and not bs.empty:
+                    ebit = None
+                    for label in ["EBIT", "Operating Income"]:
+                        if label in inc.index:
+                            ebit = inc.loc[label].iloc[0]
+                            break
+                    total_assets = None
+                    current_liab = None
+                    for label in ["Total Assets"]:
+                        if label in bs.index:
+                            total_assets = bs.loc[label].iloc[0]
+                    for label in ["Current Liabilities", "Total Current Liabilities"]:
+                        if label in bs.index:
+                            current_liab = bs.loc[label].iloc[0]
+                            break
+                    if ebit and total_assets and current_liab:
+                        ce = total_assets - current_liab
+                        if ce > 0:
+                            roce_pct = (ebit / ce) * 100
+            except Exception:
+                pass
+
+            # Interest coverage
+            interest_coverage = None
+            try:
+                inc = ticker.financials
+                if inc is not None and not inc.empty:
+                    ebit = None
+                    interest = None
+                    for label in ["EBIT", "Operating Income"]:
+                        if label in inc.index:
+                            ebit = inc.loc[label].iloc[0]
+                            break
+                    for label in ["Interest Expense"]:
+                        if label in inc.index:
+                            interest = abs(inc.loc[label].iloc[0])
+                            break
+                    if ebit and interest and interest > 0:
+                        interest_coverage = ebit / interest
+            except Exception:
+                pass
+
+            # Revenue & PAT 3Y CAGR
+            rev_cagr_3y_pct = None
+            pat_cagr_3y_pct = None
+            try:
+                inc = ticker.financials
+                if inc is not None and inc.shape[1] >= 4:
+                    rev_now = None
+                    rev_3y = None
+                    pat_now = None
+                    pat_3y = None
+                    for label in ["Total Revenue", "Operating Revenue", "Revenue"]:
+                        if label in inc.index:
+                            rev_now = inc.loc[label].iloc[0]
+                            rev_3y = inc.loc[label].iloc[3]
+                            break
+                    for label in ["Net Income", "Net Income Common Stockholders"]:
+                        if label in inc.index:
+                            pat_now = inc.loc[label].iloc[0]
+                            pat_3y = inc.loc[label].iloc[3]
+                            break
+                    if rev_now and rev_3y and rev_3y > 0:
+                        rev_cagr_3y_pct = ((rev_now / rev_3y) ** (1/3) - 1) * 100
+                    if pat_now and pat_3y and pat_3y > 0:
+                        pat_cagr_3y_pct = ((pat_now / pat_3y) ** (1/3) - 1) * 100
+            except Exception:
+                pass
+
+            # 1Y Return
+            return_1y_pct = None
+            try:
+                hist = ticker.history(period="1y")
+                if hist is not None and len(hist) > 20:
+                    p_start = hist["Close"].iloc[0]
+                    p_end = hist["Close"].iloc[-1]
+                    if p_start > 0:
+                        return_1y_pct = ((p_end / p_start) - 1) * 100
+            except Exception:
+                pass
+
+            entry = {
+                "symbol": sym,
+                "name": info.get("shortName", sym),
+                "market_cap_cr": mkt_cap_cr,
+                "trailing_pe": trailing_pe,
+                "forward_pe": forward_pe,
+                "pb": pb,
+                "ev_ebitda": ev_ebitda,
+                "ps": ps,
+                "div_yield_pct": div_yield_pct,
+                "roe_pct": roe_pct,
+                "roa_pct": roa_pct,
+                "roce_pct": roce_pct,
+                "opm_pct": opm_pct,
+                "npm_pct": npm_pct,
+                "eps": eps,
+                "rev_growth_pct": rev_growth_pct,
+                "earn_growth_pct": earn_growth_pct,
+                "rev_cagr_3y_pct": rev_cagr_3y_pct,
+                "pat_cagr_3y_pct": pat_cagr_3y_pct,
+                "de_ratio": de_ratio_val,
+                "current_ratio": current_ratio,
+                "interest_coverage": interest_coverage,
+                "promoter_pct": promoter_pct,
+                "pledged_pct": pledged_pct,
+                "cmp": cmp,
+                "high_52w": high_52w,
+                "low_52w": low_52w,
+                "return_1y_pct": return_1y_pct,
+                "beta": beta,
+            }
+            results.append(entry)
+            print("OK (Mkt Cap: %.0f Cr)" % (mkt_cap_cr or 0))
+
+        except Exception as e:
+            print("FAILED (%s)" % e)
+            results.append({"symbol": sym, "name": sym})
+
+    return results
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(symbol=None, documents_dir=None):
+def run(symbol=None, documents_dir=None, compare=None):
     """Run the complete forensic + deep fundamental analysis.
     
     Args:
         symbol: NSE symbol (e.g. 'RELIANCE'). Defaults to COMPANY_SYMBOL.
         documents_dir: Optional path to a folder containing concall PDFs
                        and annual report PDFs for NLP analysis.
+        compare: List of NSE symbols to include in comparative analysis section.
     """
     if symbol is None:
         symbol = COMPANY_SYMBOL
@@ -8594,6 +9615,8 @@ def run(symbol=None, documents_dir=None):
     print("=" * 64)
     print("  FORENSIC + DEEP FUNDAMENTAL ANALYSIS")
     print("  Symbol: %s" % symbol)
+    if compare:
+        print("  Compare: %s" % ", ".join(compare))
     print("  Date  : %s" % datetime.datetime.now().strftime("%d-%b-%Y %H:%M"))
     print("=" * 64)
 
@@ -8654,6 +9677,16 @@ def run(symbol=None, documents_dir=None):
     if data.years == 0 and data.financial_results_filings:
         _augment_financials_from_filings(data)
 
+    # Order book history (press releases + investor presentations)
+    data.order_book_history = fetch_order_book_from_filings(symbol)
+
+    # Comparative analysis (user-specified peer companies)
+    if compare:
+        all_compare_symbols = [symbol] + [s.strip().upper() for s in compare if s.strip()]
+        data.comparison_data = fetch_comparison_metrics(all_compare_symbols)
+    else:
+        data.comparison_data = None
+
     # Step 4: Deep Fundamental Analysis
     deep_analyzer = DeepFundamentalAnalyzer(data, forensic_analyzer=analyzer)
     deep_results = deep_analyzer.run_all(documents_dir=documents_dir)
@@ -8688,6 +9721,21 @@ def run(symbol=None, documents_dir=None):
 
 
 if __name__ == "__main__":
-    # To run with documents for NLP analysis, set the path:
-    # run(documents_dir="/path/to/company/documents")
-    run()
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Forensic Accounting Report Generator",
+        usage="python3 forensic_accounting.py SYMBOL [--compare PEER1,PEER2,...]",
+    )
+    parser.add_argument("symbol", nargs="?", default=None,
+                        help="NSE symbol (e.g. TCS, RELIANCE). "
+                             "Defaults to COMPANY_SYMBOL in script.")
+    parser.add_argument("--compare", "-c", type=str, default=None,
+                        help="Comma-separated list of peer symbols for comparative analysis "
+                             "(e.g. --compare DANISH,VOLTAMP,INDOTECH,SHILCTECH)")
+    args = parser.parse_args()
+
+    compare_list = None
+    if args.compare:
+        compare_list = [s.strip() for s in args.compare.split(",") if s.strip()]
+
+    run(symbol=args.symbol, compare=compare_list)
