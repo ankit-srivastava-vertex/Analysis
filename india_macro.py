@@ -2,8 +2,8 @@
 India Macro Dashboard
 =====================
 
-End-to-end India macro/fiscal/financial-markets dashboard tracking 33
-monthly indicators across 7 categories. Fetches data automatically from
+End-to-end India macro/fiscal/financial-markets dashboard tracking 28
+monthly indicators across 6 categories. Fetches data automatically from
 10+ government/regulator sources, computes MoM and YoY growth rates,
 and produces an interactive HTML dashboard plus a multi-sheet Excel workbook.
 
@@ -11,24 +11,19 @@ Integrated into run_all.py as Scenario 8/8 — runs `--fetch-direct`, then
 builds outputs. The standalone Excel and chart are attached to the daily
 email alongside the unified market analysis workbook.
 
-INDICATORS (33 total, 7 categories)
+INDICATORS (28 total, 6 categories)
 ------------------------------------
- Fiscal (1):
-   gst_gross                — GST Gross Collections (₹ Cr)
-
- Industrial (6):
-   core8                    — IIP Core-8 Index
+ Industrial (5):
    cement_production        — Cement Production (lakh tonnes)
    steel_production         — Crude Steel Production (lakh tonnes)
    electricity_generation   — Electricity Generation (BU)
    steel_dispatch           — Steel Dispatches (lakh tonnes)
    fertilizer_dispatch      — Fertilizer Dispatches (lakh tonnes)
 
- External Sector (4):
+ External Sector (3):
    forex_reserves           — Forex Reserves Total ($ Bn)
    forex_fca                — Forex FCA ($ Bn)
    forex_gold               — Forex Gold ($ Bn)
-   fdi_inflows              — FDI Equity Inflows ($ Mn)
 
  Energy (6):
    petroleum_consumption    — Petroleum Consumption (TMT)
@@ -42,11 +37,9 @@ INDICATORS (33 total, 7 categories)
    bank_credit_total        — SCB Total Credit Outstanding (₹ Lakh Cr)
    bank_deposit_total       — SCB Total Deposits (₹ Lakh Cr)
 
- Capital Markets (14):
+ Capital Markets (12):
    fpi_equity               — FPI Equity Net Investment (₹ Cr)
    fpi_debt                 — FPI Debt Net Investment (₹ Cr)
-   fpi_custodian_top5       — FPI Top-5 Custodian AUC Share (%)
-   fpi_country_top5         — FPI Top-5 Country AUC Share (%)
    mf_aum_total             — MF Industry AUM Total (₹ Lakh Cr)
    mf_aum_equity            — MF Equity AUM (₹ Lakh Cr)
    mf_aum_debt              — MF Debt AUM (₹ Lakh Cr)
@@ -58,7 +51,7 @@ INDICATORS (33 total, 7 categories)
    depository_demat_nsdl    — NSDL Demat Accounts (Cr)
    depository_demat_cdsl    — CDSL Demat Accounts (Cr)
 
-DATA SOURCES & FETCHERS (14 direct fetchers)
+DATA SOURCES & FETCHERS (12 direct fetchers)
 ---------------------------------------------
  Source                     | Fetcher Function            | Indicators Updated
  --------------------------+-----------------------------+--------------------
@@ -79,15 +72,12 @@ DATA SOURCES & FETCHERS (14 direct fetchers)
  CDSL Periodic PDF         | fetch_cdsl_demat()          | depository_demat_cdsl
  PPAC LPG XLSX             | fetch_ppac_lpg()            | lpg_connections
  PPAC PNG XLSX             | fetch_ppac_png()            | png_connections
- OEA Core-8 XLSX           | fetch_core8_cement()        | core8, cement_production
- NSDL FPI Country Top-5    | fetch_nsdl_fpi_country_top5()| fpi_country_top5
- NSDL FPI Custodian Top-5  | fetch_nsdl_fpi_custodian_top5()| fpi_custodian_top5
+ OEA Core-8 XLSX           | fetch_core8_cement()        | cement_production
 
  Additional (manual/OGD):
    data.gov.in OGD API     — Free key from data.gov.in/user/register;
                               set DATA_GOV_IN_API_KEY in .env to enable.
-   Manual --add             — gst_gross, fdi_inflows, renewable_capacity,
-                              power_generation_state
+   Manual --add             — renewable_capacity, power_generation_state
 
 ARCHITECTURE
 ------------
@@ -115,10 +105,10 @@ USAGE
     python3 india_macro.py --list
 
     # Manually add a data point:
-    python3 india_macro.py --add gst_gross 2025-05 215000
+    python3 india_macro.py --add cement_production 2025-05 38.5
 
     # Print one indicator's data table with growth rates:
-    python3 india_macro.py --print gst_gross
+    python3 india_macro.py --print cement_production
 
     # Run all 14 direct fetchers then rebuild dashboard + Excel:
     python3 india_macro.py --fetch-direct
@@ -238,22 +228,13 @@ OGD_RESOURCES = {
 
 
 # ===========================================================================
-# INDICATOR REGISTRY — curated 34-indicator subset (auto-fetchable focus)
+# INDICATOR REGISTRY — curated 28-indicator subset (auto-fetchable focus)
 # Each indicator declares: id, category, title, unit, source, growth metrics
 # Growth metrics: any subset of ["MoM", "QoQ", "YoY"]
 # ===========================================================================
 
 INDICATORS = [
-    # ── FISCAL ────────────────────────────────────────────────────────────
-    {"id": "gst_gross", "category": "Fiscal",
-     "title": "GST Gross Collection", "unit": "₹ Cr", "freq": "monthly",
-     "source": "PIB (Ministry of Finance)", "metrics": ["MoM", "YoY"]},
-
     # ── INDUSTRIAL ────────────────────────────────────────────────────────
-    {"id": "core8", "category": "Industrial",
-     "title": "8 Core Industries Index (YoY %)", "unit": "%",
-     "freq": "monthly", "source": "Office of Economic Adviser",
-     "metrics": []},
     {"id": "cement_production", "category": "Industrial",
      "title": "Cement Production", "unit": "Mn Tonnes", "freq": "monthly",
      "source": "OEA Core-8", "metrics": ["MoM", "YoY"]},
@@ -280,9 +261,6 @@ INDICATORS = [
     {"id": "forex_gold", "category": "External Sector",
      "title": "Forex Reserves: Gold", "unit": "$ Bn",
      "freq": "monthly", "source": "RBI WSS", "metrics": ["MoM"]},
-    {"id": "fdi_inflows", "category": "External Sector",
-     "title": "FDI Inflows (Equity)", "unit": "$ Mn", "freq": "quarterly",
-     "source": "DPIIT FDI Factsheet", "metrics": ["YoY"]},
 
     # ── ENERGY ────────────────────────────────────────────────────────────
     {"id": "petroleum_consumption", "category": "Energy",
@@ -321,12 +299,6 @@ INDICATORS = [
     {"id": "fpi_debt", "category": "Capital Markets",
      "title": "FPI Net Investment — Debt", "unit": "₹ Cr",
      "freq": "monthly", "source": "NSDL FPI Statistics", "metrics": []},
-    {"id": "fpi_custodian_top5", "category": "Capital Markets",
-     "title": "Top-5 FPI Custodians (AUC % share)", "unit": "%",
-     "freq": "monthly", "source": "NSDL", "metrics": []},
-    {"id": "fpi_country_top5", "category": "Capital Markets",
-     "title": "Top-5 FPI Country-of-Origin (AUC % share)", "unit": "%",
-     "freq": "monthly", "source": "NSDL", "metrics": []},
     {"id": "mf_aum_total", "category": "Capital Markets",
      "title": "Mutual Fund Industry AUM", "unit": "₹ Lakh Cr",
      "freq": "monthly", "source": "AMFI", "metrics": ["MoM", "YoY"]},
@@ -367,21 +339,6 @@ INDICATORS = [
 # ===========================================================================
 
 SEED = {
-    "gst_gross": [
-        ("2022-04", 167540), ("2022-05", 140885), ("2022-06", 144616),
-        ("2022-07", 148995), ("2022-08", 143612), ("2022-09", 147686),
-        ("2022-10", 151718), ("2022-11", 145867), ("2022-12", 149507),
-        ("2023-01", 155922), ("2023-02", 149577), ("2023-03", 160122),
-        ("2023-04", 187035), ("2023-05", 157090), ("2023-06", 161497),
-        ("2023-07", 165105), ("2023-08", 159069), ("2023-09", 162712),
-        ("2023-10", 172003), ("2023-11", 167929), ("2023-12", 164882),
-        ("2024-01", 172129), ("2024-02", 168337), ("2024-03", 178484),
-        ("2024-04", 210267), ("2024-05", 172739), ("2024-06", 173813),
-        ("2024-07", 182075), ("2024-08", 174962), ("2024-09", 173240),
-        ("2024-10", 187346), ("2024-11", 182269), ("2024-12", 176857),
-        ("2025-01", 195506), ("2025-02", 183646), ("2025-03", 196141),
-        ("2025-04", 236716),
-    ],
     # Forex reserves total ($ Bn) — RBI WSS month-end
     "forex_reserves": [
         ("2024-04", 637.92), ("2024-05", 651.51), ("2024-06", 651.99),
@@ -406,13 +363,6 @@ SEED = {
         ("2025-01", 26400), ("2025-02", 25999), ("2025-03", 25926),
         ("2025-04", 26632),
     ],
-    # 8 Core Industries Index YoY %
-    "core8": [
-        ("2024-04", 6.70), ("2024-05", 6.90), ("2024-06", 5.10),
-        ("2024-07", 6.30), ("2024-08", -1.50), ("2024-09", 2.40),
-        ("2024-10", 3.70), ("2024-11", 4.30), ("2024-12", 4.40),
-        ("2025-01", 5.10), ("2025-02", 2.90), ("2025-03", 3.80),
-    ],
     # Bank credit YoY % (RBI WSS)
     "bank_credit_total": [
         ("2024-04", 19.0), ("2024-05", 19.8), ("2024-06", 17.4),
@@ -425,13 +375,6 @@ SEED = {
         ("2024-07", 10.6), ("2024-08", 10.7), ("2024-09", 11.5),
         ("2024-10", 11.7), ("2024-11", 11.1), ("2024-12", 10.0),
         ("2025-01", 10.2), ("2025-02", 10.6), ("2025-03", 10.3),
-    ],
-    # FDI Equity Inflows ($ Mn) — quarterly, DPIIT FDI Factsheet / RBI BOP
-    # Period = last month of the quarter (Jun/Sep/Dec/Mar)
-    "fdi_inflows": [
-        ("2023-06", 17791), ("2023-09", 10420), ("2023-12", 12385),
-        ("2024-03", 11489), ("2024-06", 16173), ("2024-09", 13602),
-        ("2024-12", 17394),
     ],
 }
 
@@ -1500,6 +1443,66 @@ def _ppac_discover_latest_snapshot():
     return best if best else (None, None)
 
 
+def _ppac_discover_pt_pdfs():
+    """Discover PT_Consumption and PT_import PDFs from PPAC homepage.
+
+    Returns dict with keys 'consumption_url' and 'import_url' (if found).
+    """
+    html = _http_get_html(PPAC_HOME, timeout=20)
+    if not html:
+        return {}
+    import re as _re
+    out = {}
+    # PT_Consumption.pdf
+    m = _re.search(
+        r'(https://ppac\.gov\.in/download\.php\?file=[^"\s]*PT_Consumption[^"\s]*\.pdf)',
+        html, _re.IGNORECASE)
+    if m:
+        out['consumption_url'] = m.group(1)
+    # PT_import.pdf (crude oil import)
+    m = _re.search(
+        r'(https://ppac\.gov\.in/download\.php\?file=[^"\s]*PT_import[^"\s]*\.pdf)',
+        html, _re.IGNORECASE)
+    if m:
+        out['import_url'] = m.group(1)
+    return out
+
+
+def _ppac_parse_pt_consumption(pdf_bytes, period):
+    """Parse PT_Consumption PDF for total petroleum consumption ('000 MT)."""
+    import re as _re
+    for _pn, txt in _pdf_pages_text(pdf_bytes):
+        for line in txt.splitlines():
+            stripped = line.strip()
+            if _re.match(r"TOTAL\s+[\d,]+", stripped, _re.IGNORECASE):
+                nums = _re.findall(r"[\d]+", stripped)
+                if nums:
+                    try:
+                        # TOTAL row: first number is the latest month value
+                        val = int(nums[0])
+                        return round(val / 1000.0, 2)  # '000 MT -> MMT
+                    except ValueError:
+                        pass
+    return None
+
+
+def _ppac_parse_pt_import_crude(pdf_bytes, period):
+    """Parse PT_import PDF for crude oil import ('000 MT)."""
+    import re as _re
+    for _pn, txt in _pdf_pages_text(pdf_bytes):
+        for line in txt.splitlines():
+            stripped = line.strip()
+            if _re.match(r"CRUDE\s+OIL\s+[\d,]+", stripped, _re.IGNORECASE):
+                nums = _re.findall(r"[\d]+", stripped)
+                if nums:
+                    try:
+                        val = int(nums[0])
+                        return round(val / 1000.0, 2)  # '000 MT -> MMT
+                    except ValueError:
+                        pass
+    return None
+
+
 def fetch_ppac_snapshot():
     period, url = _ppac_discover_latest_snapshot()
     if not url:
@@ -1547,6 +1550,24 @@ def fetch_ppac_snapshot():
                         pass
         if crude is not None and consumption is not None:
             break
+
+    # Fallback: if Snapshot PDF is image-only, try PT_Consumption / PT_import
+    if crude is None or consumption is None:
+        pt_urls = _ppac_discover_pt_pdfs()
+        if consumption is None and 'consumption_url' in pt_urls:
+            print("  · Snapshot unreadable, trying PT_Consumption.pdf ...")
+            pdf2 = _curl_download(pt_urls['consumption_url'], timeout=30)
+            if pdf2:
+                val = _ppac_parse_pt_consumption(pdf2, period)
+                if val is not None:
+                    consumption = val
+        if crude is None and 'import_url' in pt_urls:
+            print("  · Snapshot unreadable, trying PT_import.pdf (crude imports) ...")
+            pdf3 = _curl_download(pt_urls['import_url'], timeout=30)
+            if pdf3:
+                val = _ppac_parse_pt_import_crude(pdf3, period)
+                if val is not None:
+                    crude = val
 
     if crude is not None:
         out["crude_oil_production"] = (period, round(crude, 2))
@@ -1813,45 +1834,74 @@ def fetch_fertilizer_monthly():
 # These require:  pip install playwright  &&  playwright install chromium
 # Imports live inside each fetcher so missing dep does not break --fetch-direct.
 
-NSDL_STATS_URL = "https://nsdl.co.in/about/statistics.php"
+NSDL_STATS_URL = "https://nsdl.co.in/"
 
 
 def fetch_nsdl_demat():
     """Cumulative NSDL demat investor account count (Cr).
 
-    NSDL renders the 'Statistics' summary card server-side, so a plain
-    requests.get with a browser UA suffices (no Playwright needed).
+    The dedicated statistics page (nsdl.co.in/about/statistics.php) is now
+    blocked by a WAF.  Fortunately the homepage shows the same summary:
+        "April 30, 2026  Investor Accounts  4,47,48,194"
     """
     html = _http_get_html(NSDL_STATS_URL, timeout=30)
     if not html:
-        print("  ! NSDL statistics page fetch failed.")
+        print("  ! NSDL homepage fetch failed.")
         return {}
 
     import re as _re
-    tables = _re.findall(r"<table[^>]*>.*?</table>", html, _re.DOTALL | _re.IGNORECASE)
+
+    # Pattern: "<month> <day>, <year> ... Investor Accounts ... <number>"
+    # The homepage renders this in a stats card section.
+    # Try to find the date and account count near "Investor Account"
     period, accounts, raw_accounts = None, None, None
+
+    # Look for date preceding/near "Investor Accounts"
+    # Format on homepage: "April 30, 2026"
     date_pat = _re.compile(
         r"(January|February|March|April|May|June|July|August|"
         r"September|October|November|December)\s+\d{1,2},?\s+(20\d{2})",
         _re.IGNORECASE)
     acct_pat = _re.compile(
-        r"Investor\s+Accounts[^0-9]*([\d,]+)", _re.IGNORECASE)
-    for tab in tables:
-        text = _re.sub(r"<[^>]+>", " ", tab)
-        text = _re.sub(r"\s+", " ", text).strip()
-        dm = date_pat.search(text)
-        am = acct_pat.search(text)
-        if dm and am:
+        r"Investor\s+Accounts?\s*[^0-9]*([\d,]+)", _re.IGNORECASE)
+
+    # Strategy: find "Investor Accounts" match first, then look for date nearby
+    am = acct_pat.search(html)
+    if am:
+        raw_accounts = am.group(1)
+        try:
+            accounts = int(raw_accounts.replace(",", ""))
+        except ValueError:
+            pass
+        # Look for date within 500 chars before the match
+        search_region = html[max(0, am.start() - 500):am.start()]
+        dm = None
+        for dm in date_pat.finditer(search_region):
+            pass  # get the last (closest) match
+        if dm:
             mn = _MONTH_ABBR_TO_NUM.get(dm.group(1).capitalize())
             if mn is not None:
                 period = "%s-%02d" % (dm.group(2), mn)
-            try:
-                # Indian comma format: 4,43,89,501 -> 44389501
-                raw_accounts = am.group(1)
-                accounts = int(raw_accounts.replace(",", ""))
-            except ValueError:
-                pass
-            break
+
+    if period is None or accounts is None:
+        # Fallback: scan all tables (legacy approach for if stats page returns)
+        tables = _re.findall(r"<table[^>]*>.*?</table>", html,
+                             _re.DOTALL | _re.IGNORECASE)
+        for tab in tables:
+            text = _re.sub(r"<[^>]+>", " ", tab)
+            text = _re.sub(r"\s+", " ", text).strip()
+            dm2 = date_pat.search(text)
+            am2 = acct_pat.search(text)
+            if dm2 and am2:
+                mn = _MONTH_ABBR_TO_NUM.get(dm2.group(1).capitalize())
+                if mn is not None:
+                    period = "%s-%02d" % (dm2.group(2), mn)
+                try:
+                    raw_accounts = am2.group(1)
+                    accounts = int(raw_accounts.replace(",", ""))
+                except ValueError:
+                    pass
+                break
 
     if period is None or accounts is None:
         print("  ! Could not locate NSDL summary row (date=%r accounts=%r)" %
@@ -2105,119 +2155,6 @@ def fetch_core8_cement():
     return {"cement_production": (last_period, round(last_val, 2))}
 
 
-# ---- NSDL FPI AUC: top-5 country share (HTML) ----------------------------
-NSDL_FPI_COUNTRY_URL = "https://www.fpi.nsdl.co.in/web/Reports/ReportDetail.aspx?RepID=14"
-NSDL_FPI_CLIENT_URL  = "https://www.fpi.nsdl.co.in/web/Reports/ReportDetail.aspx?RepID=22"
-
-
-def _nsdl_fpi_period_from_html(html):
-    """Extract reporting month (YYYY-MM) from page heading like 'April 2026'."""
-    import re
-    m = re.search(r"(January|February|March|April|May|June|July|August|"
-                  r"September|October|November|December)\s+(20\d{2})", html, re.IGNORECASE)
-    if not m:
-        return None
-    mon = _MONTH_ABBR_TO_NUM.get(m.group(1).title()[:3]) or _MONTH_ABBR_TO_NUM.get(m.group(1).title())
-    if mon is None:
-        # Full month name fallback
-        full = {"January":1,"February":2,"March":3,"April":4,"May":5,"June":6,
-                "July":7,"August":8,"September":9,"October":10,"November":11,"December":12}
-        mon = full.get(m.group(1).title())
-    if mon is None:
-        return None
-    return "%04d-%02d" % (int(m.group(2)), mon)
-
-
-def _nsdl_fpi_top5_share(url, name_col_keyword):
-    """Generic helper: fetch NSDL FPI AUC table, return (period, top5_share_pct)."""
-    from io import StringIO
-    html = _http_get_html(url, timeout=45)
-    if not html:
-        return (None, None)
-    period = _nsdl_fpi_period_from_html(html)
-    try:
-        tables = pd.read_html(StringIO(html))
-    except Exception as e:
-        print("  ! pd.read_html failed: %s" % e)
-        return (period, None)
-    # The relevant table has multi-level header; locate by presence of 'Total' col + name keyword
-    target = None
-    for t in tables:
-        cols_flat = " ".join([str(c) for c in t.columns.tolist()]).lower()
-        if name_col_keyword.lower() in cols_flat and "total" in cols_flat:
-            target = t
-            break
-    if target is None:
-        print("  ! Could not locate NSDL FPI AUC table for %s" % name_col_keyword)
-        return (period, None)
-    # Flatten columns; find the rightmost Total column
-    flat_cols = []
-    for c in target.columns:
-        if isinstance(c, tuple):
-            flat_cols.append(" | ".join([str(x) for x in c if str(x) != 'nan']))
-        else:
-            flat_cols.append(str(c))
-    target.columns = flat_cols
-    total_cols = [c for c in flat_cols if c.strip().lower().endswith("total")]
-    if not total_cols:
-        print("  ! No Total column in NSDL FPI table")
-        return (period, None)
-    total_col = total_cols[-1]
-    # Find name column (first text column containing the keyword)
-    name_col = None
-    for c in flat_cols:
-        if name_col_keyword.lower() in c.lower():
-            name_col = c
-            break
-    if name_col is None:
-        name_col = flat_cols[1]  # fallback
-    # Coerce Total to numeric; drop non-numeric/Total/Other rows
-    df = target.copy()
-    df[total_col] = pd.to_numeric(df[total_col], errors="coerce")
-    df = df.dropna(subset=[total_col])
-    df["_name_str"] = df[name_col].astype(str).str.strip()
-    grand = df[df["_name_str"].str.lower() == "total"][total_col]
-    if grand.empty:
-        # Sometimes "Total" in Sr.No. col
-        sr_col = flat_cols[0]
-        df_grand = target[target[sr_col].astype(str).str.strip().str.lower() == "total"]
-        if not df_grand.empty:
-            grand_val = pd.to_numeric(df_grand[total_col], errors="coerce").iloc[0]
-        else:
-            print("  ! Grand Total row missing in NSDL FPI table")
-            return (period, None)
-    else:
-        grand_val = float(grand.iloc[0])
-    # Exclude Total / Others / blanks
-    body = df[~df["_name_str"].str.lower().isin(["total", "others", "other", "nan", ""])]
-    body = body.sort_values(by=total_col, ascending=False)
-    top5_sum = float(body.head(5)[total_col].sum())
-    if grand_val <= 0:
-        return (period, None)
-    return (period, round(top5_sum / grand_val * 100.0, 2))
-
-
-def fetch_nsdl_fpi_country_top5():
-    """Top-5 country-of-origin AUC share (%) from NSDL RepID=14."""
-    period, val = _nsdl_fpi_top5_share(NSDL_FPI_COUNTRY_URL, "Country")
-    if period is None or val is None:
-        return {}
-    return {"fpi_country_top5": (period, val)}
-
-
-def fetch_nsdl_fpi_custodian_top5():
-    """Top-5 client-category AUC share (%) from NSDL RepID=22.
-
-    NSDL does not publish per-custodian AUC; this uses 'Type of Client'
-    categories (FPIs, MFs, Insurance, FDI, etc.) as the closest available
-    public proxy for the custodian-concentration indicator.
-    """
-    period, val = _nsdl_fpi_top5_share(NSDL_FPI_CLIENT_URL, "Type of Client")
-    if period is None or val is None:
-        return {}
-    return {"fpi_custodian_top5": (period, val)}
-
-
 BROWSER_FETCHERS = [
 ]
 
@@ -2237,8 +2174,6 @@ DIRECT_FETCHERS = [
     ("PPAC LPG Active Domestic Customers (XLSX)", fetch_ppac_lpg),
     ("PPAC CGD Network — PNG Domestic (XLSX)", fetch_ppac_png),
     ("OEA Core-8 Industries (XLSX)",           fetch_core8_cement),
-    ("NSDL FPI AUC Country-wise Top-5 (HTML)", fetch_nsdl_fpi_country_top5),
-    ("NSDL FPI AUC Client-Type Top-5 (HTML)",  fetch_nsdl_fpi_custodian_top5),
 ]
 
 

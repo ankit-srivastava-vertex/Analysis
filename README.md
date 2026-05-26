@@ -1,13 +1,13 @@
 # Analysis — Daily Indian Equity Market Toolkit
 
 End-to-end Python toolkit that scrapes, computes and emails a unified daily
-view of the Indian equity market: FII flows, custom sector indices, sector
-momentum / RRG, a multi-universe pull-back screener, NSE+BSE bulk/block
-deals, and a deep single-stock forensic + fundamental PDF report.
+view of the Indian equity market: bulk/block deals, FII flows & stake tracking,
+HNI holdings, sector momentum / RRG, IPO anchor investors, and more.
 
 A single command (`python3 run_all.py`) — or a launchd agent that fires
 **Mon–Fri 18:00 IST** — runs the full pipeline, writes one Excel workbook +
-five interactive HTML charts, and emails everything as attachments.
+one combined interactive HTML chart (`market_charts.html` with tabbed UI),
+and emails both as attachments.
 
 ---
 
@@ -16,16 +16,16 @@ five interactive HTML charts, and emails everything as attachments.
 1. [Quick Start](#quick-start)
 2. [High-Level Architecture](#high-level-architecture)
 3. [Repository Layout](#repository-layout)
-4. [The Seven Daily Scenarios](#the-seven-daily-scenarios)
-5. [Forensic Report (Standalone)](#forensic-report-standalone)
-6. [Data Sources](#data-sources)
-7. [Inter-Module Dependencies](#inter-module-dependencies)
-8. [Output Files](#output-files)
-9. [Configuration & Secrets](#configuration--secrets)
-10. [Scheduling — launchd (macOS)](#scheduling--launchd-macos)
-11. [Scheduling — GitHub Actions (cloud)](#scheduling--github-actions-cloud)
-12. [Logging & Troubleshooting](#logging--troubleshooting)
-13. [Adding a New Scenario](#adding-a-new-scenario)
+4. [run_all.py — The Daily Pipeline](#run_allpy--the-daily-pipeline)
+5. [Standalone Scripts](#standalone-scripts)
+6. [Portfolio System](#portfolio-system)
+7. [Data Sources](#data-sources)
+8. [Inter-Module Dependencies](#inter-module-dependencies)
+9. [Output Files](#output-files)
+10. [Configuration & Secrets](#configuration--secrets)
+11. [Scheduling — launchd (macOS)](#scheduling--launchd-macos)
+12. [Scheduling — GitHub Actions (cloud)](#scheduling--github-actions-cloud)
+13. [Logging & Troubleshooting](#logging--troubleshooting)
 
 ---
 
@@ -47,15 +47,19 @@ cp .env.example .env   # if present, else create manually
 # 4. Run the full daily pipeline
 python3 run_all.py                 # all 7 scenarios + email
 python3 run_all.py --no-email      # dry run (no email)
-python3 run_all.py --skip bulk_block multi_pct_down   # skip slow ones
+python3 run_all.py --skip rrg      # skip specific scenarios
 
-# 5. Run a single-stock forensic PDF on demand
-python3 forensic_accounting.py     # prompts for ticker
+# 5. Run standalone scripts
+python3 BulkBlock.py               # bulk/block + FII + HNI (standalone)
+python3 breakout_scanner_angel.py  # breakout scan (includes multi_pct_down)
+python3 fno_max_oi.py              # F&O max OI scanner
+python3 india_macro.py --fetch-direct  # India macro dashboard
+python3 forensic_accounting.py     # single-stock forensic PDF (prompts for ticker)
 ```
 
 Outputs land in the **project root** (overwritten each run):
-[market_analysis_report.xlsx](market_analysis_report.xlsx) and five
-`*_chart.html` files. Per-run logs go to [logs/](logs/).
+`BULK_BLOCK_Deals_<timestamp>.xlsx` and `market_charts.html`.
+Per-run logs go to [logs/](logs/).
 
 ---
 
@@ -80,24 +84,25 @@ Outputs land in the **project root** (overwritten each run):
         ┌────────────────┐  angel_client.py     SMTP (Gmail)
         │ NSE / BSE APIs │  jugaad-data
         │ Angel SmartAPI │  yfinance
-        │ yfinance       │
+        │ NSDL FPI       │
         └────────────────┘
                   │
                   ▼
-        market_analysis_report.xlsx  +  5 *_chart.html  +  logs/*.log
+        BULK_BLOCK_Deals_<ts>.xlsx  +  market_charts.html  +  logs/*.log
                   │
                   ▼
                 Email with attachments
 ```
 
-**Three independent subsystems** share the same data layer (`data_provider.py`
+**Four independent subsystems** share the same data layer (`data_provider.py`
 + `angel_client.py`) and email layer (`email_sender.py`):
 
 | Subsystem | Entry point | Cadence |
 |---|---|---|
 | **Daily market sweep** (7 scenarios) | `run_all.py` | Mon–Fri 18:00 IST (launchd) |
+| **Breakout scanner** | `breakout_scanner_angel.py` | On demand |
 | **Single-stock deep PDF** | `forensic_accounting.py` | On demand |
-| **Bulk/Block live scan** | `BulkBlock.py` (also embedded as scenario in run_all) | On demand or via run_all |
+| **Portfolio analysis** (9 scenarios) | `portfolio/portfolio_run_all.py` | On demand |
 
 ---
 
@@ -109,19 +114,39 @@ Analysis/
 ├── scripts/
 │   └── run_market_analysis.sh    # launchd wrapper: cd / venv / .env / log
 │
-├── BulkBlock.py                  # NSE+BSE bulk/block deals (scenario 1)
-├── multi_pct_down.py             # Multi-universe pct-down screener (scenario 2)
-├── custom_sector_index.py        # Equal-weighted sector indices (scenario 3)
-├── fii_flows.py                  # FII daily equity cash flows (scenario 4)
-├── fii_sector_flows.py           # FII fortnightly sector flows (scenario 5)
-├── sector_momentum.py            # Mansfield RS per sector (scenario 6)
-├── rrg_chart.py                  # Relative Rotation Graph (scenario 7)
+├── BulkBlock.py                  # NSE+BSE bulk/block + FII stake + HNI (scenario 1)
+├── fii_stake_tracker.py          # FII quarterly stake streaks (runs via BulkBlock)
+├── custom_sector_index.py        # Equal-weighted sector indices (scenario 2)
+├── fii_flows.py                  # FII daily equity cash flows (scenario 3)
+├── fii_sector_flows.py           # FII fortnightly sector flows (scenario 4)
+├── sector_momentum.py            # Mansfield RS per sector (scenario 5)
+├── rrg_chart.py                  # Relative Rotation Graph (scenario 6)
+├── ipo_anchor_tracker.py         # IPO anchor investor tracking (scenario 7)
 │
-├── forensic_accounting.py        # Standalone deep single-stock PDF report
+├── breakout_scanner_angel.py     # Pre-breakout scanner (standalone, includes multi_pct_down)
+├── multi_pct_down.py             # Pct-down screener (runs via breakout_scanner_angel)
+├── fno_max_oi.py                 # F&O Max OI strike scanner (standalone)
+├── india_macro.py                # India macro dashboard (standalone)
+├── forensic_accounting.py        # Single-stock forensic PDF report (standalone)
+├── breakout_review.py            # Walk-forward validation of breakout picks (standalone)
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
 ├── email_sender.py               # SMTP helper (Gmail App Password)
+│
+├── portfolio/                    # Portfolio analysis subsystem
+│   ├── portfolio_run_all.py      # Portfolio orchestrator (9 scenarios)
+│   ├── portfolio_tracker.py      # P&L, sector exposure, concentration
+│   ├── position_health.py        # DMA/RSI/drawdown technical scan
+│   ├── sl_target_tracker.py      # SL/Target hit alerts
+│   ├── risk_metrics.py           # Beta, VaR, Sharpe, MDD
+│   ├── correlation_clusters.py   # Return-correlation pairs & clusters
+│   ├── pledge_promoter.py        # Pledge % + promoter holding flags
+│   ├── mf_overlap.py             # MF crowding overlap
+│   ├── events_calendar.py        # Corp events for owned names
+│   ├── premarket_dashboard.py    # Global cues, FX, breadth
+│   ├── holdings_loader.py        # Parse broker holdings xlsx
+│   └── _prices.py                # Shared price-fetch helper
 │
 ├── index_constituents.json       # Static sector → ticker mapping
 ├── fii_equity_cache.csv          # Cached FII daily flows (incremental)
@@ -133,11 +158,9 @@ Analysis/
 ├── TRADING_STRATEGY.md           # Strategy documentation
 ├── README.md                     # ← this file
 │
+├── data/                         # Data storage (india_macro CSVs, etc.)
 ├── logs/                         # Per-run pipeline logs (auto-pruned 30d)
-│   ├── run_all_<timestamp>.log
-│   ├── launchd.out.log
-│   └── launchd.err.log
-├── Output/                       # Manual / archival outputs (PDF reports etc.)
+├── Output/                       # Breakout scanner outputs, review archives
 ├── .cache/                       # Misc fetch caches
 ├── venv/                         # Local virtualenv (gitignored)
 │
@@ -147,49 +170,94 @@ Analysis/
 
 ---
 
-## The Seven Daily Scenarios
+## run_all.py — The Daily Pipeline
 
-Sheets land in [market_analysis_report.xlsx](market_analysis_report.xlsx) in the
-order below (~23 sheets total).
+Runs 7 scenarios in sequence. Output is **one Excel + one combined chart**.
 
-| # | Module | Sheets (prefix) | What it does |
+| # | Module | What it produces | Goes where |
 |---|---|---|---|
-| 1 | [BulkBlock.py](BulkBlock.py) | `BB NSE Bulk`, `BB NSE Block`, `BB BSE Bulk`, `BB BSE Block` | Scrapes today's bulk + block deals from NSE & BSE, filters to a hardcoded "superstar" client list (Kacholia, Kedia, Madhusudan Kela, Goldman, Smallcap World Fund, etc.). |
-| 2 | [multi_pct_down.py](multi_pct_down.py) | `MPD NSE 12M`, `MPD NSE_SME 12M`, `MPD BSE_SME 12M` | Multi-universe pull-back screener: 2–21% off 52-wk highs, > 200-DMA, RS > NIFTY 500 over 3M, base-building, mcap band. Also emits a TradingView watchlist. |
-| 3 | [custom_sector_index.py](custom_sector_index.py) | `Sector Idx Summary`, `Sector Idx Values` | Builds equal-weighted sector indices from `index_constituents.json` and computes 1D / 1W / 1M / 3M / 6M / 1Y returns. |
-| 4 | [fii_flows.py](fii_flows.py) | `FII Flow Summary`, `FII Daily Data` | Daily FII equity cash market net flows with cumulative trend (incremental cache). |
-| 5 | [fii_sector_flows.py](fii_sector_flows.py) | `FII Sector Net Flows`, `FII Sector Detail` | NSDL fortnightly FII sector-wise net buy/sell breakdown. |
-| 6 | [sector_momentum.py](sector_momentum.py) | `RS Ranking`, `RS History` | Mansfield Relative Strength per sector vs NIFTY 500. |
-| 7 | [rrg_chart.py](rrg_chart.py) | `RRG 3 Day` … `RRG Quarterly` (8 timeframes) | Relative Rotation Graph: classifies sectors into Leading / Weakening / Lagging / Improving quadrants across 8 lookback windows. |
+| 1 | [BulkBlock.py](BulkBlock.py) | Bulk/block deals + FII Stake Tracker sheets + HNI holdings | `BULK_BLOCK_Deals_<ts>.xlsx` (the single output Excel) |
+| 2 | [custom_sector_index.py](custom_sector_index.py) | Equal-weighted sector indices | Chart only |
+| 3 | [fii_flows.py](fii_flows.py) | Daily FII equity cash flows + cumulative trend | Chart only |
+| 4 | [fii_sector_flows.py](fii_sector_flows.py) | Fortnightly FII sector-wise flows | Chart only |
+| 5 | [sector_momentum.py](sector_momentum.py) | Mansfield RS per sector | **"RS Ranking" sheet → appended to BulkBlock Excel** + chart |
+| 6 | [rrg_chart.py](rrg_chart.py) | Relative Rotation Graph (8 timeframes) | Chart only |
+| 7 | [ipo_anchor_tracker.py](ipo_anchor_tracker.py) | Last 14 months of IPOs with anchor investor matches | **"IPO Anchor List" sheet → appended to BulkBlock Excel** |
 
-Each scenario is wrapped in `try/except` inside `run_all.py` — a single
-failure does not abort the pipeline, and failed scenarios are reported in
-the email body and final summary.
+**BulkBlock Excel sheets** (final output):
+- `nse_bulk`, `nse_block` — NSE deals filtered to superstar clients
+- `Bulk Deals`, `Block Deals` — BSE deals filtered to superstar clients
+- `FII_Summary` — Classification rules + per-sheet row counts
+- `FII_New_Entry`, `FII_1Q_Increasing`, `FII_2Q_Increasing`, `FII_3Q_Increasing`, `FII_4Q_Increasing` — FII stake streak data
+- `HNIs` — Superstar/HNI new buys + increased positions (sorted A-Z)
+- `RS Ranking` — Sector relative strength ranking
+- `IPO Anchor List` — Recent IPOs with watchlist anchor matches
+
+**Combined Chart** (`market_charts.html` — tabbed HTML with iframe panels):
+- Sector Index
+- FII Flows
+- FII Sector Flows
+- Sector Momentum
+- RRG Chart
+
+Each scenario is wrapped in `try/except` — a single failure does not abort
+the pipeline. Failed scenarios are reported in the email body and summary.
+
+```bash
+python3 run_all.py                         # run all + send email
+python3 run_all.py --no-email              # run all, skip email
+python3 run_all.py --skip bulk_block rrg   # skip arbitrary scenarios
+```
+
+Available `--skip` names: `bulk_block`, `sector_index`, `fii_flows`,
+`fii_sector_flows`, `sector_momentum`, `rrg`, `ipo_anchor`
 
 ---
 
-## Forensic Report (Standalone)
+## Standalone Scripts
 
-[forensic_accounting.py](forensic_accounting.py) is a separate ~8.7K-line
-program that builds a **single-stock deep forensic + fundamental PDF**.
+These scripts run independently and are **not** part of `run_all.py`:
 
-- Inputs : a ticker (NSE / BSE / SME).
-- Outputs: `forensic_report_<TICKER>_<timestamp>.pdf` (40+ sections).
-- Sections include: Springate Z-score, Ohlson O-score, Montier C-score,
-  DuPont, working-capital trend, SGR, Benford's Law, ESM checks,
-  promoter analysis, deep DCF, valuation bands, capital allocation,
-  earnings quality, debt stress, moat signals, quarterly momentum,
-  concall/annual-report NLP, peer comparison, technical, Graham,
-  capex, institutional flow, corporate actions, credit intelligence,
-  shareholding, insider trading, relative strength, plus a **clickable
-  Table of Contents** (rendered via `fpdf2.insert_toc_placeholder` after
-  the cover page) and full PDF outline bookmarks.
+| Script | Command | Output |
+|---|---|---|
+| [BulkBlock.py](BulkBlock.py) | `python3 BulkBlock.py` | `BULK_BLOCK_Deals_<ts>.xlsx` |
+| [breakout_scanner_angel.py](breakout_scanner_angel.py) | `python3 breakout_scanner_angel.py` | `Output/breakout_watchlist.xlsx` + logs |
+| [multi_pct_down.py](multi_pct_down.py) | `python3 multi_pct_down.py` | `multi_pct_down_<ts>.xlsx` + `.txt` watchlist |
+| [fno_max_oi.py](fno_max_oi.py) | `python3 fno_max_oi.py` | `fno_max_oi.xlsx` |
+| [india_macro.py](india_macro.py) | `python3 india_macro.py --fetch-direct` | `india_macro_data.xlsx` + `india_macro_dashboard.html` |
+| [forensic_accounting.py](forensic_accounting.py) | `python3 forensic_accounting.py` | `forensic_report_<TICKER>_<ts>.pdf` |
+| [breakout_review.py](breakout_review.py) | `python3 breakout_review.py` | `Output/review_<ts>.xlsx` |
 
-Run on demand:
+**Key relationships:**
+- `fii_stake_tracker.py` runs via `BulkBlock.py` (called as `get_sheets()`)
+- `multi_pct_down.py` runs via `breakout_scanner_angel.py` (called inline)
+- All scenarios in `run_all.py` can also run individually with their own
+  standalone Excel + chart output
+
+---
+
+## Portfolio System
+
+A separate orchestrator for portfolio-level analysis:
 
 ```bash
-python3 forensic_accounting.py     # interactive ticker prompt
+python3 portfolio/portfolio_run_all.py              # all 9 + email
+python3 portfolio/portfolio_run_all.py --no-email   # dry run
 ```
+
+| # | Module | Purpose |
+|---|---|---|
+| 1 | `portfolio_tracker.py` | P&L, sector exposure, concentration |
+| 2 | `position_health.py` | DMA/RSI/drawdown technical scan |
+| 3 | `sl_target_tracker.py` | SL/Target hit alerts |
+| 4 | `risk_metrics.py` | Beta, VaR, Sharpe, MDD |
+| 5 | `correlation_clusters.py` | Return-correlation pairs & clusters |
+| 6 | `pledge_promoter.py` | Pledge % + promoter holding flags |
+| 7 | `mf_overlap.py` | MF crowding overlap |
+| 8 | `events_calendar.py` | Corp events for owned names |
+| 9 | `premarket_dashboard.py` | Global cues, FX, breadth + chart |
+
+Output: `portfolio/portfolio_report.xlsx` + `premarket_dashboard_chart.html`
 
 ---
 
@@ -199,23 +267,19 @@ All data flows through public/free sources. No paid market-data feeds.
 
 | Source | Used by | Auth |
 |---|---|---|
-| **Angel One SmartAPI** (smartapi-python) | `data_provider.py` (primary OHLCV) | `.env`: `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET` |
-| **jugaad-data** (NSE scrape) | `data_provider.py` (fallback for NSE main board) | None |
-| **yfinance** | `data_provider.py` (final fallback), market-cap, indices | None |
+| **Angel One SmartAPI** | `data_provider.py` (primary OHLCV) | `.env`: `ANGEL_*` |
+| **jugaad-data** (NSE scrape) | `data_provider.py` (fallback) | None |
+| **yfinance** | `data_provider.py` (final fallback), indices | None |
 | **NSE archives CSV** | `multi_pct_down.py` (universe seed, F&O list) | None |
 | **NSE API** `/api/snapshot-capital-market-largedeal` | `BulkBlock.py` | Cookie-managed session |
-| **BSE JSON API** `api.bseindia.com/.../BulkDeal_Beta` & `BlockDeal_Beta` | `BulkBlock.py` (primary) | None |
-| **BSE HTML scrape** `bseindia.com/markets/equity/EQReports/` | `BulkBlock.py` (fallback) | None |
+| **BSE JSON API** | `BulkBlock.py` (primary BSE) | None |
+| **BSE HTML scrape** | `BulkBlock.py` (fallback) | None |
 | **NSDL FPI fortnightly** | `fii_sector_flows.py` | None |
-| **NSE FII/DII daily** | `fii_flows.py` | None |
-| **screener.in** | `forensic_accounting.py` (fundamentals) | None |
-| **moneycontrol / trendlyne** | `forensic_accounting.py` (peer, shareholding) | None |
-
-**Caching** keeps the pipeline fast and resilient:
-- [fii_equity_cache.csv](fii_equity_cache.csv) — incremental daily FII flows.
-- [fii_oi_cache.csv](fii_oi_cache.csv) — FII derivatives OI cache.
-- `.angel_scrip_master.json` — Angel scrip master (~25 MB, weekly TTL).
-- `.cache/` — misc per-fetcher caches.
+| **NSDL FPI monthly** | `fii_flows.py` | None |
+| **NSE BhavCopy (F&O)** | `fno_max_oi.py` (EOD mode) | None |
+| **screener.in** | `fii_stake_tracker.py`, `breakout_scanner_angel.py`, `forensic_accounting.py` | `.env`: `SCREENER_*` |
+| **chittorgarh.com** | `ipo_anchor_tracker.py` (anchor tables) | None |
+| **RBI / AMFI / CEA / PPAC** | `india_macro.py` (28 indicators) | None |
 
 ---
 
@@ -223,52 +287,45 @@ All data flows through public/free sources. No paid market-data feeds.
 
 ```
 run_all.py
-  ├── BulkBlock.py             ── requests, bs4, (optional) nsepython
-  ├── multi_pct_down.py        ── data_provider.py ─┬─ angel_client.py
-  │                                                 ├─ jugaad-data
-  │                                                 └─ yfinance
-  ├── custom_sector_index.py   ── data_provider.py + index_constituents.json
-  ├── fii_flows.py             ── requests + fii_equity_cache.csv
-  ├── fii_sector_flows.py      ── requests
-  ├── sector_momentum.py       ── data_provider.py + index_constituents.json
-  ├── rrg_chart.py             ── data_provider.py + index_constituents.json
-  └── email_sender.py          ── smtplib (uses EMAIL_* env vars)
+  ├── BulkBlock.py ─── fii_stake_tracker.py ─── screener.in (HNI)
+  │                    requests, bs4
+  ├── custom_sector_index.py ── data_provider.py + index_constituents.json
+  ├── fii_flows.py ── requests + fii_equity_cache.csv
+  ├── fii_sector_flows.py ── requests (NSDL)
+  ├── sector_momentum.py ── data_provider.py + index_constituents.json
+  ├── rrg_chart.py ── data_provider.py + index_constituents.json
+  ├── ipo_anchor_tracker.py ── requests (NSE + chittorgarh)
+  └── email_sender.py ── smtplib
 
-forensic_accounting.py         ── data_provider.py + screener.in scrapes
-                                  + fpdf2 (clickable TOC + bookmarks)
+breakout_scanner_angel.py ── multi_pct_down.py + data_provider.py + screener.in
+fno_max_oi.py ── angel_client.py + NSE BhavCopy
+india_macro.py ── requests + pdfplumber + plotly
+forensic_accounting.py ── data_provider.py + screener.in + fpdf2
+portfolio/portfolio_run_all.py ── holdings_loader.py + data_provider.py + ...
 ```
 
 `data_provider.py` is the **single source of truth for OHLCV**. Every module
 that needs price history calls `data_provider.download(ticker, start, end)`,
-which internally tries Angel → jugaad → yfinance and returns a normalized
-pandas DataFrame.
-
-`angel_client.py` owns the SmartAPI session: single-threaded login (Angel
-rate-limits parallel TOTP), cached scrip-master lookup, daily candle fetch
-via `getCandleData()`. `run_all.py` pre-warms the session before any worker
-threads spawn.
+which internally tries Angel → jugaad → yfinance.
 
 ---
 
 ## Output Files
 
-| File | Lifecycle |
-|---|---|
-| [market_analysis_report.xlsx](market_analysis_report.xlsx) | Overwritten each run (~23 sheets) |
-| [custom_sector_index_chart.html](custom_sector_index_chart.html) | Overwritten |
-| [fii_flows_chart.html](fii_flows_chart.html) | Overwritten |
-| [fii_sector_flows_chart.html](fii_sector_flows_chart.html) | Overwritten |
-| [sector_momentum_chart.html](sector_momentum_chart.html) | Overwritten |
-| [rrg_chart_chart.html](rrg_chart_chart.html) | Overwritten |
-| `logs/run_all_<timestamp>.log` | New per run, auto-pruned > 30 days |
-| `logs/launchd.{out,err}.log` | Append-only (launchd-level errors only) |
-| `forensic_report_<TICKER>_<timestamp>.pdf` | New per forensic run (manual) |
-| [Output/](Output/) | Manual archive of historical PDFs and snapshots |
+| File | Producer | Lifecycle |
+|---|---|---|
+| `BULK_BLOCK_Deals_<timestamp>.xlsx` | `run_all.py` / `BulkBlock.py` | New each run |
+| `market_charts.html` | `run_all.py` | Overwritten (5 tabs) |
+| `Output/breakout_watchlist.xlsx` | `breakout_scanner_angel.py` | Overwritten |
+| `fno_max_oi.xlsx` | `fno_max_oi.py` | Overwritten |
+| `india_macro_data.xlsx` | `india_macro.py` | Overwritten |
+| `india_macro_dashboard.html` | `india_macro.py` | Overwritten |
+| `portfolio/portfolio_report.xlsx` | `portfolio_run_all.py` | Overwritten |
+| `forensic_report_<TICKER>_<ts>.pdf` | `forensic_accounting.py` | New per run |
+| `logs/run_all_<timestamp>.log` | `run_all.py` | Auto-pruned > 30 days |
+| `ipo_anchor_report.txt` | `ipo_anchor_tracker.py` | TradingView watchlist |
 
-The **email** sent by `run_all.py` attaches the Excel + 5 charts.
-`BulkBlock.py` standalone-mode emits its own `BULK_BLOCK_Deals_*.xlsx`
-+ HTML email; inside `run_all.py` this is suppressed (data is captured
-into the unified workbook instead).
+The **email** sent by `run_all.py` attaches the BulkBlock Excel + `market_charts.html`.
 
 ---
 
@@ -278,7 +335,7 @@ All secrets live in `.env` at the project root (gitignored). The wrapper
 script auto-exports every line so child processes inherit them.
 
 ```ini
-# Angel One (required for Angel-routed OHLCV in multi_pct_down + others)
+# Angel One (required for OHLCV via SmartAPI)
 ANGEL_API_KEY=...
 ANGEL_CLIENT_CODE=...
 ANGEL_PIN=...
@@ -293,6 +350,10 @@ EMAIL_SMTP_SERVER=smtp.gmail.com
 EMAIL_SMTP_PORT=587
 EMAIL_USE_TLS=true
 EMAIL_SUBJECT_PREFIX=Daily Market Analysis Report
+
+# Screener.in (for HNI scrape + breakout scanner)
+SCREENER_USER=...
+SCREENER_PASS=...
 ```
 
 Generate a Gmail App Password at <https://myaccount.google.com/apppasswords>
@@ -329,11 +390,8 @@ launchctl enable    gui/$(id -u)/com.analysis.runall
 **Daily ops:**
 
 ```bash
-# Manual trigger / sanity check
+# Manual trigger
 launchctl kickstart -k gui/$(id -u)/com.analysis.runall
-
-# Inspect status / next-fire
-launchctl print gui/$(id -u)/com.analysis.runall | head -40
 
 # Tail today's log
 tail -f logs/run_all_*.log
@@ -342,22 +400,15 @@ tail -f logs/run_all_*.log
 launchctl bootout gui/$(id -u)/com.analysis.runall
 ```
 
-If the laptop is asleep at 18:00, launchd fires at the next wake (Apple-
-documented). The wrapper re-checks day-of-week so an accidental manual
-run on Sat/Sun no-ops cleanly.
-
 ---
 
 ## Scheduling — GitHub Actions (cloud)
 
 [.github/workflows/scenarios.yml](.github/workflows/scenarios.yml) provides
-an alternate cloud schedule (cron `0 13 * * 1-5` = ~16:37 IST). It checks
+an alternate cloud schedule (cron `0 13 * * 1-5` ≈ 18:30 IST). It checks
 out the repo, installs deps, runs `run_all.py` with secrets injected from
-GitHub Actions secrets (`ANGEL_*`), uploads the Excel + charts as
-artifacts, and dispatches a follow-on `send-email` job.
-
-Use this if your laptop is unreliable. Use the launchd path for fastest
-turnaround and to avoid storing market-data state in cloud artifacts.
+GitHub Actions secrets, uploads the Excel + charts as artifacts, and
+dispatches a follow-on `send-email` job.
 
 ---
 
@@ -366,37 +417,14 @@ turnaround and to avoid storing market-data state in cloud artifacts.
 | Symptom | Where to look |
 |---|---|
 | Pipeline output / scenario errors | `logs/run_all_<timestamp>.log` |
-| launchd refused to start the script | `logs/launchd.err.log` |
-| "Operation not permitted" in launchd.err.log | TCC — grant Full Disk Access to `/bin/bash` |
-| Email skipped | Check `EMAIL_PASSWORD` etc. in `.env` |
-| Angel "Access denied because of exceeding access rate" | Angel rate-limits parallel TOTP; ensure single-threaded login (already handled in `multi_pct_down.py` pre-warm) |
-| `multi_pct_down` slow | It dominates runtime (~50 min); use `--skip multi_pct_down` for fast iterations |
-| BSE deals empty | BSE JSON API sometimes 0-rows pre-EOD; HTML fallback kicks in automatically |
+| launchd refused to start | `logs/launchd.err.log` |
+| "Operation not permitted" | TCC — grant Full Disk Access to `/bin/bash` |
+| Email skipped | Check `EMAIL_PASSWORD` in `.env` |
+| Angel rate-limit errors | Ensure single-threaded login (handled automatically) |
+| BSE deals empty | BSE JSON API sometimes 0-rows pre-EOD; HTML fallback kicks in |
 
 Pipeline logs are rotated automatically — the wrapper deletes
 `run_all_*.log` files older than 30 days.
-
----
-
-## Adding a New Scenario
-
-1. **Create a module** with a top-level `run(output_prefix=...)` function
-   returning a tuple whose first element is a `dict[str, DataFrame]` of
-   sheet-name → data, and whose later elements include any chart paths.
-2. **Add a wrapper** in `run_all.py`:
-   ```python
-   def run_my_scenario():
-       from my_scenario import run as ms_run
-       result = ms_run(output_prefix=os.path.join(SCRIPT_DIR, "my_scenario"))
-       sheets, chart_path = ..., ...
-       return sheets, chart_path
-   ```
-3. **Append the name** to `ALL_SCENARIOS` (controls sheet ordering and
-   `--skip` choices).
-4. **Insert a banner block** in `main()` matching the existing pattern
-   (try/except, errors list).
-5. **Run `python3 run_all.py --no-email`** to validate; `python3 -m
-   py_compile run_all.py` to check syntax.
 
 ---
 

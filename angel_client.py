@@ -264,6 +264,7 @@ def _load_scrip_master() -> pd.DataFrame:
 
 INDEX_OVERRIDES = {
     "^NSEI":    ("NSE", "99926000", "Nifty 50"),
+    "^CRSLDX":  ("NSE", "99926004", "Nifty 500"),
     "^NSEBANK": ("NSE", "99926009", "Nifty Bank"),
     "^BSESN":   ("BSE", "99919000", "Sensex"),
 }

@@ -842,9 +842,185 @@ def _enrich_with_streaks(df):
     return df
 
 
-# ─── Excel export ────────────────────────────────────────────────────────────
+# ─── HNI / superstar holdings (Screener.in /people/ pages) ──────────────
 
-def save_to_excel(df, output_prefix):
+# Logged-in Screener.in "People" pages. Each page lists a single investor's
+# quarter-by-quarter stake in every company they hold >1%. We compare the
+# latest two quarters per row to flag "New Entry" / "Increased".
+HNI_PEOPLE_URLS = [
+    "https://www.screener.in/people/127736/ashish-kacholia/",
+    "https://www.screener.in/people/148535/bengal-finance-and-investment-pvt-ltd/",
+    "https://www.screener.in/people/163158/vijay-kishanlal-kedia/",
+    "https://www.screener.in/people/123054/venkata-nagaraju-padala/",
+    "https://www.screener.in/people/33390/rohan-gupta/",
+    "https://www.screener.in/people/21712/ajay-kumar-aggarwal/",
+    "https://www.screener.in/people/71485/nibe-ganesh-ramesh/",
+    "https://www.screener.in/people/108142/laroia-mona/",
+    "https://www.screener.in/people/174015/india-equity-fund-1/",
+    "https://www.screener.in/people/168570/sanshi-fund-i/",
+    "https://www.screener.in/people/131338/shalu-aggarwal/",
+    "https://www.screener.in/people/170071/akash-bhanshali/",
+    "https://www.screener.in/people/150091/singularity-equity-fund-i/",
+    "https://www.screener.in/people/126373/chartered-finance-leasing-limited/",
+    "https://www.screener.in/people/162189/vq-fastercap-fund/",
+    "https://www.screener.in/people/44707/ankush-kedia/",
+    "https://www.screener.in/people/56652/sandeep-kapadia/",
+    "https://www.screener.in/people/21426/steadview-capital-mauritius-limited/",
+    "https://www.screener.in/people/141932/valuequest-s-c-a-l-e-fund/",
+    "https://www.screener.in/people/98486/ms-param-capital/",
+    "https://www.screener.in/people/127829/mukul-mahavir-agrawal/",
+    "https://www.screener.in/people/116773/bijal-pritesh-vora/",
+    "https://www.screener.in/people/180470/ritu-bapna/",
+    "https://www.screener.in/people/161937/reina-ra-jaisinghani/",
+    "https://www.screener.in/people/78665/kunjal-lalitkumar-patel/",
+    "https://www.screener.in/people/64/bengal-finance-and-ninvestment-private-limited/",
+    "https://www.screener.in/people/679/ajay-upadhyaya/",
+    "https://www.screener.in/people/2350/suresh-kumar-agarwal/",
+    "https://www.screener.in/people/134160/vijay-kedia/",
+    "https://www.screener.in/people/392/vanjana-sundar-iyer/",
+    "https://www.screener.in/people/126875/malabar-india-fund-limited/",
+    "https://www.screener.in/people/150899/nav-capital-vcc-nav-capital-emerging-star-fund/",
+    "https://www.screener.in/people/169381/mansi-share-and-stock-broking-private-limited/",
+    "https://www.screener.in/people/74548/amansa-holdings-private-limited/",
+    "https://www.screener.in/people/149987/massachusetts-institute-of-techno/",
+]
+
+
+def _parse_pct(text):
+    """Parse a percent cell like '2.13' or '' into float or None."""
+    t = (text or "").strip().rstrip("%").replace(",", "")
+    if not t or t == "-":
+        return None
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _extract_ticker_from_href(href):
+    """Pull a usable ticker symbol out of a Screener.in /company/<x>/ link."""
+    if not href:
+        return ""
+    m = re.search(r"/company/([^/]+)/", href)
+    return m.group(1) if m else ""
+
+
+def _fetch_hni_page(session, url):
+    """Fetch one Screener.in /people/<id>/ page. Returns list of dicts where
+    the investor newly entered OR increased stake in the latest quarter."""
+    rows_out = []
+    try:
+        r = None
+        for attempt in range(3):
+            r = session.get(url, timeout=20)
+            if r.status_code == 429:
+                time.sleep(3 * (attempt + 1))
+                continue
+            break
+        if r is None or r.status_code != 200:
+            print(f"    {url} -> HTTP {r.status_code if r else 'no-response'}")
+            return rows_out
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        h1 = soup.find("h1")
+        hni_name = h1.get_text(strip=True) if h1 else url.rstrip("/").rsplit("/", 1)[-1]
+
+        # Find the holdings table (one whose header row has quarter labels)
+        holdings_table = None
+        for t in soup.find_all("table"):
+            header_tr = t.find("tr")
+            if not header_tr:
+                continue
+            labels = [c.get_text(strip=True) for c in header_tr.find_all(["th", "td"])]
+            if any(_parse_qtr_label(l) for l in labels):
+                holdings_table = t
+                break
+        if holdings_table is None:
+            return rows_out
+
+        header_cells = holdings_table.find("tr").find_all(["th", "td"])
+        quarters = [c.get_text(strip=True) for c in header_cells][1:]
+        if len(quarters) < 2:
+            return rows_out
+        latest_qtr, prev_qtr = quarters[-1], quarters[-2]
+
+        for tr in holdings_table.find_all("tr")[1:]:
+            cells = tr.find_all(["td", "th"])
+            if len(cells) < 2:
+                continue
+            name_cell = cells[0]
+            link = name_cell.find("a")
+            stock_name = name_cell.get_text(strip=True)
+            ticker = _extract_ticker_from_href(link.get("href", "") if link else "")
+            vals = [c.get_text(strip=True) for c in cells[1:]]
+            if len(vals) < 2:
+                continue
+            latest = _parse_pct(vals[-1])
+            prev = _parse_pct(vals[-2])
+            if latest is None or latest == 0:
+                continue  # not held in latest quarter
+            if prev is None or prev == 0:
+                flag = "New Entry"
+            elif latest > prev:
+                flag = "Increased"
+            else:
+                continue  # held but flat / decreased
+            rows_out.append({
+                "HNI": hni_name,
+                "Stock Name": stock_name,
+                "Ticker": ticker,
+                "Latest %": latest,
+                "Previous %": prev if prev is not None else 0.0,
+                "Change (pp)": round(latest - (prev or 0.0), 2),
+                "Flag": flag,
+                "Latest Quarter": latest_qtr,
+                "Previous Quarter": prev_qtr,
+            })
+    except Exception as e:
+        print(f"    {url} -> error: {e}")
+    return rows_out
+
+
+def fetch_hni_holdings():
+    """Login to Screener.in, scrape each HNI /people/ page, return a DataFrame
+    of new-entry / increased holdings in the latest quarter."""
+    user, pwd = _load_screener_creds()
+    if not user:
+        print("HNI scrape skipped: Screener.in credentials missing in .env")
+        return pd.DataFrame()
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": HEADERS["User-Agent"]})
+    print(f"\nFetching HNI / superstar holdings ({len(HNI_PEOPLE_URLS)} investors)...")
+    if not _screener_login(session, user, pwd):
+        print("  Screener.in login failed; HNI sheet skipped.")
+        return pd.DataFrame()
+
+    all_rows = []
+    for i, url in enumerate(HNI_PEOPLE_URLS, 1):
+        rows = _fetch_hni_page(session, url)
+        slug = url.rstrip("/").rsplit("/", 1)[-1]
+        print(f"  [{i}/{len(HNI_PEOPLE_URLS)}] {slug[:40]:40s} +{len(rows)} buys")
+        all_rows.extend(rows)
+        time.sleep(SCREENER_RATE_DELAY)
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows)
+    flag_order = {"New Entry": 0, "Increased": 1}
+    df["_o"] = df["Flag"].map(flag_order).fillna(99).astype(int)
+    df = df.sort_values(["_o", "Change (pp)"], ascending=[True, False])
+    df = df.drop(columns=["_o"]).reset_index(drop=True)
+    print(f"  HNI buys total: {len(df)} "
+          f"({(df['Flag'] == 'New Entry').sum()} new, "
+          f"{(df['Flag'] == 'Increased').sum()} increased)")
+    return df
+
+
+# ─── Excel export ─────────────────────────────────────────────────────────────────────
+
+def save_to_excel(df, output_prefix, hni_df=None):
     """Save FII stake tracker results to Excel."""
     excel_path = os.path.join(SCRIPT_DIR, f"{output_prefix}.xlsx")
 
@@ -855,39 +1031,54 @@ def save_to_excel(df, output_prefix):
         "Multi-Quarter Increasing",
         "Increased Stake",
     ]
-    # Per-sheet filters. Streak sheets are CUMULATIVE so a 4Q stock also
-    # appears in the 3Q and 2Q sheets.
+    # Per-sheet filters. Streak sheets are now EXCLUSIVE (each stock appears
+    # in exactly one streak bucket). Sequence: New Entry -> 1Q -> 2Q -> 3Q -> 4Q.
+    # New Entry also requires FII stake > 1% to filter out negligible entries.
     SHEET_SPECS = [
-        ("New_Entry", lambda d: d[d["Category"] == "New Entry"],
+        ("New_Entry",
+            lambda d: d[(d["Category"] == "New Entry") & (d["FII Stake (%)"] > 1.0)],
             ["Change 9M (pp)", "Change 12M (pp)"]),
-        ("Multi-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 2],
+        ("1-Quarter_Increasing",
+            lambda d: d[d["Category"] == "Increased Stake"],
             ["Change 9M (pp)", "Change 12M (pp)"]),
-        ("3-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 3],
+        ("2-Quarter_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] == 2) & (d["Category"] != "New Entry")],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("3-Quarter_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] == 3) & (d["Category"] != "New Entry")],
             ["Change 12M (pp)"]),
-        ("4-Quarter_Increasing", lambda d: d[d["Streak (Qtrs)"] >= 4],
+        ("4-Quarter_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] >= 4) & (d["Category"] != "New Entry")],
             []),
-        ("Increased_Stake", lambda d: d[d["Category"] == "Increased Stake"],
-            ["Change 9M (pp)", "Change 12M (pp)"]),
     ]
 
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        # Summary: exclusive Category counts + cumulative streak buckets
-        summary_rows = [(c, len(df[df["Category"] == c])) for c in cat_list]
-        summary_rows += [
-            ("Cumulative streak buckets:", ""),
-            ("Streak >= 2 quarters", int((df["Streak (Qtrs)"] >= 2).sum())),
-            ("Streak >= 3 quarters", int((df["Streak (Qtrs)"] >= 3).sum())),
-            ("Streak >= 4 quarters", int((df["Streak (Qtrs)"] >= 4).sum())),
-            ("Total", len(df)),
+        # Summary: classification rules + per-sheet counts
+        summary_rows = [
+            ("Classification rules (applied in order):", ""),
+            ("  if prev_qtr < 0.05", '-> "New Entry"'),
+            ("  elif streak >= 4", '-> "4-Quarter Increasing"'),
+            ("  elif streak == 3", '-> "3-Quarter Increasing"'),
+            ("  elif streak == 2", '-> "Multi-Quarter Increasing" (2-Quarter)'),
+            ("  elif streak == 1", '-> "Increased Stake" (1-Quarter)'),
+            ("", ""),
+            ("Sheet filters (exclusive):", ""),
+            ("  New_Entry", "Category = New Entry AND FII Stake > 1%"),
+            ("  1-Quarter_Increasing", "Category = Increased Stake"),
+            ("  2-Quarter_Increasing", "Streak = 2 AND Category != New Entry"),
+            ("  3-Quarter_Increasing", "Streak = 3 AND Category != New Entry"),
+            ("  4-Quarter_Increasing", "Streak >= 4 AND Category != New Entry"),
+            ("", ""),
+            ("Sheet counts:", ""),
         ]
+        for sheet_name, selector, _ in SHEET_SPECS:
+            summary_rows.append((sheet_name, len(selector(df))))
+        summary_rows.append(("Total (all categories)", len(df)))
         pd.DataFrame(summary_rows, columns=["Category", "Count"]).to_excel(
             writer, sheet_name="Summary", index=False
         )
 
-        # All stocks — full detail (keep every column)
-        df.to_excel(writer, sheet_name="FII Stake Increase", index=False)
-
-        # Per-sheet slices (cumulative for streak sheets) with column trimming
+        # Per-sheet slices (exclusive) with column trimming
         for sheet_name, selector, drop_cols in SHEET_SPECS:
             sub = selector(df)
             if sub.empty:
@@ -899,6 +1090,10 @@ def save_to_excel(df, output_prefix):
             drop = [c for c in drop_cols if c in sub.columns]
             sub = sub.drop(columns=drop)
             sub.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+        # HNI / superstar buys (new entry + increased in latest quarter)
+        if hni_df is not None and not hni_df.empty:
+            hni_df.to_excel(writer, sheet_name="HNIs", index=False)
 
         # Auto-fit column widths
         for ws in writer.book.worksheets:
@@ -914,6 +1109,56 @@ def save_to_excel(df, output_prefix):
 
 
 # ─── Entry points ────────────────────────────────────────────────────────────
+
+
+def get_sheets():
+    """Return FII stake + HNI sheets as a dict of DataFrames (for BulkBlock integration).
+    Does NOT write its own Excel file."""
+    SHEET_SPECS = [
+        ("FII_New_Entry",
+            lambda d: d[(d["Category"] == "New Entry") & (d["FII Stake (%)"] > 1.0)],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("FII_1Q_Increasing",
+            lambda d: d[d["Category"] == "Increased Stake"],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("FII_2Q_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] == 2) & (d["Category"] != "New Entry")],
+            ["Change 9M (pp)", "Change 12M (pp)"]),
+        ("FII_3Q_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] == 3) & (d["Category"] != "New Entry")],
+            ["Change 12M (pp)"]),
+        ("FII_4Q_Increasing",
+            lambda d: d[(d["Streak (Qtrs)"] >= 4) & (d["Category"] != "New Entry")],
+            []),
+    ]
+
+    df = fetch_fii_stake_data()
+    if df.empty:
+        return {}
+
+    sheets = {}
+    for sheet_name, selector, drop_cols in SHEET_SPECS:
+        sub = selector(df)
+        if sub.empty:
+            continue
+        if "Streak (Qtrs)" in sub.columns:
+            sub = sub.sort_values(
+                ["Streak (Qtrs)", "Change QoQ (pp)"], ascending=[False, False]
+            )
+        drop = [c for c in drop_cols if c in sub.columns]
+        sub = sub.drop(columns=drop)
+        sheets[sheet_name] = sub.reset_index(drop=True)
+
+    # HNI holdings
+    try:
+        hni_df = fetch_hni_holdings()
+        if hni_df is not None and not hni_df.empty:
+            sheets["HNIs"] = hni_df
+    except Exception as e:
+        print(f"  HNI fetch failed: {e}")
+
+    return sheets
+
 
 def run(output_prefix="fii_stake_tracker"):
     """Main entry point (for run_all.py integration).
@@ -942,7 +1187,14 @@ def run(output_prefix="fii_stake_tracker"):
     print(f"  {'Total':30s}: {len(df):>5}")
     print(f"{'='*60}")
 
-    excel_path = save_to_excel(df, output_prefix)
+    # Fetch HNI / superstar holdings (Screener.in /people/ pages)
+    try:
+        hni_df = fetch_hni_holdings()
+    except Exception as e:
+        print(f"HNI fetch failed: {e}")
+        hni_df = pd.DataFrame()
+
+    excel_path = save_to_excel(df, output_prefix, hni_df=hni_df)
     return df, excel_path
 
 

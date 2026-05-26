@@ -459,14 +459,7 @@ class BSEScraper:
         nse_block_deals_df = self.nse_largedeals(mode="block_deals")
 
         # Sample list of superstar names to filter in bulk and block deals
-        client_names_to_filter = ['ABAKKUS ASSET MANAGER LLP',
-'ABAKKUS ASSET MANAGER LLP(HDFC CUSTODY)',
-'ABAKKUS ASSET MANAGER PRIVATE LIMITED',
-'ABAKKUS DIVERSIFIED ALPHA FUND',
-'ABAKKUS DIVERSIFIED ALPHA FUND-2',
-'ABAKKUS EMERGING OPPORTUNITIES FUND - 1',
-'ABAKKUS GROWTH FUND - 1',
-'ABAKKUS GROWTH FUND-2',
+        client_names_to_filter = [
 'AJAY KUMAR AGGARWAL',
 'AJAY UPADHYAYA',
 'UPADHYAYA AJAY',
@@ -527,8 +520,8 @@ class BSEScraper:
 'ROHAN GUPTA', #SG Finserve promoter
 'NALANDA INDIA EQUITY FUND LIMITED',
 'NALANDA INDIA FUND LIMITED',
-'OXBOW MASTER FUND LIMITED',
-'QRG INVESTMENTS AND HOLDINGS LIMITED',
+'NAV CAPITAL VCC - NAV CAPITAL EMERGING STAR FUND',
+'MANSI SHARE AND STOCK BROKING PRIVATE LIMITED',
 'RITU BAPNA',
 'SANDEEP SINGH',
 'Sandeep Kapadia',
@@ -538,15 +531,8 @@ class BSEScraper:
 'PARAM CAPITAL',
 'Asha Mukul Agrawal',
 'SANDEEP KAPADIA',
-'SBI LIFE INSURANCE COMPANY LIMITED',
-'SBI LIFE INSURANCE COMPANY LTD',
 'SHALU  AGGARWAL',
 'SIXTEENTH STREET ASIAN GEMS FUND',
-'SMALL CAP WORLD FUND INC',
-'SMALLCAP WORLD FUND INC',
-'SMALLCAP WORLD FUND INC.',
-'SMALLCAPWORLD FUND INC',
-'SMALLER CAP WORLD FUND INC',
 'STEADVIEW CAPITAL MASTER FUND LTD.',
 'STEADVIEW CAPITAL MAURITIUS LIMITED',
 'STEADVIEW CAPITAL OPPORTUNITIES PCC',
@@ -556,8 +542,6 @@ class BSEScraper:
 'Valuequest S C A L E Fund',
 'VQ FASTERCAP FUND',
 # ── New variations discovered from 1Y historical analysis (May 2026) ──
-'ABAKKUS EMERGING OPPORTUNITIES FUND-1',        # variant of "FUND - 1"
-'ABAKKUS DIVERSIFIED ALPHA FUND - 2',           # variant of "FUND-2"
 'SINGULARITY LARGE VALUE FUND I',               # Fund I (II & III already listed)
 'SURYA VANSHI COMMOTRADE PVT. LTD.',            # spacing/punctuation variant
 'CHARTERED FINANCE & LEASI NG LIMITED',          # typo in exchange data
@@ -604,6 +588,41 @@ class BSEScraper:
             dataframes[block_name] = filtered_block_df
         else:
             print(f"⚠️  No data fetched for {block_name}")
+
+        # ── FII Stake Tracker + HNI Holdings ──
+        try:
+            from fii_stake_tracker import get_sheets as fst_get_sheets
+            fst_sheets = fst_get_sheets()
+            if fst_sheets:
+                # Build FII Summary sheet
+                summary_rows = [
+                    ("Classification rules (applied in order):", ""),
+                    ("  if prev_qtr < 0.05", '-> "New Entry"'),
+                    ("  elif streak >= 4", '-> "4-Quarter Increasing"'),
+                    ("  elif streak == 3", '-> "3-Quarter Increasing"'),
+                    ("  elif streak == 2", '-> "Multi-Quarter Increasing" (2-Quarter)'),
+                    ("  elif streak == 1", '-> "Increased Stake" (1-Quarter)'),
+                    ("", ""),
+                    ("Sheet counts:", ""),
+                ]
+                for sn, sdf in fst_sheets.items():
+                    if sn != "HNIs":
+                        summary_rows.append((sn, len(sdf)))
+                if "HNIs" in fst_sheets:
+                    summary_rows.append(("HNIs", len(fst_sheets["HNIs"])))
+                dataframes["FII_Summary"] = pd.DataFrame(summary_rows, columns=["Category", "Count"])
+
+                # Sort HNIs by name ascending
+                if "HNIs" in fst_sheets and not fst_sheets["HNIs"].empty:
+                    hni_df = fst_sheets["HNIs"]
+                    name_col = next((c for c in hni_df.columns if c.lower() in ("hni", "name", "investor")), None)
+                    if name_col:
+                        fst_sheets["HNIs"] = hni_df.sort_values(name_col, ascending=True).reset_index(drop=True)
+
+                dataframes.update(fst_sheets)
+                print(f"\n✓ FII Stake Tracker: {len(fst_sheets)} sheet(s) merged")
+        except Exception as e:
+            print(f"\n⚠️  FII Stake Tracker failed: {e}")
 
         # Save to Excel
         if dataframes:
