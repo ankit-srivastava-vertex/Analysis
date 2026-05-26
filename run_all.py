@@ -172,9 +172,7 @@ def run_rrg():
     result = rrg_run(output_prefix=prefix)
     if result is None:
         return None
-    _all_timeframe_data, _fig, excel_path, html_path = result
-    if excel_path and os.path.exists(excel_path):
-        os.remove(excel_path)
+    _all_timeframe_data, _fig, html_path = result
     return html_path
 
 
