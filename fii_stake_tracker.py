@@ -863,8 +863,6 @@ HNI_PEOPLE_URLS = [
     "https://www.screener.in/people/150091/singularity-equity-fund-i/",
     "https://www.screener.in/people/126373/chartered-finance-leasing-limited/",
     "https://www.screener.in/people/162189/vq-fastercap-fund/",
-    "https://www.screener.in/people/44707/ankush-kedia/",
-    "https://www.screener.in/people/56652/sandeep-kapadia/",
     "https://www.screener.in/people/21426/steadview-capital-mauritius-limited/",
     "https://www.screener.in/people/141932/valuequest-s-c-a-l-e-fund/",
     "https://www.screener.in/people/98486/ms-param-capital/",
@@ -1141,7 +1139,10 @@ def get_sheets():
         sub = selector(df)
         if sub.empty:
             continue
-        if "Streak (Qtrs)" in sub.columns:
+        # Sort by Stock Name ascending
+        if "Stock Name" in sub.columns:
+            sub = sub.sort_values("Stock Name", ascending=True)
+        elif "Streak (Qtrs)" in sub.columns:
             sub = sub.sort_values(
                 ["Streak (Qtrs)", "Change QoQ (pp)"], ascending=[False, False]
             )

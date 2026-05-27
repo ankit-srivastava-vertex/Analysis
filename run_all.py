@@ -407,6 +407,15 @@ def main():
             if chart:
                 chart_files.append(chart)
             if ranking_df is not None and not ranking_df.empty:
+                # Sort by 20D Trend descending (extract numeric from '↑ 2.3' / '↓ 1.5')
+                if "20D Trend" in ranking_df.columns:
+                    import re as _re
+                    def _trend_val(s):
+                        m = _re.search(r'([\u2191\u2193])\s*([\d.]+)', str(s))
+                        if not m: return 0.0
+                        return float(m.group(2)) if m.group(1) == '\u2191' else -float(m.group(2))
+                    ranking_df = ranking_df.assign(_tv=ranking_df["20D Trend"].map(_trend_val))
+                    ranking_df = ranking_df.sort_values("_tv", ascending=False).drop(columns=["_tv"]).reset_index(drop=True)
                 extra_sheets["RS Ranking"] = ranking_df
             print("  ✓ Sector Momentum complete")
         except Exception as e:

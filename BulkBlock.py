@@ -438,7 +438,7 @@ class BSEScraper:
 
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
                 for sheet_name, df in dataframes_dict.items():
-                    clean_sheet_name = sheet_name.replace('BSE ', '')[:31]
+                    clean_sheet_name = sheet_name[:31]
                     df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
                     print(f"✓ Sheet '{clean_sheet_name}': {len(df)} rows saved")
 
@@ -468,8 +468,6 @@ class BSEScraper:
 'Ankit Vijay Kedia',
 'Vijay Krishanlal Kedia',
 'Kedia Secuirities Private Limited',
-'ANKUSH  KEDIA',
-'ANKUSH KEDIA',
 'ASHISH KACHOLIA',
 'ASHISH RAMESH KACHOLIA',
 'ASHISH RAMESHCHANDRA KACHOLIA',
@@ -524,18 +522,11 @@ class BSEScraper:
 'MANSI SHARE AND STOCK BROKING PRIVATE LIMITED',
 'RITU BAPNA',
 'SANDEEP SINGH',
-'Sandeep Kapadia',
-'KAPADIA SANDEEP',
 'Mukul Mahavir Agrawal',
 'SANSHI FUND-I',
 'PARAM CAPITAL',
 'Asha Mukul Agrawal',
-'SANDEEP KAPADIA',
 'SHALU  AGGARWAL',
-'SIXTEENTH STREET ASIAN GEMS FUND',
-'STEADVIEW CAPITAL MASTER FUND LTD.',
-'STEADVIEW CAPITAL MAURITIUS LIMITED',
-'STEADVIEW CAPITAL OPPORTUNITIES PCC',
 'VANAJA SUNDAR IYER',
 'VENKATA NAGARAJU PADALA',
 'VINOD  KUMAR',
@@ -566,7 +557,7 @@ class BSEScraper:
                       "nse_block": filtered_nse_block_df}
 
         # Fetch BSE BULK DEALS via API
-        bulk_name = 'BSE Bulk Deals'
+        bulk_name = 'bse_bulk'
         bulk_df = self.fetch_bse_deals_api("bulk")
 
         if bulk_df is not None and not bulk_df.empty:
@@ -579,7 +570,7 @@ class BSEScraper:
         time.sleep(1)
 
         # Fetch BSE BLOCK DEALS via API
-        block_name = 'BSE Block Deals'
+        block_name = 'bse_block'
         block_df = self.fetch_bse_deals_api("block")
 
         if block_df is not None and not block_df.empty:
@@ -612,12 +603,11 @@ class BSEScraper:
                     summary_rows.append(("HNIs", len(fst_sheets["HNIs"])))
                 dataframes["FII_Summary"] = pd.DataFrame(summary_rows, columns=["Category", "Count"])
 
-                # Sort HNIs by name ascending
+                # Sort HNIs by stock name ascending
                 if "HNIs" in fst_sheets and not fst_sheets["HNIs"].empty:
                     hni_df = fst_sheets["HNIs"]
-                    name_col = next((c for c in hni_df.columns if c.lower() in ("hni", "name", "investor")), None)
-                    if name_col:
-                        fst_sheets["HNIs"] = hni_df.sort_values(name_col, ascending=True).reset_index(drop=True)
+                    if "Stock Name" in hni_df.columns:
+                        fst_sheets["HNIs"] = hni_df.sort_values("Stock Name", ascending=True).reset_index(drop=True)
 
                 dataframes.update(fst_sheets)
                 print(f"\n✓ FII Stake Tracker: {len(fst_sheets)} sheet(s) merged")
