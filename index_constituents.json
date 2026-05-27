@@ -260,7 +260,12 @@
             "DRAGARWQ",
             "GAUDIUMIVF",
             "CHANDAN",
-            "LXMIDENTAL"
+            "LXMIDENTAL",
+            "OSELDEVICE",
+            "POLYMED",
+            "METROPOLIS",
+            "THYROCARE",
+            "NEPHROPLUS"
         ]
     },
     "Pharma": {
@@ -282,7 +287,18 @@
             "SUDEEPPHRM",
             "INNOVACAP",
             "SENORES",
-            "NGLFINE"
+            "NGLFINE",
+            "GLAND",
+            "AJANTPHARM",
+            "JBCHEPHARM",
+            "ASTRAZEN",
+            "APLLTD",
+            "ALIVUS",
+            "CONCORDBIO",
+            "MARKSANS",
+            "SUPRIYA",
+            "RPGLIFE",
+            "KPL"
         ]
     },
     "Chemical": {

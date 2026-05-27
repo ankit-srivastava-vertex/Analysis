@@ -9,16 +9,20 @@ support (max put OI strike) and resistance (max call OI strike) levels.
 PRIMARY SOURCE: Angel One SmartAPI Market Data (FULL mode) — live intraday OI
 FALLBACK:       NSE BhavCopy zip (EOD data, no auth needed)
 
-OUTPUT: fno_max_oi.xlsx with two sheets:
-  Sheet 1: "Equity F&O"  — all equity stock options
-  Sheet 2: "Index F&O"   — NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY
+OUTPUT FILE: fno_<month>.xlsx  (e.g. fno_may.xlsx, fno_jun.xlsx)
+  - The month in the filename is determined by the date of the first sheet.
+  - Each daily run adds a new sheet named by the run date (e.g. "27-May-2026").
+  - Re-running on the same day replaces the existing sheet for that date.
+  - Use --new to start a fresh file (old file is not deleted).
 
-Columns per sheet:
-  Symbol, Expiry, Underlying LTP, Call Max OI, Call Strike, Put Max OI,
-  Put Strike, PCR (Put/Call OI ratio), Call OI Change, Put OI Change
+SHEET STRUCTURE:
+  Single sheet per day combining equity + index results with a "Type" column.
+  Columns: Type, Symbol, Expiry, Underlying LTP, Call Max OI, Call Strike,
+           Put Max OI, Put Strike
 
 USAGE:
-  python3 fno_max_oi.py                  # live (market hours) or fallback to EOD
+  python3 fno_max_oi.py                  # append sheet to existing fno_<month>.xlsx
+  python3 fno_max_oi.py --new            # create a new fno_<month>.xlsx
   python3 fno_max_oi.py --expiry weekly  # nearest weekly expiry (default)
   python3 fno_max_oi.py --expiry monthly # nearest monthly expiry only
   python3 fno_max_oi.py --eod            # force EOD bhavcopy (skip Angel)
@@ -37,14 +41,14 @@ import argparse
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+import glob
+
 import pandas as pd
 import httpx
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
-
-OUTPUT_FILE = os.path.join(SCRIPT_DIR, "fno_max_oi.xlsx")
 
 # Angel One scrip master (same cache as angel_client.py)
 SCRIP_MASTER_CACHE = os.path.join(SCRIPT_DIR, ".angel_scrip_master.json")
@@ -270,9 +274,6 @@ def fetch_live_oi_angel(master, symbols, expiry_type="weekly", is_index=False):
         # Find max OI
         max_call = max(calls, key=lambda x: x["oi"])
         max_put = max(puts, key=lambda x: x["oi"])
-        total_call_oi = sum(c["oi"] for c in calls)
-        total_put_oi = sum(p["oi"] for p in puts)
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 0
 
         results.append({
             "Symbol": sym,
@@ -282,9 +283,6 @@ def fetch_live_oi_angel(master, symbols, expiry_type="weekly", is_index=False):
             "Call Strike": max_call["strike"],
             "Put Max OI": max_put["oi"],
             "Put Strike": max_put["strike"],
-            "PCR": pcr,
-            "Total Call OI": total_call_oi,
-            "Total Put OI": total_put_oi,
         })
 
         if idx % 10 == 0 or idx == total:
@@ -471,11 +469,6 @@ def parse_bhavcopy(df, expiry_type="weekly", filter_symbols=None, inst_type="STO
             "Call Strike": max_call["StrkPric"],
             "Put Max OI": int(max_put["OpnIntrst"]),
             "Put Strike": max_put["StrkPric"],
-            "PCR": pcr,
-            "Total Call OI": int(total_call_oi),
-            "Total Put OI": int(total_put_oi),
-            "Call OI Change": int(call_oi_change),
-            "Put OI Change": int(put_oi_change),
         })
 
     return pd.DataFrame(results)
@@ -485,14 +478,35 @@ def parse_bhavcopy(df, expiry_type="weekly", filter_symbols=None, inst_type="STO
 # MAIN ORCHESTRATOR
 # ===========================================================================
 
-def run(expiry_type="weekly", force_eod=False):
-    """Main entry point. Returns (equity_df, index_df, output_path)."""
+def _get_output_path(create_new=False):
+    """Determine output Excel path.
+
+    - If create_new or no existing file: fno_<current_month>.xlsx
+    - Otherwise: most recent existing fno_*.xlsx
+    """
+    existing = sorted(glob.glob(os.path.join(SCRIPT_DIR, "fno_*.xlsx")))
+    if not create_new and existing:
+        return existing[-1]
+    # New file named after current month
+    month_name = date.today().strftime("%b").lower()  # e.g. 'may'
+    return os.path.join(SCRIPT_DIR, f"fno_{month_name}.xlsx")
+
+
+def _drop_unwanted_cols(df):
+    """Remove columns not needed in output."""
+    drop = ["PCR", "Total Call OI", "Total Put OI", "Call OI Change", "Put OI Change"]
+    return df.drop(columns=[c for c in drop if c in df.columns], errors="ignore")
+
+
+def run(expiry_type="weekly", force_eod=False, create_new=False):
+    """Main entry point. Returns (combined_df, output_path)."""
     print("=" * 70)
     print("  F&O MAX OI SCANNER")
     print("=" * 70)
     print(f"  Date: {date.today()}")
     print(f"  Expiry: {expiry_type}")
     print(f"  Mode: {'EOD (BhavCopy)' if force_eod else 'Live (Angel One) with EOD fallback'}")
+    print(f"  File mode: {'New file' if create_new else 'Append to existing'}")
     print()
 
     equity_df = pd.DataFrame()
@@ -536,7 +550,11 @@ def run(expiry_type="weekly", force_eod=False):
                   f"{len(equity_df)} equity + {len(index_df)} index results")
         else:
             print("  ✗ No data source available")
-            return equity_df, index_df, None
+            return pd.DataFrame(), None
+
+    # Drop unwanted columns
+    equity_df = _drop_unwanted_cols(equity_df)
+    index_df = _drop_unwanted_cols(index_df)
 
     # Sort results
     if not equity_df.empty:
@@ -544,22 +562,37 @@ def run(expiry_type="weekly", force_eod=False):
     if not index_df.empty:
         index_df = index_df.sort_values("Symbol").reset_index(drop=True)
 
-    # Write Excel
-    print(f"\n  Writing {OUTPUT_FILE}...")
-    with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as w:
-        # Add dummy sheet if both DFs are empty to avoid IndexError
-        if equity_df.empty and index_df.empty:
-            pd.DataFrame([["No data found"]]).to_excel(w, sheet_name="No Data", index=False, header=False)
-        if not equity_df.empty:
-            equity_df.to_excel(w, sheet_name="Equity F&O", index=False)
-        if not index_df.empty:
-            index_df.to_excel(w, sheet_name="Index F&O", index=False)
+    # Combine equity + index into one sheet (add Type column)
+    if not equity_df.empty:
+        equity_df.insert(0, "Type", "Equity")
+    if not index_df.empty:
+        index_df.insert(0, "Type", "Index")
+    combined_df = pd.concat([equity_df, index_df], ignore_index=True)
 
-    print(f"  ✓ Done: {OUTPUT_FILE}")
-    print(f"    Equity F&O: {len(equity_df)} stocks")
-    print(f"    Index F&O:  {len(index_df)} indices")
+    if combined_df.empty:
+        print("  ✗ No data to write")
+        return combined_df, None
 
-    return equity_df, index_df, OUTPUT_FILE
+    # Determine output file and sheet name
+    output_path = _get_output_path(create_new=create_new)
+    sheet_name = date.today().strftime("%d-%b-%Y")  # e.g. "27-May-2026"
+
+    # Write: append sheet to existing file, or create new
+    if os.path.exists(output_path) and not create_new:
+        # Append new sheet to existing workbook
+        with pd.ExcelWriter(output_path, engine="openpyxl", mode="a",
+                            if_sheet_exists="replace") as w:
+            combined_df.to_excel(w, sheet_name=sheet_name, index=False)
+    else:
+        # Create new file
+        with pd.ExcelWriter(output_path, engine="openpyxl") as w:
+            combined_df.to_excel(w, sheet_name=sheet_name, index=False)
+
+    print(f"\n  ✓ Done: {output_path}")
+    print(f"    Sheet: {sheet_name}")
+    print(f"    Rows: {len(combined_df)} ({len(equity_df)} equity + {len(index_df)} index)")
+
+    return combined_df, output_path
 
 
 # ===========================================================================
@@ -572,15 +605,19 @@ if __name__ == "__main__":
                         default="weekly", help="Expiry type (default: weekly)")
     parser.add_argument("--eod", action="store_true",
                         help="Force EOD BhavCopy mode (skip Angel One)")
+    parser.add_argument("--new", action="store_true",
+                        help="Create a new Excel file (default: append to existing)")
     args = parser.parse_args()
 
     t0 = time.time()
-    eq, idx, out = run(expiry_type=args.expiry, force_eod=args.eod)
+    combined, out = run(expiry_type=args.expiry, force_eod=args.eod, create_new=args.new)
     elapsed = time.time() - t0
     print(f"\n  Total time: {elapsed:.1f}s")
 
     # Print summary
-    if not eq.empty:
-        print("\n  Top 10 by Call Max OI (Equity):")
-        top = eq.nlargest(10, "Call Max OI")[["Symbol", "Call Strike", "Call Max OI", "Put Strike", "Put Max OI", "PCR"]]
-        print(top.to_string(index=False))
+    if not combined.empty:
+        eq_only = combined[combined["Type"] == "Equity"]
+        if not eq_only.empty:
+            print("\n  Top 10 by Call Max OI (Equity):")
+            top = eq_only.nlargest(10, "Call Max OI")[["Symbol", "Call Strike", "Call Max OI", "Put Strike", "Put Max OI"]]
+            print(top.to_string(index=False))

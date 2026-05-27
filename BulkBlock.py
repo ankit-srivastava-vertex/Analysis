@@ -603,11 +603,11 @@ class BSEScraper:
                     summary_rows.append(("HNIs", len(fst_sheets["HNIs"])))
                 dataframes["FII_Summary"] = pd.DataFrame(summary_rows, columns=["Category", "Count"])
 
-                # Sort HNIs by stock name ascending
+                # Sort HNIs by HNI ascending
                 if "HNIs" in fst_sheets and not fst_sheets["HNIs"].empty:
                     hni_df = fst_sheets["HNIs"]
-                    if "Stock Name" in hni_df.columns:
-                        fst_sheets["HNIs"] = hni_df.sort_values("Stock Name", ascending=True).reset_index(drop=True)
+                    if "HNI" in hni_df.columns:
+                        fst_sheets["HNIs"] = hni_df.sort_values("HNI", ascending=True).reset_index(drop=True)
 
                 dataframes.update(fst_sheets)
                 print(f"\n✓ FII Stake Tracker: {len(fst_sheets)} sheet(s) merged")
