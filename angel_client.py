@@ -308,9 +308,23 @@ def _parse_ticker(ticker: str):
                or _symbol_index.get(("NSE", raw)))
         return ("NSE", tok) if tok else (None, None)
     _load_scrip_master()
+    # 1. NSE regular equity
     tok = (_symbol_index.get(("NSE", t.upper() + "-EQ"))
            or _symbol_index.get(("NSE", t.upper())))
-    return ("NSE", tok) if tok else (None, None)
+    if tok:
+        return "NSE", tok
+    # 2. BSE regular equity
+    tok = (_symbol_index.get(("BSE", t.upper() + "-EQ"))
+           or _symbol_index.get(("BSE", t.upper())))
+    if tok:
+        return "BSE", tok
+    # 3. NSE SME
+    tok = _symbol_index.get(("NSE", t.upper() + "-SM"))
+    if tok:
+        return "NSE", tok
+    # 4. BSE SME (no special suffix — try name match)
+    tok = _symbol_index.get(("BSE", t.upper() + "-SM"))
+    return ("BSE", tok) if tok else (None, None)
 
 
 # ─────────────────────────── rate limiter ──────────────────────────────────

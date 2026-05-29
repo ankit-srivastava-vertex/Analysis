@@ -349,13 +349,19 @@ def _fill_underlying_ltp(obj, master, results, is_index):
 # FALLBACK — NSE BhavCopy (EOD, no auth)
 # ===========================================================================
 
-def fetch_eod_bhavcopy():
-    """Download latest NSE F&O BhavCopy zip and return parsed DataFrame."""
-    print("  [Fallback] Fetching NSE BhavCopy (EOD data)...")
+def fetch_eod_bhavcopy(same_day_only=False):
+    """Download NSE F&O BhavCopy zip and return parsed DataFrame.
+
+    Args:
+        same_day_only: If True, only try today's date. If False, search last 7 days.
+    """
+    label = "same-day" if same_day_only else "recent"
+    print(f"  Fetching NSE BhavCopy ({label} EOD data)...")
     client = httpx.Client(http2=False, follow_redirects=True, timeout=20,
                           headers={"User-Agent": UA})
 
-    for days_ago in range(7):
+    days_range = 1 if same_day_only else 7
+    for days_ago in range(days_range):
         d = date.today() - timedelta(days=days_ago)
         if d.weekday() >= 5:
             continue
@@ -367,14 +373,17 @@ def fetch_eod_bhavcopy():
                 z = zipfile.ZipFile(io.BytesIO(r.content))
                 csv_name = z.namelist()[0]
                 data = z.read(csv_name).decode("utf-8", errors="ignore")
-                print(f"  Found BhavCopy for {d}")
+                print(f"  ✓ Found BhavCopy for {d}")
                 client.close()
                 return d, pd.read_csv(io.StringIO(data))
         except Exception:
             pass
 
     client.close()
-    print("  ERROR: No BhavCopy found in last 7 days")
+    if same_day_only:
+        print("  ✗ Same-day BhavCopy not available yet")
+    else:
+        print("  ERROR: No BhavCopy found in last 7 days")
     return None, None
 
 
@@ -404,7 +413,7 @@ def parse_bhavcopy(df, expiry_type="weekly", filter_symbols=None, inst_type="STO
     opts["LastPric"] = pd.to_numeric(opts.get("LastPric", 0), errors="coerce")
     opts["UndrlygPric"] = pd.to_numeric(opts.get("UndrlygPric", 0), errors="coerce")
     opts["NewBrdLotQty"] = pd.to_numeric(opts.get("NewBrdLotQty", 1), errors="coerce").replace(0, 1)
-    opts["XpryDt"] = pd.to_datetime(opts["XpryDt"], dayfirst=True)
+    opts["XpryDt"] = pd.to_datetime(opts["XpryDt"], format="mixed", dayfirst=True)
 
     # Convert OI from shares to lots (contracts)
     opts["OpnIntrst"] = (opts["OpnIntrst"] / opts["NewBrdLotQty"]).round().astype(int)
@@ -492,52 +501,54 @@ def _get_output_path(create_new=False):
     return os.path.join(SCRIPT_DIR, f"fno_{month_name}.xlsx")
 
 
+def _is_market_open_today():
+    """Check if NSE market has opened today (9:15 AM IST on a weekday).
+
+    Returns True only if today is a weekday AND current time >= 9:15 AM IST.
+    Angel One OI data is stale (previous session) until market opens.
+    """
+    from datetime import timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.date()
+
+    # Weekend — market closed
+    if today_ist.weekday() >= 5:
+        return False
+
+    # Market opens at 9:15 AM IST
+    market_open = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
+    return now_ist >= market_open
+
+
 def _drop_unwanted_cols(df):
     """Remove columns not needed in output."""
     drop = ["PCR", "Total Call OI", "Total Put OI", "Call OI Change", "Put OI Change"]
     return df.drop(columns=[c for c in drop if c in df.columns], errors="ignore")
 
 
-def run(expiry_type="weekly", force_eod=False, create_new=False):
+def run(expiry_type="weekly", force_live=False, create_new=False):
     """Main entry point. Returns (combined_df, output_path)."""
     print("=" * 70)
     print("  F&O MAX OI SCANNER")
     print("=" * 70)
     print(f"  Date: {date.today()}")
     print(f"  Expiry: {expiry_type}")
-    print(f"  Mode: {'EOD (BhavCopy)' if force_eod else 'Live (Angel One) with EOD fallback'}")
+    print(f"  Mode: {'Live (Angel One)' if force_live else 'BhavCopy (same-day) with Angel One fallback'}")
     print(f"  File mode: {'New file' if create_new else 'Append to existing'}")
     print()
 
     equity_df = pd.DataFrame()
     index_df = pd.DataFrame()
 
-    # Try Angel One live first (unless forced EOD)
-    angel_success = False
-    if not force_eod:
-        try:
-            print("[1/3] Loading scrip master...")
-            master = load_scrip_master()
+    bhavcopy_success = False
 
-            print("[2/3] Fetching live OI — Equity F&O...")
-            equity_symbols = get_fno_symbols_from_master(master)
-            print(f"  Found {len(equity_symbols)} F&O equity symbols")
-            equity_df = fetch_live_oi_angel(master, equity_symbols, expiry_type, is_index=False)
+    data_date = None  # actual date of the OI data
 
-            print(f"\n[3/3] Fetching live OI — Index F&O...")
-            index_df = fetch_live_oi_angel(master, INDEX_SYMBOLS, expiry_type, is_index=True)
-
-            if not equity_df.empty:
-                angel_success = True
-                print(f"\n  ✓ Angel One: {len(equity_df)} equity + {len(index_df)} index results")
-        except Exception as e:
-            print(f"\n  ! Angel One failed: {e}")
-            print("  Falling back to NSE BhavCopy...")
-
-    # Fallback to BhavCopy
-    if not angel_success:
-        print("\n[Fallback] Using NSE BhavCopy (EOD)...")
-        bhavcopy_date, bhavcopy_df = fetch_eod_bhavcopy()
+    # Try same-day BhavCopy first (unless forced live)
+    if not force_live:
+        print("[1/2] Trying same-day NSE BhavCopy...")
+        bhavcopy_date, bhavcopy_df = fetch_eod_bhavcopy(same_day_only=True)
         if bhavcopy_df is not None:
             print(f"  Parsing equity options (STO)...")
             equity_df = parse_bhavcopy(bhavcopy_df, expiry_type, inst_type="STO")
@@ -546,10 +557,41 @@ def run(expiry_type="weekly", force_eod=False, create_new=False):
                 bhavcopy_df, expiry_type,
                 filter_symbols=set(INDEX_SYMBOLS), inst_type="IDO"
             )
-            print(f"  ✓ BhavCopy ({bhavcopy_date}): "
-                  f"{len(equity_df)} equity + {len(index_df)} index results")
-        else:
-            print("  ✗ No data source available")
+            if not equity_df.empty:
+                bhavcopy_success = True
+                data_date = bhavcopy_date
+                print(f"  ✓ BhavCopy ({bhavcopy_date}): "
+                      f"{len(equity_df)} equity + {len(index_df)} index results")
+
+    # Fallback to Angel One live — only if market is open today
+    if not bhavcopy_success:
+        if not _is_market_open_today():
+            print("\n  ✗ Market has not opened today (pre-market or holiday).")
+            print("    Angel One data would be stale (previous session). Aborting.")
+            return pd.DataFrame(), None
+
+        print("\n[2/2] Fetching live OI via Angel One...")
+        try:
+            print("  Loading scrip master...")
+            master = load_scrip_master()
+
+            print("  Fetching live OI — Equity F&O...")
+            equity_symbols = get_fno_symbols_from_master(master)
+            print(f"  Found {len(equity_symbols)} F&O equity symbols")
+            equity_df = fetch_live_oi_angel(master, equity_symbols, expiry_type, is_index=False)
+
+            print(f"\n  Fetching live OI — Index F&O...")
+            index_df = fetch_live_oi_angel(master, INDEX_SYMBOLS, expiry_type, is_index=True)
+
+            if not equity_df.empty:
+                data_date = date.today()  # market is open, data is current
+                print(f"\n  ✓ Angel One: {len(equity_df)} equity + {len(index_df)} index results")
+            else:
+                print("  ✗ No data from Angel One either")
+                return pd.DataFrame(), None
+        except Exception as e:
+            print(f"\n  ✗ Angel One failed: {e}")
+            print("  No data source available")
             return pd.DataFrame(), None
 
     # Drop unwanted columns
@@ -573,9 +615,9 @@ def run(expiry_type="weekly", force_eod=False, create_new=False):
         print("  ✗ No data to write")
         return combined_df, None
 
-    # Determine output file and sheet name
+    # Determine output file and sheet name (use actual data date, not run date)
     output_path = _get_output_path(create_new=create_new)
-    sheet_name = date.today().strftime("%d-%b-%Y")  # e.g. "27-May-2026"
+    sheet_name = data_date.strftime("%d-%b-%Y")  # e.g. "27-May-2026"
 
     # Write: append sheet to existing file, or create new
     if os.path.exists(output_path) and not create_new:
@@ -603,14 +645,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="F&O Max OI Strike Scanner")
     parser.add_argument("--expiry", choices=["weekly", "monthly"],
                         default="weekly", help="Expiry type (default: weekly)")
-    parser.add_argument("--eod", action="store_true",
-                        help="Force EOD BhavCopy mode (skip Angel One)")
+    parser.add_argument("--live", action="store_true",
+                        help="Force Angel One live mode (skip BhavCopy)")
     parser.add_argument("--new", action="store_true",
                         help="Create a new Excel file (default: append to existing)")
     args = parser.parse_args()
 
     t0 = time.time()
-    combined, out = run(expiry_type=args.expiry, force_eod=args.eod, create_new=args.new)
+    combined, out = run(expiry_type=args.expiry, force_live=args.live, create_new=args.new)
     elapsed = time.time() - t0
     print(f"\n  Total time: {elapsed:.1f}s")
 

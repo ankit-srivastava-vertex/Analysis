@@ -586,9 +586,19 @@ def _resolve_yf_ticker(symbol):
         except Exception:
             pass
 
-    # 1) Direct suffix attempts (main board NSE/BSE)
-    _try(symbol + ".NS")
-    _try(symbol + ".BO")
+    # 1) Direct suffix attempts (main board NSE/BSE) — use exchange-aware resolution
+    try:
+        from data_provider import _to_yf_ticker
+        primary = _to_yf_ticker(symbol)
+        _try(primary)
+        # Also try the other exchange
+        if primary.endswith(".NS"):
+            _try(symbol + ".BO")
+        else:
+            _try(symbol + ".NS")
+    except Exception:
+        _try(symbol + ".NS")
+        _try(symbol + ".BO")
 
     # 2) Manual alias map (handles SME tickers Yahoo abbreviates)
     for alias in _TICKER_ALIASES.get(symbol, []):

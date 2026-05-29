@@ -82,11 +82,28 @@ def _try_angel(ticker: str, start, end) -> Optional[pd.DataFrame]:
     return df.reindex(columns=_OHLCV)
 
 
+def _to_yf_ticker(ticker: str) -> str:
+    """Convert a bare symbol to yfinance format (.NS/.BO) using _parse_ticker.
+    If already suffixed or is an index (^), return as-is."""
+    t = ticker.strip()
+    if t.upper().endswith(".NS") or t.upper().endswith(".BO") or t.startswith("^"):
+        return t
+    try:
+        from angel_client import _parse_ticker
+        exch, tok = _parse_ticker(t)
+        if exch == "BSE":
+            return t + ".BO"
+        return t + ".NS"  # default to .NS for NSE or unknown
+    except Exception:
+        return t + ".NS"
+
+
 def _try_jugaad(ticker: str, start, end) -> Optional[pd.DataFrame]:
     """jugaad-data only handles NSE equity. Skip silently otherwise."""
-    if not ticker.upper().endswith(".NS"):
+    yf_t = _to_yf_ticker(ticker)
+    if not yf_t.upper().endswith(".NS"):
         return None
-    sym = ticker[:-3]
+    sym = yf_t[:-3]
     if sym.startswith("^"):  # indices not supported by jugaad stock_df
         return None
     try:
@@ -111,10 +128,11 @@ def _try_jugaad(ticker: str, start, end) -> Optional[pd.DataFrame]:
 
 
 def _try_yfinance(ticker: str, start, end) -> Optional[pd.DataFrame]:
+    yf_t = _to_yf_ticker(ticker)
     try:
         import yfinance as yf
         df = yf.download(
-            ticker, start=str(start),
+            yf_t, start=str(start),
             end=str(end) if end else None,
             progress=False, auto_adjust=False, threads=False,
         )

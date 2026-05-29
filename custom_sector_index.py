@@ -58,7 +58,8 @@ from jugaad_data.nse import stock_df
 
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-CONSTITUENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index_constituents.json")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONSTITUENTS_FILE = os.path.join(SCRIPT_DIR, "index_constituents.json")
 BASE_VALUE = 1000  # Starting value for each custom index
 
 
@@ -120,7 +121,7 @@ def fetch_close_prices(symbol, start_date, end_date):
     try:
         from data_provider import _fetch_one, _resolve_period
         s, e = _resolve_period(str(start_date), str(end_date), None)
-        dp_df = _fetch_one(symbol + ".NS", s, e)
+        dp_df = _fetch_one(symbol, s, e)
         if dp_df is not None and not dp_df.empty and "Close" in dp_df.columns:
             result = dp_df[["Close"]].copy()
             result = result.reset_index()
@@ -149,8 +150,10 @@ def fetch_close_prices(symbol, start_date, end_date):
     # ── Fallback 2: yfinance ──
     try:
         import yfinance as yf
+        from data_provider import _to_yf_ticker
+        yf_sym = _to_yf_ticker(symbol)
         yf_df = yf.download(
-            symbol + ".NS", start=str(start_date), end=str(end_date),
+            yf_sym, start=str(start_date), end=str(end_date),
             progress=False,
         )
         if yf_df is not None and not yf_df.empty:
@@ -315,7 +318,7 @@ def create_chart(all_indices, title="Custom Sector Indices"):
                 ],
             ),
         ),
-        yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=25),
+        yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=10),
         hovermode="closest",
         legend=dict(
             orientation="h",
@@ -387,7 +390,7 @@ def create_individual_charts(all_indices):
                     ],
                 ),
             ),
-            yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=25),
+            yaxis=dict(title="% Change from Base", rangemode="tozero", dtick=10),
             hovermode="x",
             template="plotly_white",
             height=400,

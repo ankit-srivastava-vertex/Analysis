@@ -132,6 +132,9 @@ def fetch_all_prices():
     if dropped:
         print("  Dropped (no data): %s" % ", ".join(sorted(dropped)))
 
+    # Forward-fill gaps in benchmark/sector data so NaN holes don't propagate
+    valid = valid.ffill()
+
     print("  Got data for %d sectors + benchmark (%d trading days)" % (
         len(valid.columns) - 1, len(valid)))
 
@@ -144,7 +147,7 @@ def _build_custom_indices(benchmark_series):
     Returns:
         (index_df, constituent_close_df)
         - index_df: DataFrame with Date index, one column per custom index (prefixed 'C:')
-        - constituent_close_df: DataFrame with all constituent stock closes (ticker.NS columns)
+        - constituent_close_df: DataFrame with all constituent stock closes (bare symbol columns)
     """
     if not os.path.exists(CONSTITUENTS_FILE):
         print("  No custom indices file found, skipping")
@@ -156,7 +159,7 @@ def _build_custom_indices(benchmark_series):
     all_tickers = set()
     for info in index_defs.values():
         for symbol in info["constituents"]:
-            all_tickers.add(symbol + ".NS")
+            all_tickers.add(symbol)
 
     if not all_tickers:
         return pd.DataFrame(), pd.DataFrame()
@@ -174,7 +177,9 @@ def _build_custom_indices(benchmark_series):
             raw = dp.download(batch, period="1y", progress=False)
         except Exception:
             try:
-                raw = yf.download(batch, period="1y", progress=False) if _HAS_YFINANCE else None
+                from data_provider import _to_yf_ticker
+                yf_batch = [_to_yf_ticker(t) for t in batch]
+                raw = yf.download(yf_batch, period="1y", progress=False) if _HAS_YFINANCE else None
             except Exception:
                 raw = None
         try:
@@ -198,7 +203,7 @@ def _build_custom_indices(benchmark_series):
     # Build each index
     result = pd.DataFrame(index=close.index)
     for index_name, info in index_defs.items():
-        tickers = [s + ".NS" for s in info["constituents"]]
+        tickers = list(info["constituents"])
         available = [t for t in tickers if t in close.columns and close[t].notna().sum() > 5]
         if len(available) < 2:
             print("  [C: %s] Skipped — only %d stocks with data" % (index_name, len(available)))
@@ -208,12 +213,15 @@ def _build_custom_indices(benchmark_series):
             print("  [C: %s] Skipped — only %d trading days" % (index_name, len(prices)))
             continue
 
-        returns = prices.pct_change().clip(-0.35, 0.35)
+        returns = prices.pct_change().clip(-0.35, 0.35).fillna(0)
         portfolio_ret = returns.mean(axis=1)
         index_vals = (1 + portfolio_ret).cumprod()
-        index_vals.iloc[0] = 1.0
-        base_level = benchmark_series.iloc[0] if not benchmark_series.empty else 1000.0
+        # Use first valid benchmark value; fallback to 1000 if benchmark is all-NaN
+        bench_valid = benchmark_series.dropna()
+        base_level = float(bench_valid.iloc[0]) if len(bench_valid) > 0 else 1000.0
         index_series = index_vals * base_level
+        # Safety: drop any residual NaN/Inf
+        index_series = index_series.replace([float('inf'), float('-inf')], pd.NA).dropna()
 
         col_name = "C: " + index_name
         result[col_name] = index_series
@@ -230,11 +238,28 @@ def resample_prices(daily_df, rule):
 
 
 def compute_jdk_rs(sector_series, benchmark_series, sma_period):
-    """Compute JdK RS-Ratio and RS-Momentum for one sector."""
-    rs = sector_series / benchmark_series * 100
+    """Compute JdK RS-Ratio and RS-Momentum for one sector.
+
+    Handles NaN/zero in benchmark gracefully — any invalid data points
+    are simply excluded from the result.
+    """
+    # Drop any NaN from both series (align on common valid dates)
+    combined = pd.DataFrame({"sector": sector_series, "bench": benchmark_series}).dropna()
+    if len(combined) < sma_period * 2:
+        return pd.DataFrame()
+    sector_clean = combined["sector"]
+    bench_clean = combined["bench"]
+    # Avoid division by zero
+    bench_clean = bench_clean.replace(0, pd.NA).dropna()
+    sector_clean = sector_clean.reindex(bench_clean.index)
+
+    rs = sector_clean / bench_clean * 100
     rs_sma = rs.rolling(window=sma_period, min_periods=sma_period).mean()
+    # Avoid division by zero in ratio computation
+    rs_sma = rs_sma.replace(0, pd.NA)
     rs_ratio = rs / rs_sma * 100
     rs_ratio_sma = rs_ratio.rolling(window=sma_period, min_periods=sma_period).mean()
+    rs_ratio_sma = rs_ratio_sma.replace(0, pd.NA)
     rs_momentum = rs_ratio / rs_ratio_sma * 100
 
     result = pd.DataFrame({
@@ -242,6 +267,8 @@ def compute_jdk_rs(sector_series, benchmark_series, sma_period):
         "RS_Ratio": rs_ratio,
         "RS_Momentum": rs_momentum,
     })
+    # Remove NaN and Inf
+    result = result.replace([float('inf'), float('-inf')], pd.NA)
     return result.dropna()
 
 
@@ -251,7 +278,7 @@ def compute_all_rs(prices_df, sma_period):
         print("  ERROR: Benchmark '%s' not in data" % BENCHMARK_NAME)
         return {}
 
-    benchmark = prices_df[BENCHMARK_NAME]
+    benchmark = prices_df[BENCHMARK_NAME].dropna()
     sectors = [c for c in prices_df.columns if c != BENCHMARK_NAME]
 
     results = {}
@@ -275,7 +302,7 @@ def compute_constituent_quadrants(constituent_close, benchmark_series, index_def
     """Compute per-stock RS with full tail data for mini-RRG charts.
 
     Args:
-        constituent_close: DataFrame with all stock closes (TICKER.NS columns)
+        constituent_close: DataFrame with all stock closes (bare symbol columns)
         benchmark_series: Series of Nifty 50 daily close
         index_defs: dict from index_constituents.json
 
@@ -288,11 +315,11 @@ def compute_constituent_quadrants(constituent_close, benchmark_series, index_def
 
     print("\n[2b] Computing per-stock RS tails for constituent drill-down ...")
 
-    # Map sector display name -> list of ticker.NS that have data
+    # Map sector display name -> list of tickers that have data
     sector_stocks = {}
     for index_name, info in index_defs.items():
         display_name = "C: " + index_name
-        tickers = [s + ".NS" for s in info["constituents"]]
+        tickers = list(info["constituents"])
         available = [t for t in tickers if t in constituent_close.columns
                      and constituent_close[t].notna().sum() > 20]
         if available:
@@ -304,7 +331,7 @@ def compute_constituent_quadrants(constituent_close, benchmark_series, index_def
         # Resample constituent prices + benchmark
         if resample_rule is None:
             stock_prices = constituent_close.copy()
-            bench = benchmark_series.copy()
+            bench = benchmark_series.dropna()
         else:
             stock_prices = constituent_close.resample(resample_rule).last().dropna(how="all")
             bench = benchmark_series.resample(resample_rule).last().dropna()
@@ -948,9 +975,15 @@ def run(output_prefix=None):
 
     # 1b. Build custom sector indices and get constituent prices
     print("\n[1b] Building custom sector indices ...")
-    custom, constituent_close = _build_custom_indices(daily[BENCHMARK_NAME])
+    # Pass ffilled benchmark so custom index construction never sees NaN
+    benchmark_for_build = daily[BENCHMARK_NAME].ffill().bfill()
+    custom, constituent_close = _build_custom_indices(benchmark_for_build)
     if not custom.empty:
         daily = daily.join(custom, how="left")
+        # Forward-fill custom index columns to avoid NaN gaps after join
+        for col in custom.columns:
+            if col in daily.columns:
+                daily[col] = daily[col].ffill()
         print("  Merged %d custom indices into price data" % len(custom.columns))
 
     # 2. Compute RS for each timeframe (sector-level)
@@ -974,8 +1007,10 @@ def run(output_prefix=None):
     if not constituent_close.empty:
         with open(CONSTITUENTS_FILE, "r") as f:
             index_defs = json.load(f)
+        # Pass NaN-free benchmark for constituent computation
+        bench_for_constituents = daily[BENCHMARK_NAME].ffill().bfill()
         constituents_data = compute_constituent_quadrants(
-            constituent_close, daily[BENCHMARK_NAME], index_defs
+            constituent_close, bench_for_constituents, index_defs
         )
 
     # 3. Build chart

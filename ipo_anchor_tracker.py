@@ -447,13 +447,14 @@ def _try_close(ipo: IPO) -> float | None:
     # Plain yfinance fallback.
     try:
         import yfinance as yf  # type: ignore
-        for suffix in (".NS", ".BO"):
-            t = yf.Ticker(ipo.symbol + suffix)
-            hist = t.history(start=ipo.listing_date.strftime("%Y-%m-%d"),
-                             end=(ipo.listing_date + timedelta(days=5))
-                                  .strftime("%Y-%m-%d"))
-            if hist is not None and not hist.empty:
-                return float(hist["Close"].iloc[0])
+        from data_provider import _to_yf_ticker
+        yf_sym = _to_yf_ticker(ipo.symbol)
+        t = yf.Ticker(yf_sym)
+        hist = t.history(start=ipo.listing_date.strftime("%Y-%m-%d"),
+                         end=(ipo.listing_date + timedelta(days=5))
+                              .strftime("%Y-%m-%d"))
+        if hist is not None and not hist.empty:
+            return float(hist["Close"].iloc[0])
     except Exception:
         pass
     return None

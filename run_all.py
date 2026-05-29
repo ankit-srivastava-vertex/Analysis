@@ -262,8 +262,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 }
 .tab-btn:hover { color:#fff; background:rgba(255,255,255,0.2); }
 .tab-btn.active { color:#fff; background:#e94560; box-shadow: 0 -2px 6px rgba(233,69,96,0.4); }
-.tab-panel { width:100%%; height:calc(100vh - 60px); }
-.tab-panel iframe { width:100%%; height:100%%; border:none; }
+.tab-panel { width:100%%; height:calc(100vh - 60px); overflow:auto; }
+.tab-panel iframe { width:100%%; height:1400px; border:none; }
 </style>
 </head>
 <body>

@@ -170,12 +170,12 @@ def create_rs_chart(all_rs, all_indices, title="Sector Relative Strength vs Nift
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.10,
+        vertical_spacing=0.30,
         subplot_titles=(
             "Relative Strength (> 0 = Outperforming Nifty 50)<br><sup>Sector vs Nifty 50 — rising line means sector gaining strength relative to benchmark, even if both are falling</sup>",
             "Sector Index — % Change from Base<br><sup>Absolute gain/loss of each sector index from starting value — independent of Nifty performance</sup>",
         ),
-        row_heights=[0.55, 0.45],
+        row_heights=[0.50, 0.50],
     )
 
     colors = [
@@ -243,21 +243,24 @@ def create_rs_chart(all_rs, all_indices, title="Sector Relative Strength vs Nift
         title=dict(text=title, font=dict(size=20), y=0.98, yanchor="top"),
         hovermode="closest",
         legend=dict(
-            orientation="v",
+            orientation="h",
             yanchor="top",
-            y=1.0,
-            xanchor="left",
-            x=1.02,
-            font=dict(size=10),
+            y=0.6,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11),
+            traceorder="normal",
+            entrywidth=200,
+            entrywidthmode="pixels",
         ),
         template="plotly_white",
-        height=900,
-        margin=dict(t=100, r=200),
+        height=1100,
+        margin=dict(t=100, r=50, b=80),
     )
 
     # Y-axis tick scaling for both panels
-    fig.update_yaxes(dtick=25, row=1, col=1)
-    fig.update_yaxes(dtick=25, row=2, col=1)
+    fig.update_yaxes(dtick=10, row=1, col=1)
+    fig.update_yaxes(dtick=10, row=2, col=1)
 
     # Range selector on bottom panel
     fig.update_xaxes(
@@ -297,7 +300,11 @@ def save_to_excel(all_rs, all_indices, ranking_df, output_file):
 
 def save_chart_html(fig, output_file):
     """Save chart as standalone HTML."""
-    html = fig.to_html(full_html=True, include_plotlyjs="cdn")
+    html = fig.to_html(
+        full_html=True,
+        include_plotlyjs="cdn",
+        config={"responsive": True},
+    )
     with open(output_file, "w") as f:
         f.write(html)
     print("HTML chart saved: %s" % output_file)
