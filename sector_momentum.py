@@ -259,8 +259,8 @@ def create_rs_chart(all_rs, all_indices, title="Sector Relative Strength vs Nift
     )
 
     # Y-axis tick scaling for both panels
-    fig.update_yaxes(dtick=10, row=1, col=1)
-    fig.update_yaxes(dtick=10, row=2, col=1)
+    fig.update_yaxes(dtick=25, row=1, col=1)
+    fig.update_yaxes(dtick=25, row=2, col=1)
 
     # Range selector on bottom panel
     fig.update_xaxes(
