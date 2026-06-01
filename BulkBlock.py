@@ -544,40 +544,60 @@ class BSEScraper:
         if nse_bulk_deals_df is not None and not nse_bulk_deals_df.empty:
             nse_bulk_deals_df.columns = nse_bulk_deals_df.columns.str.strip()
             filtered_nse_bulk_df = nse_bulk_deals_df[nse_bulk_deals_df['clientName'].isin(client_names_to_filter)]
+            if filtered_nse_bulk_df.empty:
+                filtered_nse_bulk_df = pd.DataFrame({"Status": [f"No deals matched filter. Total deals fetched: {len(nse_bulk_deals_df)}"]})
         else:
-            filtered_nse_bulk_df = pd.DataFrame()
+            filtered_nse_bulk_df = pd.DataFrame({"Status": ["ERROR: NSE Bulk deals fetch failed or returned empty"]})
 
         if nse_block_deals_df is not None and not nse_block_deals_df.empty:
             nse_block_deals_df.columns = nse_block_deals_df.columns.str.strip()
             filtered_nse_block_df = nse_block_deals_df[nse_block_deals_df['clientName'].isin(client_names_to_filter)]
+            if filtered_nse_block_df.empty:
+                filtered_nse_block_df = pd.DataFrame({"Status": [f"No deals matched filter. Total deals fetched: {len(nse_block_deals_df)}"]})
         else:
-            filtered_nse_block_df = pd.DataFrame()
+            filtered_nse_block_df = pd.DataFrame({"Status": ["ERROR: NSE Block deals fetch failed or returned empty"]})
 
         dataframes = {"nse_bulk": filtered_nse_bulk_df,
                       "nse_block": filtered_nse_block_df}
 
         # Fetch BSE BULK DEALS via API
         bulk_name = 'bse_bulk'
-        bulk_df = self.fetch_bse_deals_api("bulk")
+        try:
+            bulk_df = self.fetch_bse_deals_api("bulk")
+        except Exception as e:
+            bulk_df = None
+            print(f"⚠️  BSE Bulk fetch exception: {e}")
 
         if bulk_df is not None and not bulk_df.empty:
             bulk_df.columns = bulk_df.columns.str.strip()
             filtered_bulk_df = bulk_df[bulk_df['Client Name'].isin(client_names_to_filter)]
-            dataframes[bulk_name] = filtered_bulk_df
+            if filtered_bulk_df.empty:
+                dataframes[bulk_name] = pd.DataFrame({"Status": [f"No deals matched filter. Total BSE bulk deals fetched: {len(bulk_df)}"]})
+            else:
+                dataframes[bulk_name] = filtered_bulk_df
         else:
+            dataframes[bulk_name] = pd.DataFrame({"Status": ["ERROR: BSE Bulk deals API failed or returned no data"]})
             print(f"⚠️  No data fetched for {bulk_name}")
 
         time.sleep(1)
 
         # Fetch BSE BLOCK DEALS via API
         block_name = 'bse_block'
-        block_df = self.fetch_bse_deals_api("block")
+        try:
+            block_df = self.fetch_bse_deals_api("block")
+        except Exception as e:
+            block_df = None
+            print(f"⚠️  BSE Block fetch exception: {e}")
 
         if block_df is not None and not block_df.empty:
             block_df.columns = block_df.columns.str.strip()
             filtered_block_df = block_df[block_df['Client Name'].isin(client_names_to_filter)]
-            dataframes[block_name] = filtered_block_df
+            if filtered_block_df.empty:
+                dataframes[block_name] = pd.DataFrame({"Status": [f"No deals matched filter. Total BSE block deals fetched: {len(block_df)}"]})
+            else:
+                dataframes[block_name] = filtered_block_df
         else:
+            dataframes[block_name] = pd.DataFrame({"Status": ["ERROR: BSE Block deals API failed or returned no data"]})
             print(f"⚠️  No data fetched for {block_name}")
 
         # ── FII Stake Tracker + HNI Holdings ──
