@@ -7,7 +7,7 @@ resistance bases and approaching breakout levels. Runs the full pipeline
 end-to-end: universe generation → OHLCV download → pattern detection →
 scoring → Excel + chart output.
 
-ARCHITECTURE (v4.4)
+ARCHITECTURE (v4.4) 
 -------------------
 Two independent universes are scanned in sequence:
 
@@ -28,7 +28,7 @@ For each universe, the breakout scan detects:
   - Base quality (duration, range, higher lows)
   - Volume contraction (VCR, VDU)
   - Patterns: multi-touch, VCP, W-bottom, cup & handle
-  - Relative strength vs Nifty 50 (rising RS line over 50 sessions)
+  - Relative strength vs Nifty 500 (rising RS line over 50 sessions)
   - Risk/reward plan (stop, target, R:R ratio)
 
 SCORING (v4.3)
@@ -54,7 +54,6 @@ OUTPUT (4-sheet Excel)
     Sheet 3: "MPD Breakouts"      — Breakout candidates from MPD universe
     Sheet 4: "Screener Breakouts" — Breakout candidates from screener universe
 
-  Charts: Output/breakout_charts_mpd/ and Output/breakout_charts_screener/
   Logs:   Output/logs/logs_breakout_scanner_angel_v35_<timestamp>.txt
 
 DATA SOURCE (OHLCV)
@@ -81,7 +80,7 @@ USAGE
   python3 breakout_scanner_angel.py --high-conviction   # only HC picks in output
   python3 breakout_scanner_angel.py --symbols-csv f.csv # custom single-universe mode
   python3 breakout_scanner_angel.py --min-score 70      # raise score threshold
-  python3 breakout_scanner_angel.py --charts 15         # top-N charts per universe
+
 """
 
 import os
@@ -130,7 +129,7 @@ class _Tee:
 # Screener.in screen URL — second universe source
 SCREENER_URL_DEFAULT = "https://www.screener.in/screens/2877406/52w-15/"
 
-NIFTY50_BENCH = "^NSEI"  # Nifty 50 index (handled via Angel INDEX_OVERRIDES)
+NIFTY500_BENCH = "^CRSLDX"  # Nifty 500 index (handled via Angel INDEX_OVERRIDES)
 
 
 def _yahoo_to_tv(ticker: str) -> str:
@@ -361,11 +360,11 @@ def fetch_ohlcv(tickers: list, lookback_days: int = LOOKBACK_DAYS,
 
 
 def fetch_benchmark(lookback_days: int = LOOKBACK_DAYS) -> pd.Series:
-    """Fetch Nifty 50 index close history from Angel One."""
+    """Fetch Nifty 500 index close history from Angel One."""
     from angel_client import angel_download
     end = TODAY + datetime.timedelta(days=1)
     start = TODAY - datetime.timedelta(days=int(lookback_days * 1.5))
-    df = angel_download("^NSEI", start, end)
+    df = angel_download("^CRSLDX", start, end)
     if df.empty:
         return pd.Series(dtype=float)
     return df["Close"].rename("Bench")
@@ -695,57 +694,6 @@ def risk_plan(df: pd.DataFrame, res: dict) -> dict:
 
 
 # ─── Part 7: Output ─────────────────────────────────────────────────────────
-
-def render_chart(symbol: str, df: pd.DataFrame, res: dict, score: dict,
-                 risk: dict, flags: dict, out_path: str):
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, row_heights=[0.75, 0.25],
-        vertical_spacing=0.03,
-    )
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df["Open"], high=df["High"],
-        low=df["Low"], close=df["Close"], name="Price",
-        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
-    ), row=1, col=1)
-
-    # Resistance line
-    fig.add_hline(y=res["R"], line_color="#1e88e5", line_width=2,
-                  annotation_text=f"R = {res['R']:.2f}", row=1, col=1)
-    # Stop / target
-    fig.add_hline(y=risk["stop"], line_color="#ef5350", line_dash="dash",
-                  annotation_text=f"Stop {risk['stop']:.2f}", row=1, col=1)
-    fig.add_hline(y=risk["target"], line_color="#26a69a", line_dash="dash",
-                  annotation_text=f"Tgt {risk['target']:.2f}", row=1, col=1)
-
-    # Mark base region
-    fig.add_vrect(x0=res["base_start"], x1=df.index[-1],
-                  fillcolor="#1e88e5", opacity=0.05, line_width=0, row=1, col=1)
-
-    # Volume + 50d MA
-    colors = np.where(df["Close"] >= df["Open"], "#26a69a", "#ef5350")
-    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], marker_color=colors,
-                         name="Volume", showlegend=False), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index,
-                             y=df["Volume"].rolling(50).mean(),
-                             line=dict(color="white", width=1.2),
-                             name="Vol 50DMA"), row=2, col=1)
-
-    flags_str = ", ".join([k for k, v in flags.items() if v]) or "—"
-    title = (
-        f"{symbol} — Score {score['score']:.1f}/100 | "
-        f"R={res['R']:.2f} ({res['distance_pct']*100:+.2f}%) | "
-        f"Touches={res['touches']} | RR={risk['rr']} | "
-        f"Flags: {flags_str}"
-    )
-    fig.update_layout(
-        title=title, template="plotly_dark", height=720,
-        xaxis_rangeslider_visible=False, showlegend=False,
-    )
-    fig.write_html(out_path, include_plotlyjs="cdn")
-
 
 def _build_summary_sheet():
     """Static reference content written as the first sheet of the Excel.
@@ -1224,8 +1172,7 @@ def main():
     p.add_argument("--max", type=int, default=0,
                    help="cap universe size (0 = all)")
     p.add_argument("--min-score", type=float, default=WATCHLIST_MIN_SCORE)
-    p.add_argument("--charts", type=int, default=20,
-                   help="render top-N charts")
+
     p.add_argument("--lookback", type=int, default=LOOKBACK_DAYS)
     p.add_argument("--no-strict", action="store_true",
                    help="disable v3.3 hard gates (diagnostic v1 funnel)")
@@ -1282,7 +1229,6 @@ def main():
         if rows:
             excel_path = os.path.join(SCRIPT_DIR, "breakout_watchlist.xlsx")
             write_excel(rows, excel_path)
-            _render_top_charts(rows, ohlcv, bench, args)
         print("\nDONE.")
         return
 
@@ -1310,8 +1256,6 @@ def main():
             mpd_rows, mpd_drops = scan(list(ohlcv_mpd.keys()), ohlcv_mpd,
                                        bench, effective_min_score, strict=strict)
             _print_scan_stats(mpd_rows, mpd_drops, effective_min_score)
-            _render_top_charts(mpd_rows, ohlcv_mpd, bench, args,
-                               prefix_dir="breakout_charts_mpd")
         else:
             print("  No tickers from Multi Pct-Down — skipping scan.")
 
@@ -1335,8 +1279,6 @@ def main():
                 scr_rows, scr_drops = scan(list(ohlcv_scr.keys()), ohlcv_scr,
                                            bench, effective_min_score, strict=strict)
                 _print_scan_stats(scr_rows, scr_drops, effective_min_score)
-                _render_top_charts(scr_rows, ohlcv_scr, bench, args,
-                                   prefix_dir="breakout_charts_screener")
             else:
                 print("  No tickers from Screener.in — skipping scan.")
         except Exception as e:
@@ -1549,41 +1491,7 @@ def _print_scan_stats(rows, drops, effective_min_score):
               f" w={n_hc_w}, cup_handle={n_hc_ch})")
 
 
-def _render_top_charts(rows, ohlcv, bench, args, prefix_dir="breakout_charts"):
-    """Render top-N charts for a set of breakout rows."""
-    if not rows:
-        return
-    if args.high_conviction:
-        rows = [r for r in rows if r.get("high_conviction")]
-    rows_sorted = sorted(rows, key=lambda r: (not r.get("high_conviction"),
-                                              -r["score"]))
-    charts_dir = os.path.join(SCRIPT_DIR, os.pardir, "Output", prefix_dir)
-    os.makedirs(charts_dir, exist_ok=True)
-    n_charts = min(args.charts, len(rows_sorted))
-    if n_charts == 0:
-        return
-    print(f"\n  Rendering top {n_charts} charts -> {prefix_dir}/ ...")
-    for r in rows_sorted[:n_charts]:
-        sym = r["symbol"]
-        if sym not in ohlcv:
-            continue
-        df = ohlcv[sym]
-        res = detect_resistance(df)
-        if res is None:
-            continue
-        score = compute_score(df, res, bench)
-        risk = risk_plan(df, res)
-        flags = {
-            "multi_touch": r.get("pattern_multi_touch", False),
-            "vcp": r.get("pattern_vcp", False),
-            "w_pattern": r.get("pattern_w", False),
-            "cup_handle": r.get("pattern_cup_handle", False),
-            "rs_rising_50d": r.get("rs_rising_50d", False),
-        }
-        prefix = "HC_" if r.get("high_conviction") else ""
-        out = os.path.join(charts_dir, f"{prefix}{sym}_breakout.html")
-        render_chart(sym, df.tail(args.lookback), res, score, risk, flags, out)
-    print(f"  Charts saved to: {charts_dir}")
+
 
 
 if __name__ == "__main__":
