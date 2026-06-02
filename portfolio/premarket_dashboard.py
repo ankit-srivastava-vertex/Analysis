@@ -245,7 +245,7 @@ def _compute_breadth_history(verbose: bool = True,
         if verbose and i % 50 == 0:
             print(f"    breadth {i}/{len(universe)}")
         try:
-            df = data_provider.download(f"{sym}.NS", start=start, end=end,
+            df = data_provider.download(sym, start=start, end=end,
                                         interval="1d", progress=False)
         except Exception:
             continue
@@ -265,16 +265,26 @@ def _compute_breadth_history(verbose: bool = True,
               f"computing daily breadth …")
 
     px = pd.DataFrame(closes).sort_index()
+    # Ensure all columns are numeric float (guards against object-dtype from
+    # mixed data sources in pandas 2.x where rolling silently drops non-numeric).
+    import numpy as np
+    px = px.apply(pd.to_numeric, errors="coerce")
+
+    # Drop rows where fewer than half the stocks have data — these are
+    # weekends/holidays that crept in from yfinance or API quirks.  Keeping
+    # them inflates the index and breaks the rolling window (50-row window
+    # may span only ~35 actual trading days, failing min_periods=50).
+    trading_mask = px.notna().sum(axis=1) > len(closes) * 0.5
+    px = px[trading_mask]
 
     # Vectorised rolling stats per stock.
+    valid = px.notna()
     sma50  = px.rolling(50,  min_periods=50).mean()
     sma200 = px.rolling(200, min_periods=200).mean()
     hi252  = px.rolling(252, min_periods=200).max()
     lo252  = px.rolling(252, min_periods=200).min()
     prev   = px.shift(1)
 
-    import numpy as np
-    valid = px.notna()
     sma50_n  = sma50.notna().sum(axis=1).replace(0, np.nan).astype(float)
     sma200_n = sma200.notna().sum(axis=1).replace(0, np.nan).astype(float)
     above50_pct  = (((px > sma50)  & sma50.notna()).sum(axis=1).astype(float)  / sma50_n  * 100)
@@ -373,6 +383,9 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     h = history.copy()
     h["Date"] = pd.to_datetime(h["Date"])
     h = h.sort_values("Date")
+    # Drop non-trading-day rows (weekends/holidays with negligible scans)
+    if "Scanned" in h.columns:
+        h = h[pd.to_numeric(h["Scanned"], errors="coerce") > 50].reset_index(drop=True)
 
     titles = [
         "% of NIFTY 500 above 50-DMA & 200-DMA"
@@ -393,13 +406,13 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["Above50DMA%"], name="% > 50-DMA",
         mode="lines+markers", line=dict(width=2, color="#1976D2"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>%{y:.1f}%<extra>50-DMA</extra>",
     ), row=1, col=1)
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["Above200DMA%"], name="% > 200-DMA",
         mode="lines+markers", line=dict(width=2, color="#7B1FA2"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>%{y:.1f}%<extra>200-DMA</extra>",
     ), row=1, col=1)
     fig.add_hline(y=50, line_dash="dash", line_color="gray", row=1, col=1)
@@ -410,13 +423,13 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["New52wHighs"], name="New 52w Highs",
         mode="lines+markers", line=dict(width=2, color="#4CAF50"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>New Highs: %{y}<extra></extra>",
     ), row=2, col=1)
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["New52wLows"], name="New 52w Lows",
         mode="lines+markers", line=dict(width=2, color="#F44336"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>New Lows: %{y}<extra></extra>",
     ), row=2, col=1)
 
@@ -424,13 +437,13 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["Advances"], name="Advances",
         mode="lines+markers", line=dict(width=2, color="#4CAF50"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>Advances: %{y}<extra></extra>",
     ), row=3, col=1)
     fig.add_trace(go.Scatter(
         x=h["Date"], y=h["Declines"], name="Declines",
         mode="lines+markers", line=dict(width=2, color="#F44336"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>Declines: %{y}<extra></extra>",
     ), row=3, col=1)
 
@@ -439,7 +452,7 @@ def _build_chart(history: pd.DataFrame, out_path: Path) -> Optional[Path]:
     fig.add_trace(go.Scatter(
         x=h["Date"], y=hl, name="Hi/Lo Ratio",
         mode="lines+markers", line=dict(width=2, color="#FF9800"),
-        marker=dict(size=4),
+        marker=dict(size=4), connectgaps=True,
         hovertemplate="%{x|%d-%b-%Y}<br>Ratio: %{y:.2f}<extra></extra>",
     ), row=4, col=1)
     fig.add_hline(y=1, line_dash="dash", line_color="gray", row=4, col=1)

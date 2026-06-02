@@ -85,14 +85,13 @@ RS_BENCH_FALLBACK = "^NSEI"  # Nifty 50 if 500 fails
 # ─────────────────────────── helpers ────────────────────────────────────────
 
 def _to_data_provider_ticker(symbol: str, series: str) -> str:
-    """Convert (symbol, series) to the form data_provider understands."""
+    """Convert (symbol, series) to the form data_provider understands.
+
+    Pass bare symbol — data_provider handles exchange resolution internally.
+    """
     if not symbol:
         return ""
-    sym = symbol.upper()
-    if series and series.upper() in ("SM", "ST", "SME"):
-        # Angel SME suffix
-        return f"{sym}-SM.NS"
-    return f"{sym}.NS"
+    return symbol.upper()
 
 
 def _safe_close(df: Optional[pd.DataFrame]) -> Optional[pd.Series]:

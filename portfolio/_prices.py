@@ -25,12 +25,11 @@ _CACHE: dict = {}
 
 
 def _yf_ticker(sym: str, series: str = "EQ") -> str:
-    sym = (sym or "").strip().upper()
-    if not sym:
-        return ""
-    if series and series.upper() == "BE":
-        return f"{sym}.BO"
-    return f"{sym}.NS"
+    """Convert holding symbol to a ticker suitable for data_provider.
+
+    Pass bare symbol — data_provider handles exchange resolution internally.
+    """
+    return (sym or "").strip().upper()
 
 
 def fetch_close_panel(symbols: Iterable[tuple],
