@@ -4,63 +4,74 @@ Master Report Runner (Orchestrator)
 
 SUMMARY
 -------
-Command-centre script that runs all market analysis scenarios in sequence.
-BulkBlock produces the single output Excel workbook (with RS Ranking and
-IPO Anchor List sheets appended). The other scenarios produce interactive
-HTML charts only.
+Command-centre script that runs all market analysis scenarios in sequence,
+consolidates their outputs into a single unified Excel workbook, and sends
+one email with the workbook + interactive HTML charts attached.
 
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
 2. Run 7 scenarios in order:
 
-   a. bulk_block        → BulkBlock.BSEScraperWithEmail  — NSE+BSE bulk & block deals,
-                                                           FII Stake Tracker sheets,
-                                                           HNI holdings. Produces
-                                                           BULK_BLOCK_Deals_<ts>.xlsx.
-   b. sector_index      → custom_sector_index.run()      — Custom equal-weighted sector
-                                                           indices. Chart only.
-   c. fii_flows         → fii_flows.run()                — Daily FII equity cash flows.
-                                                           Chart only.
-   d. fii_sector_flows  → fii_sector_flows.run()         — Fortnightly FII sector-wise
-                                                           flows. Chart only.
-   e. sector_momentum   → sector_momentum.run()          — Mansfield RS per sector.
-                                                           Chart + "RS Ranking" sheet
-                                                           appended to BulkBlock Excel.
-   f. rrg               → rrg_chart.run()                — Relative Rotation Graph.
-                                                           Chart only.
-   g. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs with
-                                                           anchor investor matching.
-                                                           "IPO Anchor List" sheet
-                                                           appended to BulkBlock Excel.
+   a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
+                                                          filtered to a hardcoded
+                                                          "superstar" client list.
+                                                          Standalone Excel emission is
+                                                          SUPPRESSED via a _CapturingScraper
+                                                          subclass. Sheets prefixed "BB ".
+   b. sector_index      → custom_sector_index.run()     — Custom equal-weighted sector
+                                                          indices (Sector Idx Summary +
+                                                          Sector Idx Values).
+   c. fii_flows         → fii_flows.run()               — Daily FII equity cash flows
+                                                          (FII Flow Summary + FII Daily Data).
+   d. fii_sector_flows  → fii_sector_flows.run()        — Fortnightly FII sector-wise flows
+                                                          (FII Sector Net Flows + Detail).
+   e. sector_momentum   → sector_momentum.run()         — Mansfield RS per sector
+                                                          (RS Ranking + RS History).
+   f. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
+                                                          timeframes (RRG 3 Day … Quarterly).
+   g. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs (NSE + NSE SME)
+                                                          with listing-day +/- and watchlist
+                                                          anchor matches (sheets prefixed
+                                                          "IPO Anchor"). Also writes a
+                                                          standalone TradingView watchlist
+                                                          file ipo_anchor_report.txt.
 
    Each scenario is wrapped in try/except so a single failure does not
-   abort the pipeline.
+   abort the pipeline; failures are collected in `errors` and reported
+   in the email body + summary.
 
-   NOTE: multi_pct_down runs inline via breakout_scanner_angel.py.
-   NOTE: fii_stake_tracker runs via BulkBlock.py.
-   NOTE: india_macro.py runs independently (not part of this pipeline).
+   NOTE: multi_pct_down is now integrated directly into
+   breakout_scanner_angel.py (runs inline as Universe 1). Run that
+   script separately for the combined breakout output.
 
-3. Append "RS Ranking" and "IPO Anchor List" sheets to the BulkBlock
-   output Excel.
+3. Merge every scenario's sheets into one Excel workbook
+   (market_analysis_report.xlsx). Sub-module standalone Excel files are
+   removed after their data is captured, so only the unified workbook
+   remains on disk.
 
-4. Collect 5 HTML chart files (sector_index, fii_flows, fii_sector_flows,
-   sector_momentum, rrg).
+4. Collect all HTML chart files (5 charts: sector_index, fii_flows,
+   fii_sector_flows, sector_momentum, rrg).
 
-5. Send email with BulkBlock Excel + 5 charts attached (unless --no-email).
+5. Send consolidated email with the unified Excel + HTML charts
+   attached (unless --no-email).
+
+NOTE: india_macro is NOT part of this pipeline. Run india_macro.py
+separately to refresh the macro dashboard.
 
 DATA SOURCES
 ------------
 All data is fetched by the individual sub-modules (see each file's header).
-This script only orchestrates — it does not call any external APIs directly.
+This script only orchestrates and consolidates — it does not call any
+external APIs directly.
 
 OUTPUT
 ------
-- BULK_BLOCK_Deals_<timestamp>.xlsx  — Single output workbook containing:
-                                        bulk/block deals, FII_Summary,
-                                        FII_New_Entry, FII_1-4Q_Increasing,
-                                        HNIs, RS Ranking, IPO Anchor List.
-- *_chart.html                       — 5 interactive Plotly charts.
+- market_analysis_report.xlsx    — Unified workbook, typically ~18 sheets:
+                                    4 BB (bulk/block) + 2 sector_index +
+                                    2 fii_flows + 2 fii_sector_flows +
+                                    2 sector_momentum + 8 RRG timeframes.
+- *_chart.html                   — 5 interactive Plotly charts.
 
 USAGE
 -----
@@ -89,7 +100,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = datetime.date.today()
 TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# Scenario names for --skip
+# Scenario names for --skip (order = sheet order in unified Excel)
 ALL_SCENARIOS = ["bulk_block", "sector_index",
                  "fii_flows", "fii_sector_flows",
                  "sector_momentum", "rrg", "ipo_anchor"]
@@ -98,154 +109,303 @@ ALL_SCENARIOS = ["bulk_block", "sector_index",
 # ─── Scenario runners ──────────────────────────────────────
 
 def run_bulk_block():
-    """Run BulkBlock scraper. Returns the output Excel path."""
+    """Scrape NSE+BSE bulk/block deals filtered for superstar names.
+    Returns sheets dict + None (no chart).
+    Captures the scraped DataFrames in-memory; suppresses BulkBlock's
+    own standalone Excel file so we only emit the unified workbook.
+    """
     from BulkBlock import BSEScraper
-    captured_filename = {}
+    captured = {}
 
     class _CapturingScraper(BSEScraper):
         def save_to_excel(self, dataframes_dict, filename):
-            super().save_to_excel(dataframes_dict, filename)
-            captured_filename["path"] = os.path.join(SCRIPT_DIR, filename)
+            # Capture only — do not write a standalone file.
+            captured.update(dataframes_dict)
+            print("  (run_all) captured %d BulkBlock sheet(s); standalone Excel suppressed."
+                  % len(dataframes_dict))
 
     scraper = _CapturingScraper()
     scraper.run()
-    return captured_filename.get("path")
+
+    # Sheet names use the raw deal type without prefix.
+    sheets = {}
+    name_map = {
+        "nse_bulk": "NSE Bulk",
+        "nse_block": "NSE Block",
+        "BSE Bulk Deals": "BSE Bulk",
+        "BSE Block Deals": "BSE Block",
+    }
+    for raw_name, df in captured.items():
+        clean = name_map.get(raw_name, str(raw_name))
+        if df is None or (hasattr(df, "empty") and df.empty):
+            df = pd.DataFrame({"Note": ["No matching deals"]})
+        sheets[clean[:31]] = df
+    return sheets, None
 
 
 def run_sector_index():
-    """Run Custom Sector Index Builder. Returns (chart_path, None)."""
+    """Run Custom Sector Index Builder. Returns sheets dict + chart path."""
     from custom_sector_index import run as csi_run
     prefix = os.path.join(SCRIPT_DIR, "custom_sector_index")
     result = csi_run(output_prefix=prefix)
     if result is None or result[0] is None:
-        return None
-    _all_indices, _all_prices, _summary_df, _fig, excel_path, html_path = result
-    # Remove standalone Excel — chart is the only output
-    if excel_path and os.path.exists(excel_path):
+        return {}, None
+
+    all_indices, all_prices, summary_df, fig, excel_path, html_path = result
+
+    sheets = {}
+    sheets["Sector Idx Summary"] = summary_df
+    idx_df = pd.DataFrame(all_indices)
+    idx_df.index.name = "Date"
+    sheets["Sector Idx Values"] = idx_df
+
+    # Clean up individual Excel (data goes into unified Excel)
+    if os.path.exists(excel_path):
         os.remove(excel_path)
-    return html_path
+
+    return sheets, html_path
 
 
 def run_fii_flows():
-    """Run FII Equity Cash Market Tracker. Returns chart_path."""
+    """Run FII Equity Cash Market Tracker. Returns sheets dict + chart path."""
     from fii_flows import run as fii_run
     prefix = os.path.join(SCRIPT_DIR, "fii_flows")
     result = fii_run(output_prefix=prefix)
     if result is None:
-        return None
-    _equity_df, _oi_df, _fig, excel_path, html_path = result
-    if excel_path and os.path.exists(excel_path):
+        return {}, None
+
+    equity_df, oi_df, fig, excel_path, html_path = result
+
+    sheets = {}
+    edf = equity_df.copy()
+    edf["FII_Cumulative_Cr"] = edf["FII_Net_Cr"].cumsum()
+
+    # Summary sheet
+    latest = edf.iloc[-1]
+    summary_data = {
+        "Metric": [
+            "Date Range",
+            "Trading Days",
+            "Latest Net (₹ Cr)",
+            "Cumulative Net (₹ Cr)",
+            "Avg Daily Net (₹ Cr)",
+        ],
+        "Value": [
+            "%s to %s" % (
+                edf["Date"].min().strftime("%d-%b-%Y")
+                if hasattr(edf["Date"].min(), "strftime")
+                else str(edf["Date"].min()),
+                edf["Date"].max().strftime("%d-%b-%Y")
+                if hasattr(edf["Date"].max(), "strftime")
+                else str(edf["Date"].max()),
+            ),
+            len(edf),
+            latest["FII_Net_Cr"],
+            latest["FII_Cumulative_Cr"],
+            round(edf["FII_Net_Cr"].mean(), 2),
+        ],
+    }
+    sheets["FII Flow Summary"] = pd.DataFrame(summary_data)
+    sheets["FII Daily Data"] = edf
+
+    if os.path.exists(excel_path):
         os.remove(excel_path)
-    return html_path
+
+    return sheets, html_path
 
 
 def run_fii_sector_flows():
-    """Run FII Sector-wise Flows. Returns chart_path."""
+    """Run FII Sector-wise Flows. Returns sheets dict + chart path."""
     from fii_sector_flows import run as fsf_run
     prefix = os.path.join(SCRIPT_DIR, "fii_sector_flows")
     result = fsf_run(output_prefix=prefix)
     if result is None:
-        return None
-    _sector_totals, _detail_df, _fig, chart_path, excel_path = result
-    if excel_path and os.path.exists(excel_path):
+        return {}, None
+
+    sector_totals, detail_df, fig, chart_path, excel_path = result
+
+    sheets = {}
+    sheets["FII Sector Net Flows"] = sector_totals.sort_values(
+        "Net_Cr", ascending=False).copy()
+    if not detail_df.empty:
+        sheets["FII Sector Detail"] = detail_df
+
+    if os.path.exists(excel_path):
         os.remove(excel_path)
-    return chart_path
+
+    return sheets, chart_path
 
 
 def run_sector_momentum():
-    """Run Sector Momentum. Returns (rs_ranking_df, chart_path)."""
+    """Run Sector Momentum & RS Analyzer. Returns sheets dict + chart path."""
     from sector_momentum import run as sm_run
     prefix = os.path.join(SCRIPT_DIR, "sector_momentum")
     result = sm_run(output_prefix=prefix)
     if result is None:
-        return None, None
-    _all_rs, _all_indices, ranking_df, _fig, excel_path, html_path = result
-    if excel_path and os.path.exists(excel_path):
+        return {}, None
+
+    all_rs, all_indices, ranking_df, fig, excel_path, html_path = result
+
+    sheets = {}
+    sheets["RS Ranking"] = ranking_df
+
+    rs_df = pd.DataFrame(all_rs)
+    rs_df.index.name = "Date"
+    sheets["RS History"] = rs_df
+
+    if os.path.exists(excel_path):
         os.remove(excel_path)
-    return ranking_df, html_path
+
+    return sheets, html_path
 
 
 def run_rrg():
-    """Run RRG Chart. Returns chart_path."""
+    """Run RRG Chart. Returns sheets dict + chart path."""
     from rrg_chart import run as rrg_run
     prefix = os.path.join(SCRIPT_DIR, "rrg_chart")
     result = rrg_run(output_prefix=prefix)
     if result is None:
-        return None
-    _all_timeframe_data, _fig, html_path = result
-    return html_path
+        return {}, None
+
+    all_timeframe_data, fig, html_path = result
+
+    sheets = {}
+    for tf_name, sector_data in all_timeframe_data.items():
+        rows = []
+        for sector in sorted(sector_data.keys()):
+            df = sector_data[sector]
+            if df.empty:
+                continue
+            x = df["RS_Ratio"].iloc[-1]
+            y = df["RS_Momentum"].iloc[-1]
+            q = "Leading" if x >= 100 and y >= 100 else \
+                "Weakening" if x >= 100 else \
+                "Lagging" if y < 100 else "Improving"
+            rows.append({
+                "Sector": sector,
+                "RS-Ratio": round(x, 2),
+                "RS-Momentum": round(y, 2),
+                "Quadrant": q,
+            })
+        if rows:
+            sheet_name = "RRG %s" % tf_name
+            sheets[sheet_name[:31]] = pd.DataFrame(rows).sort_values(
+                "RS-Ratio", ascending=False)
+
+    return sheets, html_path
 
 
 def run_ipo_anchor():
-    """Run IPO Anchor Tracker. Returns ipo_anchor_df."""
+    """Run IPO Anchor Tracker. Returns sheets dict + None (no chart).
+    Sheets: 'IPOs' (last-15-month listings + watchlist anchor matches) and
+    'Notes' (methodology). The TradingView .txt watchlist is written by
+    the underlying module to ipo_anchor_report.txt and is NOT merged into
+    the unified workbook (kept as a standalone file for upload).
+    """
     from ipo_anchor_tracker import run as ipo_run
     result = ipo_run()
     sheets_in = result.get("sheets", {})
-    return sheets_in.get("IPOs")
+    # Prefix sheets so they group together in the unified workbook.
+    sheets = {}
+    if "IPOs" in sheets_in:
+        sheets["IPO Anchor List"] = sheets_in["IPOs"]
+    if "Notes" in sheets_in:
+        sheets["IPO Anchor Notes"] = sheets_in["Notes"]
+    return sheets, None
 
 
-# ─── Combined chart builder ─────────────────────────────────────────────────
+# ─── Unified Excel builder ──────────────────────────────────────────────────
 
-CHART_LABELS = {
-    "custom_sector_index": "Sector Index",
-    "fii_flows": "FII Flows",
-    "fii_sector_flows": "FII Sector Flows",
-    "sector_momentum": "Sector Momentum",
-    "rrg_chart": "RRG Chart",
+# Sheets explicitly excluded from the unified workbook (kept out of the
+# Excel even if upstream scenarios produce them). Charts/HTML still render.
+EXCLUDED_SHEETS = {
+    "Sector Idx Summary",
+    "Sector Idx Values",
+    "FII Flow Summary",
+    "FII Daily Data",
+    "FII Sector Net Flows",
+    "FII Sector Detail",
+    "RS History",
+    "RRG 3 Day",
+    "RRG 7 Day",
+    "RRG 2 Week",
+    "RRG 12 Day",
+    "RRG 3 Week",
+    "RRG Weekly",
+    "RRG Monthly",
+    "RRG Quarterly",
+    "IPO Anchor Notes",
 }
 
 
-def build_combined_chart(chart_files):
-    """Merge individual chart HTMLs into a single tabbed HTML file.
+def build_unified_excel(all_sheets, output_path):
+    """Write all scenario sheets into one Excel workbook."""
+    if not all_sheets:
+        print("  No data to write to unified Excel.")
+        return None
 
-    Embeds each chart's full HTML as an iframe srcdoc panel with a
-    tab-switching UI. Deletes the individual files afterwards.
-    Returns the combined HTML path.
+    filtered = {k: v for k, v in all_sheets.items() if k not in EXCLUDED_SHEETS}
+    skipped = [k for k in all_sheets if k in EXCLUDED_SHEETS]
+
+    if not filtered:
+        print("  No data to write to unified Excel after filtering.")
+        return None
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        for sheet_name, df in filtered.items():
+            # Excel sheet name limit is 31 chars
+            safe_name = sheet_name[:31]
+            if hasattr(df, "index") and df.index.name == "Date":
+                df.to_excel(writer, sheet_name=safe_name)
+            else:
+                df.to_excel(writer, sheet_name=safe_name, index=False)
+
+    print("  Unified Excel: %s (%d sheets)" % (output_path, len(filtered)))
+    if skipped:
+        print("  Excluded sheets (%d): %s" % (len(skipped), ", ".join(skipped)))
+    return output_path
+
+
+def build_combined_chart(chart_files):
+    """Combine all chart HTML files into a single tabbed market_charts.html.
+
+    Each chart's full HTML is embedded as an iframe srcdoc so the original
+    standalone files remain untouched. Returns the combined file path or
+    None if no charts are provided.
     """
+    chart_files = [f for f in chart_files if f and os.path.exists(f)]
     if not chart_files:
         return None
 
     combined_path = os.path.join(SCRIPT_DIR, "market_charts.html")
 
-    # Determine label for each chart from its filename
-    panels = []
-    for path in chart_files:
-        basename = os.path.basename(path)
-        label = basename  # fallback
-        for key, lbl in CHART_LABELS.items():
-            if key in basename:
-                label = lbl
-                break
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        panels.append((label, content))
+    label_map = {
+        "sector_momentum_chart.html": "Sector Momentum",
+        "custom_sector_index_chart.html": "Custom Sector Index",
+        "rrg_chart.html": "RRG",
+        "fii_flows_chart.html": "FII Flows",
+        "fii_sector_flows_chart.html": "FII Sector Flows",
+    }
 
-    # Build tabbed HTML
     tab_buttons = []
     tab_panels = []
-    for i, (label, content) in enumerate(panels):
+    for i, path in enumerate(chart_files):
+        fname = os.path.basename(path)
+        display = label_map.get(fname, fname.replace("_", " ").replace(".html", ""))
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+        safe = html.replace("&", "&amp;").replace('"', "&quot;")
         active = " active" if i == 0 else ""
         tab_buttons.append(
-            '  <button class="tab-btn%s" onclick="showTab(%d)">%s</button>'
-            % (active, i, label)
-        )
-        display = "block" if i == 0 else "none"
-        # Escape for srcdoc: replace " with &quot; and </script with escaped
-        safe = (content
-                .replace('&', '&amp;')
-                .replace('"', '&quot;')
-                .replace('<', '&lt;')
-                .replace('>', '&gt;'))
+            '<button class="tab-btn%s" onclick="showTab(%d)">%s</button>'
+            % (active, i, display))
         tab_panels.append(
-            '<div class="tab-panel" id="panel-%d" style="display:%s">'
-            '<iframe srcdoc="%s"></iframe></div>' % (i, display, safe)
-        )
+            '<div class="tab-panel" id="panel-%d" style="display:%s;">'
+            '<iframe srcdoc="%s"></iframe></div>'
+            % (i, "block" if i == 0 else "none", safe))
 
-    html = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Daily Market Analysis Charts — %s</title>
+    html_doc = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Market Charts</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f5f5f5; }
@@ -262,58 +422,29 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 }
 .tab-btn:hover { color:#fff; background:rgba(255,255,255,0.2); }
 .tab-btn.active { color:#fff; background:#e94560; box-shadow: 0 -2px 6px rgba(233,69,96,0.4); }
-.tab-panel { width:100%%; height:calc(100vh - 60px); overflow:auto; }
-.tab-panel iframe { width:100%%; height:1400px; border:none; }
+.tab-panel { width:100%; height:calc(100vh - 60px); overflow:auto; }
+.tab-panel iframe { width:100%; height:1400px; border:none; }
 </style>
 </head>
 <body>
-<div class="tab-bar">
-%s
-</div>
-%s
+<div class="tab-bar">__BUTTONS__</div>
+__PANELS__
 <script>
 function showTab(idx) {
-  document.querySelectorAll('.tab-panel').forEach((p,i) => p.style.display = i===idx ? 'block' : 'none');
-  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===idx));
+  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+  document.querySelectorAll('.tab-panel').forEach((p, i) => p.style.display = (i === idx ? 'block' : 'none'));
 }
 </script>
-</body>
-</html>""" % (TODAY.strftime("%d-%b-%Y"), "\n".join(tab_buttons), "\n".join(tab_panels))
+</body></html>
+"""
+    html_doc = html_doc.replace("__BUTTONS__", "\n".join(tab_buttons))
+    html_doc = html_doc.replace("__PANELS__", "\n".join(tab_panels))
 
     with open(combined_path, "w", encoding="utf-8") as f:
-        f.write(html)
+        f.write(html_doc)
 
-    # Remove individual chart files
-    for path in chart_files:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-    print("  ✓ Combined chart: %s (%d tabs)" % (os.path.basename(combined_path), len(panels)))
+    print("  ✓ Combined chart: market_charts.html (%d tabs)" % len(chart_files))
     return combined_path
-
-
-# ─── Append sheets to existing Excel ────────────────────────────────────────
-
-def append_sheets_to_excel(excel_path, extra_sheets):
-    """Append additional DataFrames as new sheets to an existing Excel file."""
-    if not excel_path or not os.path.exists(excel_path):
-        print("  ⚠️  Cannot append sheets — Excel not found: %s" % excel_path)
-        return
-    if not extra_sheets:
-        return
-
-    from openpyxl import load_workbook
-    wb = load_workbook(excel_path)
-    with pd.ExcelWriter(excel_path, engine="openpyxl", mode="a",
-                        if_sheet_exists="replace") as writer:
-        writer.workbook = wb
-        for name, df in extra_sheets.items():
-            if df is not None and not df.empty:
-                safe_name = name[:31]
-                df.to_excel(writer, sheet_name=safe_name, index=False)
-                print("  ✓ Appended sheet '%s': %d rows" % (safe_name, len(df)))
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -333,20 +464,21 @@ def main():
     print("  MASTER REPORT RUNNER — %s" % TODAY.strftime("%d-%b-%Y"))
     print("=" * 70)
 
-    bulkblock_excel = None
+    unified_sheets = {}
     chart_files = []
-    extra_sheets = {}  # sheets to append to BulkBlock Excel
     errors = []
 
-    # ── 1. Bulk & Block Deals (NSE + BSE + FII + HNI) ─────────────────────
+    # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
     if "bulk_block" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/7: Bulk & Block Deals (NSE + BSE + FII + HNI)")
+        print("  SCENARIO 1/7: Bulk & Block Deals (NSE + BSE)")
         print("=" * 70)
         try:
-            bulkblock_excel = run_bulk_block()
-            print("  ✓ Bulk & Block Deals complete → %s" %
-                  (os.path.basename(bulkblock_excel) if bulkblock_excel else "N/A"))
+            sheets, chart = run_bulk_block()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ Bulk & Block Deals complete (%d sheets)" % len(sheets))
         except Exception as e:
             errors.append("bulk_block: %s" % e)
             print("  ✗ Bulk & Block Deals FAILED: %s" % e)
@@ -358,7 +490,8 @@ def main():
         print("  SCENARIO 2/7: Custom Sector Index")
         print("=" * 70)
         try:
-            chart = run_sector_index()
+            sheets, chart = run_sector_index()
+            unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
             print("  ✓ Sector Index complete")
@@ -373,7 +506,8 @@ def main():
         print("  SCENARIO 3/7: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
-            chart = run_fii_flows()
+            sheets, chart = run_fii_flows()
+            unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
             print("  ✓ FII Flows complete")
@@ -388,7 +522,8 @@ def main():
         print("  SCENARIO 4/7: FII Sector-wise Flows")
         print("=" * 70)
         try:
-            chart = run_fii_sector_flows()
+            sheets, chart = run_fii_sector_flows()
+            unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
             print("  ✓ FII Sector Flows complete")
@@ -403,20 +538,10 @@ def main():
         print("  SCENARIO 5/7: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
-            ranking_df, chart = run_sector_momentum()
+            sheets, chart = run_sector_momentum()
+            unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
-            if ranking_df is not None and not ranking_df.empty:
-                # Sort by 20D Trend descending (extract numeric from '↑ 2.3' / '↓ 1.5')
-                if "20D Trend" in ranking_df.columns:
-                    import re as _re
-                    def _trend_val(s):
-                        m = _re.search(r'([\u2191\u2193])\s*([\d.]+)', str(s))
-                        if not m: return 0.0
-                        return float(m.group(2)) if m.group(1) == '\u2191' else -float(m.group(2))
-                    ranking_df = ranking_df.assign(_tv=ranking_df["20D Trend"].map(_trend_val))
-                    ranking_df = ranking_df.sort_values("_tv", ascending=False).drop(columns=["_tv"]).reset_index(drop=True)
-                extra_sheets["RS Ranking"] = ranking_df
             print("  ✓ Sector Momentum complete")
         except Exception as e:
             errors.append("sector_momentum: %s" % e)
@@ -429,7 +554,8 @@ def main():
         print("  SCENARIO 6/7: Relative Rotation Graph")
         print("=" * 70)
         try:
-            chart = run_rrg()
+            sheets, chart = run_rrg()
+            unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
             print("  ✓ RRG Chart complete")
@@ -444,31 +570,35 @@ def main():
         print("  SCENARIO 7/7: IPO Anchor Tracker")
         print("=" * 70)
         try:
-            ipo_df = run_ipo_anchor()
-            if ipo_df is not None and not ipo_df.empty:
-                extra_sheets["IPO Anchor List"] = ipo_df
+            sheets, chart = run_ipo_anchor()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
             print("  ✓ IPO Anchor Tracker complete")
         except Exception as e:
             errors.append("ipo_anchor: %s" % e)
             print("  ✗ IPO Anchor Tracker FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── Append extra sheets to BulkBlock Excel ────────────────────────────
+
+    # ── Build Unified Excel ───────────────────────────────────────────
     print("\n" + "=" * 70)
-    print("  FINALIZING OUTPUT")
+    print("  BUILDING OUTPUTS")
     print("=" * 70)
 
-    if bulkblock_excel and extra_sheets:
-        append_sheets_to_excel(bulkblock_excel, extra_sheets)
-    elif extra_sheets and not bulkblock_excel:
-        print("  ⚠️  BulkBlock Excel missing — cannot append RS Ranking / IPO sheets")
+    unified_excel_path = os.path.join(
+        SCRIPT_DIR, "market_analysis_report.xlsx")
 
-    # Build combined chart from individual chart files
-    combined_chart = None
-    if chart_files:
-        combined_chart = build_combined_chart(chart_files)
+    if unified_sheets:
+        build_unified_excel(unified_sheets, unified_excel_path)
+    else:
+        unified_excel_path = None
+        print("  No unified Excel data to write.")
 
-    # ── Send Email ────────────────────────────────────────────────────────
+    # ── Build Combined Chart ─────────────────────────────────────────
+    combined_chart_path = build_combined_chart(chart_files)
+
+    # ── 8. Send Email ────────────────────────────────────────────────────
     if not args.no_email:
         print("\n" + "=" * 70)
         print("  SENDING EMAIL")
@@ -477,10 +607,11 @@ def main():
         from email_sender import send_report
 
         attachments = []
-        if bulkblock_excel and os.path.exists(bulkblock_excel):
-            attachments.append(bulkblock_excel)
-        if combined_chart and os.path.exists(combined_chart):
-            attachments.append(combined_chart)
+        if unified_excel_path and os.path.exists(unified_excel_path):
+            attachments.append(unified_excel_path)
+        if combined_chart_path and os.path.exists(combined_chart_path):
+            attachments.append(combined_chart_path)
+        attachments.extend([f for f in chart_files if os.path.exists(f)])
 
         subject = "Daily Market Analysis Report — %s" % TODAY.strftime("%d-%b-%Y")
 
@@ -489,12 +620,12 @@ def main():
             "",
             "Attached reports:",
         ]
-        if bulkblock_excel:
-            body_lines.append("  • %s (Deals + FII + HNI + RS Ranking + IPO Anchors)"
-                              % os.path.basename(bulkblock_excel))
-        if combined_chart:
-            body_lines.append("  • %s (5 Interactive Charts — tabbed)"
-                              % os.path.basename(combined_chart))
+        if unified_excel_path:
+            body_lines.append("  • Market Analysis Report (Excel) — %d sheets" %
+                              len(unified_sheets))
+        for cf in chart_files:
+            body_lines.append("  • %s (Interactive Chart)" % os.path.basename(cf))
+
         if errors:
             body_lines.append("")
             body_lines.append("Scenarios with errors:")
@@ -502,8 +633,12 @@ def main():
                 body_lines.append("  ✗ %s" % err)
 
         body_text = "\n".join(body_lines)
-        sent = send_report(subject=subject, body_text=body_text,
-                           attachments=attachments)
+
+        sent = send_report(
+            subject=subject,
+            body_text=body_text,
+            attachments=attachments,
+        )
         if not sent:
             print("  Email not sent (check EMAIL_* env vars).")
     else:
@@ -514,10 +649,12 @@ def main():
     print("  SUMMARY — %s" % TODAY.strftime("%d-%b-%Y"))
     print("=" * 70)
 
-    if bulkblock_excel:
-        print("  Output Excel  : %s" % os.path.basename(bulkblock_excel))
-    if combined_chart:
-        print("  Combined Chart: %s" % os.path.basename(combined_chart))
+    if unified_excel_path:
+        print("  Unified Excel : %s" % os.path.basename(unified_excel_path))
+    if combined_chart_path:
+        print("  Combined Chart: %s" % os.path.basename(combined_chart_path))
+    for cf in chart_files:
+        print("  Chart         : %s" % os.path.basename(cf))
     if errors:
         print("\n  ERRORS (%d):" % len(errors))
         for err in errors:
