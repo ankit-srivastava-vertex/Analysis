@@ -247,20 +247,6 @@ def run_sector_momentum():
     all_rs, all_indices, ranking_df, fig, excel_path, html_path = result
 
     sheets = {}
-    if ranking_df is not None and not ranking_df.empty and "20D Trend" in ranking_df.columns:
-        import re as _re
-
-        def _trend_val(s):
-            m = _re.search(r"([\u2191\u2193])\s*([\d.]+)", str(s))
-            if not m:
-                return 0.0
-            return float(m.group(2)) if m.group(1) == "\u2191" else -float(m.group(2))
-
-        ranking_df = (ranking_df
-                      .assign(_tv=ranking_df["20D Trend"].map(_trend_val))
-                      .sort_values("_tv", ascending=True)
-                      .drop(columns=["_tv"])
-                      .reset_index(drop=True))
     sheets["RS Ranking"] = ranking_df
 
     rs_df = pd.DataFrame(all_rs)
@@ -457,13 +443,6 @@ function showTab(idx) {
     with open(combined_path, "w", encoding="utf-8") as f:
         f.write(html_doc)
 
-    # Remove individual chart files now that they're embedded in the combined file.
-    for path in chart_files:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
     print("  ✓ Combined chart: market_charts.html (%d tabs)" % len(chart_files))
     return combined_path
 
@@ -632,6 +611,7 @@ def main():
             attachments.append(unified_excel_path)
         if combined_chart_path and os.path.exists(combined_chart_path):
             attachments.append(combined_chart_path)
+        attachments.extend([f for f in chart_files if os.path.exists(f)])
 
         subject = "Daily Market Analysis Report — %s" % TODAY.strftime("%d-%b-%Y")
 
@@ -643,9 +623,8 @@ def main():
         if unified_excel_path:
             body_lines.append("  • Market Analysis Report (Excel) — %d sheets" %
                               len(unified_sheets))
-        if combined_chart_path:
-            body_lines.append("  • %s (Interactive Charts — tabbed)" %
-                              os.path.basename(combined_chart_path))
+        for cf in chart_files:
+            body_lines.append("  • %s (Interactive Chart)" % os.path.basename(cf))
 
         if errors:
             body_lines.append("")
@@ -674,6 +653,8 @@ def main():
         print("  Unified Excel : %s" % os.path.basename(unified_excel_path))
     if combined_chart_path:
         print("  Combined Chart: %s" % os.path.basename(combined_chart_path))
+    for cf in chart_files:
+        print("  Chart         : %s" % os.path.basename(cf))
     if errors:
         print("\n  ERRORS (%d):" % len(errors))
         for err in errors:
