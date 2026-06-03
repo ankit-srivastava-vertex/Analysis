@@ -124,6 +124,10 @@ def _try_jugaad(ticker: str, start, end) -> Optional[pd.DataFrame]:
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.set_index("Date").sort_index()
     df = df[~df.index.duplicated(keep="last")]
+    # jugaad-data returns timestamps at 18:30 UTC (= 00:00 IST next day).
+    # Shift to IST so normalize() gives the correct trading date.
+    if len(df) and df.index[0].hour == 18 and df.index[0].minute == 30:
+        df.index = df.index + pd.Timedelta(hours=5, minutes=30)
     return df.reindex(columns=_OHLCV)
 
 
