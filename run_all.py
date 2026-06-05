@@ -444,6 +444,13 @@ function showTab(idx) {
         f.write(html_doc)
 
     print("  ✓ Combined chart: market_charts.html (%d tabs)" % len(chart_files))
+
+    for path in chart_files:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
     return combined_path
 
 
@@ -611,7 +618,6 @@ def main():
             attachments.append(unified_excel_path)
         if combined_chart_path and os.path.exists(combined_chart_path):
             attachments.append(combined_chart_path)
-        attachments.extend([f for f in chart_files if os.path.exists(f)])
 
         subject = "Daily Market Analysis Report — %s" % TODAY.strftime("%d-%b-%Y")
 
@@ -623,8 +629,9 @@ def main():
         if unified_excel_path:
             body_lines.append("  • Market Analysis Report (Excel) — %d sheets" %
                               len(unified_sheets))
-        for cf in chart_files:
-            body_lines.append("  • %s (Interactive Chart)" % os.path.basename(cf))
+        if combined_chart_path:
+            body_lines.append("  • Combined Market Charts (HTML) — %d tabs" %
+                              len([f for f in chart_files]))
 
         if errors:
             body_lines.append("")
@@ -653,8 +660,6 @@ def main():
         print("  Unified Excel : %s" % os.path.basename(unified_excel_path))
     if combined_chart_path:
         print("  Combined Chart: %s" % os.path.basename(combined_chart_path))
-    for cf in chart_files:
-        print("  Chart         : %s" % os.path.basename(cf))
     if errors:
         print("\n  ERRORS (%d):" % len(errors))
         for err in errors:

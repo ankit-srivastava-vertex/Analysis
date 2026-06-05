@@ -3,14 +3,30 @@ angel_client.py — yfinance-shaped adapter for Angel One SmartAPI (SDK)
 =====================================================================
 
 Free Indian-market historical OHLCV via the official smartapi-python SDK.
+Thread-safe; designed to serve concurrent chart panes without ever tripping
+Angel's rate limit.
 
 Public surface:
   - angel_download(ticker, start, end, interval="1d") -> pd.DataFrame
         DataFrame[Open,High,Low,Close,Volume] indexed by Timestamp.
-  - angel_download_many(tickers, start, end, max_workers=2) -> dict
-        Bulk fetch, rate-limit safe (~2 req/sec).
+  - angel_download_many(tickers, start, end, max_workers=RATE_LIMIT_PER_SEC) -> dict
+        Bulk fetch, rate-limit safe.
   - get_angel_session() -> (api_key, jwt_token)  (lazy, auto-relogin)
   - refresh_token(force=False) -> bool
+  - INDEX_OVERRIDES: dict of synthetic index tickers → (exch, token, name)
+        Includes Nifty 50/100/500, Bank, Midcap 100/150, Smallcap 100/250,
+        MidSmall 400, FinNifty, Sensex.
+
+Concurrency / robustness:
+  - _init_lock (RLock) serializes session bootstrap + scrip-master parse so
+    parallel callers never fire two logins or two master-loads.
+  - _RateLimiter: adaptive sliding-window limiter with dual windows
+    (per-second + per-minute), an in-flight semaphore, jittered backoff,
+    and self-healing throttle/recover on AB1004 errors.
+      * Halves effective rate on rate-limit hit; restores it gradually
+        after sustained successful calls.
+      * Sleeps outside the internal lock to avoid stacking thread waits.
+      * One-line log on state transitions only; silent during steady state.
 
 .env keys required:
   ANGEL_API_KEY=...
@@ -28,10 +44,12 @@ import os
 import sys
 import json
 import time
+import random
 import threading
 import datetime
 import warnings
 import urllib.request
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
@@ -49,15 +67,51 @@ SCRIP_MASTER_URL = (
 SCRIP_MASTER_CACHE = os.path.join(SCRIPT_DIR, ".angel_scrip_master.json")
 SCRIP_MASTER_TTL_DAYS = 7
 
-RATE_LIMIT_PER_SEC = 2
-_rate_lock = threading.Lock()
-_last_call_ts = [0.0] * RATE_LIMIT_PER_SEC
+# Adaptive limiter tuned for Angel's documented caps:
+#   getCandleData: 3 req/sec, 180 req/min.
+# RATE_LIMIT_PER_SEC stays exported for back-compat (angel_download_many uses it
+# as max_workers default and for ETA print).
+RATE_LIMIT_PER_SEC = 3
+_RATE_LIMIT_PER_MIN = 180
+_RATE_LIMIT_MAX_INFLIGHT = 4
+
+# Single lock guarding session bootstrap (scrip master load + SmartConnect login).
+# Concurrent callers (e.g. 4 chart panes hitting /api/historical at the same time
+# plus the WS bootstrap thread) all serialize through this so we never fire two
+# parallel logins or scrip-master parses, which trips Angel's per-second cap.
+_init_lock = threading.RLock()
 
 _smart_api = None   # SmartConnect instance (None until logged in)
 _api_key_cache = ""  # cached for get_angel_session() return value
 _refresh_token_cache = None  # stored from generateSession for renewAccessToken
 _master_df: Optional[pd.DataFrame] = None
 _symbol_index: Optional[dict] = None  # (exch, symbol_upper) -> token
+
+# Wall-clock watchdog for outbound Angel HTTPS calls. Without this the SDK's
+# urllib3 pool can hand back a stale TCP socket and the SDK call blocks
+# forever on the next read. Wrapping each call with a future + hard timeout
+# guarantees the handler returns. On timeout we drop _smart_api so the next
+# attempt builds a fresh SmartConnect (and a fresh connection pool).
+import concurrent.futures as _cf
+_call_executor = _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="angel-call")
+ANGEL_CALL_TIMEOUT_SEC = float(os.environ.get("ANGEL_CALL_TIMEOUT", "10"))
+
+def _call_with_timeout(fn, *args, timeout=None, **kwargs):
+    """Run fn(*args, **kwargs) with a hard wall-clock timeout.
+    Returns (result, timed_out). The runaway thread is left to finish in the
+    background (executor caps concurrency at 4)."""
+    fut = _call_executor.submit(fn, *args, **kwargs)
+    try:
+        return fut.result(timeout=timeout or ANGEL_CALL_TIMEOUT_SEC), False
+    except _cf.TimeoutError:
+        return None, True
+
+def _reset_session():
+    """Drop the current SmartConnect so the next call rebuilds it with a
+    fresh HTTP connection pool. Used to recover from stale sockets."""
+    global _smart_api
+    with _init_lock:
+        _smart_api = None
 
 
 # ─────────────────────────── env / credentials ─────────────────────────────
@@ -112,8 +166,12 @@ def _sdk_login(creds: dict):
     api_key = creds["ANGEL_API_KEY"]
     obj = SmartConnect(api_key=api_key)
     totp = pyotp.TOTP(creds["ANGEL_TOTP_SECRET"]).now()
-    data = obj.generateSession(creds["ANGEL_CLIENT_CODE"],
-                               creds["ANGEL_PIN"], totp)
+    data, timed_out = _call_with_timeout(
+        obj.generateSession, creds["ANGEL_CLIENT_CODE"], creds["ANGEL_PIN"], totp,
+        timeout=12,
+    )
+    if timed_out:
+        raise RuntimeError("Angel login timed out (network/upstream stalled)")
     if not data or not data.get("status"):
         msg = data.get("message", data) if data else "No response"
         raise RuntimeError("Login failed: %s" % msg)
@@ -127,9 +185,14 @@ def _try_refresh_access_token() -> bool:
     if _smart_api is None or not _refresh_token_cache:
         return False
     try:
-        new_data = _smart_api.renewAccessToken({
-            "refreshToken": _refresh_token_cache,
-        })
+        new_data, timed_out = _call_with_timeout(
+            _smart_api.renewAccessToken,
+            {"refreshToken": _refresh_token_cache},
+            timeout=8,
+        )
+        if timed_out:
+            print("Token refresh timed out; will fall back to full login.")
+            return False
         if new_data and new_data.get("status"):
             jwt = (new_data.get("data") or {}).get("jwtToken")
             if jwt:
@@ -146,8 +209,18 @@ def _try_refresh_access_token() -> bool:
 
 
 def refresh_token(force: bool = False) -> bool:
-    """Re-establish session. Tries renewAccessToken first, then full TOTP login."""
+    """Re-establish session. Tries renewAccessToken first, then full TOTP login.
+    Thread-safe: serializes all callers through _init_lock so we never fire
+    parallel logins (which trips Angel's per-second rate limit)."""
+    with _init_lock:
+        return _refresh_token_locked(force)
+
+
+def _refresh_token_locked(force: bool = False) -> bool:
     global _smart_api, _api_key_cache, _refresh_token_cache
+    # Fast path: another thread already logged in while we waited on the lock.
+    if _smart_api is not None and not force:
+        return True
     # Fast path: renew with refresh token (no TOTP)
     if _try_refresh_access_token():
         return True
@@ -185,22 +258,28 @@ def refresh_token(force: bool = False) -> bool:
 
 
 def get_angel_session():
-    """Return (api_key, jwt_token). Logs in lazily on first call."""
+    """Return (api_key, jwt_token). Logs in lazily on first call. Thread-safe."""
     global _smart_api
-    if _smart_api is not None:
+    with _init_lock:
+        if _smart_api is not None:
+            return (_api_key_cache, _smart_api.access_token)
+        if not _refresh_token_locked(force=True):
+            raise RuntimeError("Angel One auth failed; check .env")
         return (_api_key_cache, _smart_api.access_token)
-    if not refresh_token(force=True):
-        raise RuntimeError("Angel One auth failed; check .env")
-    return (_api_key_cache, _smart_api.access_token)
 
 
 def _ensure_session():
-    """Ensure SmartConnect is logged in. Returns the SmartConnect instance."""
+    """Ensure SmartConnect is logged in. Returns the SmartConnect instance.
+    Thread-safe: concurrent callers queue on _init_lock and reuse one session."""
     global _smart_api
     if _smart_api is not None:
         return _smart_api
-    get_angel_session()
-    return _smart_api
+    with _init_lock:
+        if _smart_api is not None:
+            return _smart_api
+        if not _refresh_token_locked(force=True):
+            raise RuntimeError("Angel One auth failed; check .env")
+        return _smart_api
 
 
 # ─────────────────────────── scrip master ──────────────────────────────────
@@ -227,46 +306,56 @@ def _load_scrip_master() -> pd.DataFrame:
     global _master_df, _symbol_index
     if _master_df is not None:
         return _master_df
-    if not _master_is_fresh():
-        _download_scrip_master()
-    with open(SCRIP_MASTER_CACHE) as f:
-        rows = json.load(f)
-    df = pd.DataFrame(rows)
-    if "instrumenttype" in df.columns:
-        df = df[df["instrumenttype"].astype(str).isin(["", "AMXIDX"])
-                | df["instrumenttype"].isna()]
-    keep = [c for c in ("token", "symbol", "name", "exch_seg", "lotsize")
-            if c in df.columns]
-    df = df[keep].copy()
-    _master_df = df.reset_index(drop=True)
-    idx = {}
-    for r in _master_df.itertuples(index=False):
-        try:
-            sym_full = str(r.symbol).strip().upper()
-            exch = str(r.exch_seg).strip().upper()
-            tok = str(r.token).strip()
-            name = str(getattr(r, "name", "")).strip().upper()
-            if not (sym_full and exch and tok):
+    with _init_lock:
+        # Re-check after acquiring lock; another thread may have populated it.
+        if _master_df is not None:
+            return _master_df
+        if not _master_is_fresh():
+            _download_scrip_master()
+        with open(SCRIP_MASTER_CACHE) as f:
+            rows = json.load(f)
+        df = pd.DataFrame(rows)
+        if "instrumenttype" in df.columns:
+            df = df[df["instrumenttype"].astype(str).isin(["", "AMXIDX"])
+                    | df["instrumenttype"].isna()]
+        keep = [c for c in ("token", "symbol", "name", "exch_seg", "lotsize")
+                if c in df.columns]
+        df = df[keep].copy()
+        _master_df = df.reset_index(drop=True)
+        idx = {}
+        for r in _master_df.itertuples(index=False):
+            try:
+                sym_full = str(r.symbol).strip().upper()
+                exch = str(r.exch_seg).strip().upper()
+                tok = str(r.token).strip()
+                name = str(getattr(r, "name", "")).strip().upper()
+                if not (sym_full and exch and tok):
+                    continue
+                base = sym_full.split("-", 1)[0]
+                idx.setdefault((exch, sym_full), tok)
+                idx.setdefault((exch, base), tok)
+                if name and name != base:
+                    idx.setdefault((exch, name), tok)
+            except Exception:
                 continue
-            base = sym_full.split("-", 1)[0]
-            idx.setdefault((exch, sym_full), tok)
-            idx.setdefault((exch, base), tok)
-            if name and name != base:
-                idx.setdefault((exch, name), tok)
-        except Exception:
-            continue
-    _symbol_index = idx
-    print("   Indexed %d (exch, symbol) -> token pairs" % len(idx))
-    return _master_df
+        _symbol_index = idx
+        print("   Indexed %d (exch, symbol) -> token pairs" % len(idx))
+        return _master_df
 
 
 # ─────────────────────────── ticker resolution ─────────────────────────────
 
 INDEX_OVERRIDES = {
-    "^NSEI":    ("NSE", "99926000", "Nifty 50"),
-    "^CRSLDX":  ("NSE", "99926004", "Nifty 500"),
-    "^NSEBANK": ("NSE", "99926009", "Nifty Bank"),
-    "^BSESN":   ("BSE", "99919000", "Sensex"),
+    "^NSEI":      ("NSE", "99926000", "Nifty 50"),
+    "^CRSLDX":    ("NSE", "99926004", "Nifty 500"),
+    "^NSEBANK":   ("NSE", "99926009", "Nifty Bank"),
+    "^BSESN":     ("BSE", "99919000", "Sensex"),
+    "^NSEMID150": ("NSE", "99926060", "Nifty Midcap 150"),
+    "^NSESML250": ("NSE", "99926062", "Nifty Smallcap 250"),
+    "^NSEMID100": ("NSE", "99926011", "Nifty Midcap 100"),
+    "^NSESML100": ("NSE", "99926032", "Nifty Smallcap 100"),
+    "^NSEMS400":  ("NSE", "99926063", "Nifty MidSmall 400"),
+    "^NSEFIN":    ("NSE", "99926037", "Nifty Financial Services"),
 }
 
 
@@ -329,16 +418,109 @@ def _parse_ticker(ticker: str):
 
 # ─────────────────────────── rate limiter ──────────────────────────────────
 
+class _RateLimiter:
+    """Adaptive sliding-window limiter for Angel's getCandleData endpoint.
+
+    Guarantees the union of:
+      * <= per_sec calls in any rolling 1-second window
+      * <= per_min calls in any rolling 60-second window
+      * <= max_inflight concurrent calls (back-pressures N-pane bursts)
+
+    Self-healing:
+      * On AB1004 (rate-limited), halves the effective per-sec budget and
+        forces a jittered cooldown so all waiting threads stagger.
+      * After `recovery_threshold` consecutive successes, climbs the budget
+        back toward nominal one step at a time.
+      * Sleeps happen OUTSIDE the internal lock so threads compute fresh
+        deadlines instead of stacking sequentially.
+    """
+
+    def __init__(self, per_sec=3, per_min=180, max_inflight=4,
+                 recovery_threshold=20):
+        self._lock = threading.Lock()
+        self._sec_win = deque()
+        self._min_win = deque()
+        self._nominal_per_sec = per_sec
+        self._per_min = per_min
+        self._cur_per_sec = per_sec
+        self._inflight = threading.BoundedSemaphore(max_inflight)
+        self._consecutive_ok = 0
+        self._recovery_threshold = recovery_threshold
+        self._cooldown_until = 0.0
+        self._throttled = False  # state flag for one-shot log on transition
+
+    def _purge_locked(self, now):
+        cutoff_s = now - 1.0
+        while self._sec_win and self._sec_win[0] <= cutoff_s:
+            self._sec_win.popleft()
+        cutoff_m = now - 60.0
+        while self._min_win and self._min_win[0] <= cutoff_m:
+            self._min_win.popleft()
+
+    def acquire(self):
+        """Block until a slot is available. Caller MUST call release()."""
+        self._inflight.acquire()
+        try:
+            while True:
+                with self._lock:
+                    now = time.time()
+                    wait = max(0.0, self._cooldown_until - now)
+                    if wait == 0.0:
+                        self._purge_locked(now)
+                        if len(self._sec_win) >= self._cur_per_sec:
+                            wait = max(wait, self._sec_win[0] + 1.0 - now)
+                        if len(self._min_win) >= self._per_min:
+                            wait = max(wait, self._min_win[0] + 60.0 - now)
+                        if wait <= 0.0:
+                            self._sec_win.append(now)
+                            self._min_win.append(now)
+                            return
+                # Jitter prevents waking herd at exact same instant.
+                time.sleep(wait + random.uniform(0.0, 0.05))
+        except BaseException:
+            self._inflight.release()
+            raise
+
+    def release(self):
+        self._inflight.release()
+
+    def report_rate_limited(self):
+        """Called after Angel returns AB1004. Throttle down + cooldown."""
+        with self._lock:
+            self._consecutive_ok = 0
+            prev = self._cur_per_sec
+            self._cur_per_sec = max(1, self._cur_per_sec // 2)
+            self._cooldown_until = time.time() + 1.5 + random.uniform(0.0, 0.5)
+            if not self._throttled:
+                self._throttled = True
+                print("[Angel] rate-limit hit — throttling %d → %d req/sec"
+                      % (prev, self._cur_per_sec))
+
+    def report_success(self):
+        """Called after a successful Angel call. Gradually restore rate."""
+        with self._lock:
+            self._consecutive_ok += 1
+            if (self._consecutive_ok >= self._recovery_threshold
+                    and self._cur_per_sec < self._nominal_per_sec):
+                self._cur_per_sec += 1
+                self._consecutive_ok = 0
+                if self._cur_per_sec >= self._nominal_per_sec:
+                    if self._throttled:
+                        self._throttled = False
+                        print("[Angel] rate-limit recovered — back to %d req/sec"
+                              % self._nominal_per_sec)
+
+
+_rate_limiter = _RateLimiter(
+    per_sec=RATE_LIMIT_PER_SEC,
+    per_min=_RATE_LIMIT_PER_MIN,
+    max_inflight=_RATE_LIMIT_MAX_INFLIGHT,
+)
+
+
 def _rate_limit_acquire():
-    with _rate_lock:
-        now = time.time()
-        oldest = _last_call_ts[0]
-        wait = (oldest + 1.0) - now
-        if wait > 0:
-            time.sleep(wait)
-            now = time.time()
-        _last_call_ts.pop(0)
-        _last_call_ts.append(now)
+    """Back-compat shim. Caller must pair with `_rate_limiter.release()`."""
+    _rate_limiter.acquire()
 
 
 # ─────────────────────────── public download API ───────────────────────────
@@ -409,48 +591,70 @@ def angel_download(ticker: str,
     }
 
     for attempt in range(retries + 1):
-        _rate_limit_acquire()
+        _rate_limiter.acquire()
         try:
-            obj = _ensure_session()
-            resp = obj.getCandleData(historicParam)
-        except Exception:
-            if attempt < retries:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            return _empty_df()
-
-        if resp is None or not isinstance(resp, dict):
-            if attempt < retries:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            return _empty_df()
-
-        if not resp.get("status"):
-            err_code = str(resp.get("errorcode", "")).upper()
-            err_msg = str(resp.get("message", ""))
-            # Rate limit — back off and retry
-            if err_code == "AB1004" and attempt < retries:
-                time.sleep(1.0 * (attempt + 1))
-                continue
-            # Auth error — refresh token first, then full re-login
-            if _is_auth_error_msg(err_code + " " + err_msg) and attempt < retries:
-                if _try_refresh_access_token() or refresh_token(force=False):
+            try:
+                obj = _ensure_session()
+                resp, timed_out = _call_with_timeout(obj.getCandleData, historicParam)
+                if timed_out:
+                    # Stale connection in SDK pool — drop session so the next
+                    # attempt rebuilds it with a fresh urllib3 pool.
+                    print("angel_download: getCandleData timed out for %s; resetting session" % ticker)
+                    _reset_session()
+                    if attempt < retries:
+                        time.sleep(0.3)
+                        continue
+                    return _empty_df()
+            except Exception:
+                if attempt < retries:
+                    time.sleep(0.5 * (attempt + 1)
+                               + random.uniform(0.0, 0.25))
                     continue
-            if attempt < retries:
-                time.sleep(0.5 * (attempt + 1))
-                continue
-            return _empty_df()
+                return _empty_df()
 
-        data = resp.get("data") or []
-        if not data:
-            return _empty_df()
-        df = pd.DataFrame(
-            data, columns=["Date", "Open", "High", "Low", "Close", "Volume"],
-        )
-        df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
-        df = df.set_index("Date").sort_index()
-        df = df[~df.index.duplicated(keep="last")]
-        return df
+            if resp is None or not isinstance(resp, dict):
+                if attempt < retries:
+                    time.sleep(0.5 * (attempt + 1)
+                               + random.uniform(0.0, 0.25))
+                    continue
+                return _empty_df()
+
+            if not resp.get("status"):
+                err_code = str(resp.get("errorcode", "")).upper()
+                err_msg = str(resp.get("message", ""))
+                # Rate limit — adaptive backoff: shrink internal budget,
+                # then exponential sleep with jitter.
+                if err_code == "AB1004":
+                    _rate_limiter.report_rate_limited()
+                    if attempt < retries:
+                        time.sleep((1.5 ** attempt)
+                                   + random.uniform(0.0, 0.5))
+                        continue
+                    return _empty_df()
+                # Auth error — refresh token first, then full re-login
+                if (_is_auth_error_msg(err_code + " " + err_msg)
+                        and attempt < retries):
+                    if _try_refresh_access_token() or refresh_token(force=False):
+                        continue
+                if attempt < retries:
+                    time.sleep(0.5 * (attempt + 1)
+                               + random.uniform(0.0, 0.25))
+                    continue
+                return _empty_df()
+
+            data = resp.get("data") or []
+            _rate_limiter.report_success()
+            if not data:
+                return _empty_df()
+            df = pd.DataFrame(
+                data, columns=["Date", "Open", "High", "Low", "Close", "Volume"],
+            )
+            df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
+            df = df.set_index("Date").sort_index()
+            df = df[~df.index.duplicated(keep="last")]
+            return df
+        finally:
+            _rate_limiter.release()
     return _empty_df()
 
 

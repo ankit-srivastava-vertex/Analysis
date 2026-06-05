@@ -541,21 +541,47 @@ class BSEScraper:
         ]
 
         # Guard against empty NSE DataFrames (e.g. nsepython unavailable)
+        pulled_str = f"Data pulled on {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+
+        def _date_range(df):
+            if df is None or df.empty:
+                return None
+            for c in df.columns:
+                if 'date' in str(c).lower():
+                    try:
+                        vals = sorted({str(v).strip() for v in df[c].dropna() if str(v).strip()})
+                    except Exception:
+                        return None
+                    if not vals:
+                        return None
+                    return vals[0] if len(vals) == 1 else f"{vals[0]} to {vals[-1]}"
+            return None
+
         if nse_bulk_deals_df is not None and not nse_bulk_deals_df.empty:
             nse_bulk_deals_df.columns = nse_bulk_deals_df.columns.str.strip()
             filtered_nse_bulk_df = nse_bulk_deals_df[nse_bulk_deals_df['clientName'].isin(client_names_to_filter)]
             if filtered_nse_bulk_df.empty:
-                filtered_nse_bulk_df = pd.DataFrame({"Status": [f"No deals matched filter. Total deals fetched: {len(nse_bulk_deals_df)}"]})
+                dr = _date_range(nse_bulk_deals_df)
+                msg = f"No deals matched filter. Total deals fetched: {len(nse_bulk_deals_df)}."
+                if dr:
+                    msg += f" Data date: {dr}."
+                msg += f" {pulled_str}."
+                filtered_nse_bulk_df = pd.DataFrame({"Status": [msg]})
         else:
-            filtered_nse_bulk_df = pd.DataFrame({"Status": ["ERROR: NSE Bulk deals fetch failed or returned empty"]})
+            filtered_nse_bulk_df = pd.DataFrame({"Status": [f"ERROR: NSE Bulk deals fetch failed or returned empty. {pulled_str}."]})
 
         if nse_block_deals_df is not None and not nse_block_deals_df.empty:
             nse_block_deals_df.columns = nse_block_deals_df.columns.str.strip()
             filtered_nse_block_df = nse_block_deals_df[nse_block_deals_df['clientName'].isin(client_names_to_filter)]
             if filtered_nse_block_df.empty:
-                filtered_nse_block_df = pd.DataFrame({"Status": [f"No deals matched filter. Total deals fetched: {len(nse_block_deals_df)}"]})
+                dr = _date_range(nse_block_deals_df)
+                msg = f"No deals matched filter. Total deals fetched: {len(nse_block_deals_df)}."
+                if dr:
+                    msg += f" Data date: {dr}."
+                msg += f" {pulled_str}."
+                filtered_nse_block_df = pd.DataFrame({"Status": [msg]})
         else:
-            filtered_nse_block_df = pd.DataFrame({"Status": ["ERROR: NSE Block deals fetch failed or returned empty"]})
+            filtered_nse_block_df = pd.DataFrame({"Status": [f"ERROR: NSE Block deals fetch failed or returned empty. {pulled_str}."]})
 
         dataframes = {"nse_bulk": filtered_nse_bulk_df,
                       "nse_block": filtered_nse_block_df}
@@ -572,11 +598,16 @@ class BSEScraper:
             bulk_df.columns = bulk_df.columns.str.strip()
             filtered_bulk_df = bulk_df[bulk_df['Client Name'].isin(client_names_to_filter)]
             if filtered_bulk_df.empty:
-                dataframes[bulk_name] = pd.DataFrame({"Status": [f"No deals matched filter. Total BSE bulk deals fetched: {len(bulk_df)}"]})
+                dr = _date_range(bulk_df)
+                msg = f"No deals matched filter. Total BSE bulk deals fetched: {len(bulk_df)}."
+                if dr:
+                    msg += f" Data date: {dr}."
+                msg += f" {pulled_str}."
+                dataframes[bulk_name] = pd.DataFrame({"Status": [msg]})
             else:
                 dataframes[bulk_name] = filtered_bulk_df
         else:
-            dataframes[bulk_name] = pd.DataFrame({"Status": ["ERROR: BSE Bulk deals API failed or returned no data"]})
+            dataframes[bulk_name] = pd.DataFrame({"Status": [f"ERROR: BSE Bulk deals API failed or returned no data. {pulled_str}."]})
             print(f"⚠️  No data fetched for {bulk_name}")
 
         time.sleep(1)
@@ -593,11 +624,16 @@ class BSEScraper:
             block_df.columns = block_df.columns.str.strip()
             filtered_block_df = block_df[block_df['Client Name'].isin(client_names_to_filter)]
             if filtered_block_df.empty:
-                dataframes[block_name] = pd.DataFrame({"Status": [f"No deals matched filter. Total BSE block deals fetched: {len(block_df)}"]})
+                dr = _date_range(block_df)
+                msg = f"No deals matched filter. Total BSE block deals fetched: {len(block_df)}."
+                if dr:
+                    msg += f" Data date: {dr}."
+                msg += f" {pulled_str}."
+                dataframes[block_name] = pd.DataFrame({"Status": [msg]})
             else:
                 dataframes[block_name] = filtered_block_df
         else:
-            dataframes[block_name] = pd.DataFrame({"Status": ["ERROR: BSE Block deals API failed or returned no data"]})
+            dataframes[block_name] = pd.DataFrame({"Status": [f"ERROR: BSE Block deals API failed or returned no data. {pulled_str}."]})
             print(f"⚠️  No data fetched for {block_name}")
 
         # ── FII Stake Tracker + HNI Holdings ──
