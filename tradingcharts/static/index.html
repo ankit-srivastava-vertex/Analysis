@@ -1,0 +1,3670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Charts Dashboard</title>
+<!-- Vendored locally for offline / portable boot. CDN is a fallback only. -->
+<script src="/static/vendor/lightweight-charts-4.1.1.standalone.production.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
+<script>
+// ─── Server-side state sync ──────────────────────────────────────────────────
+// Hydrates localStorage from /api/state synchronously on page load, then mirrors
+// any writes back to the server (debounced). Survives port changes, browser
+// changes, and incognito; localStorage is only a transparent client-side cache.
+(function () {
+    const TRACKED_KEYS = [
+        'chartWatchlists', 'chartActiveWL',
+        'chartDrawings', 'chartAlerts',
+        'paneConfigs', 'chartCount',
+        'globalChartType', 'globalViewRange',
+        'chartTheme',
+        'smartVPSGOpts',
+        'chartSync',
+    ];
+    // 1) Synchronous hydrate (blocks parser briefly; localhost <1ms typical).
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/state', false);
+        xhr.send(null);
+        if (xhr.status === 200) {
+            const remote = JSON.parse(xhr.responseText || '{}');
+            for (const k of TRACKED_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(remote, k) && remote[k] !== null) {
+                    localStorage.setItem(k, remote[k]);
+                }
+            }
+        }
+    } catch (e) { console.warn('[state] hydrate failed:', e); }
+
+    // 2) Mirror writes back (debounced).
+    let pushTimer = null;
+    function pushNow() {
+        const payload = {};
+        for (const k of TRACKED_KEYS) {
+            const v = localStorage.getItem(k);
+            if (v !== null) payload[k] = v;
+        }
+        fetch('/api/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }).catch(e => console.warn('[state] push failed:', e));
+    }
+    function schedulePush() {
+        if (pushTimer) clearTimeout(pushTimer);
+        pushTimer = setTimeout(pushNow, 400);
+    }
+    const _origSet = Storage.prototype.setItem;
+    const _origRemove = Storage.prototype.removeItem;
+    Storage.prototype.setItem = function (k, v) {
+        const r = _origSet.apply(this, arguments);
+        if (this === localStorage && TRACKED_KEYS.indexOf(k) !== -1) schedulePush();
+        return r;
+    };
+    Storage.prototype.removeItem = function (k) {
+        const r = _origRemove.apply(this, arguments);
+        if (this === localStorage && TRACKED_KEYS.indexOf(k) !== -1) schedulePush();
+        return r;
+    };
+    // Flush on tab close.
+    window.addEventListener('beforeunload', () => {
+        if (pushTimer) { clearTimeout(pushTimer); pushNow(); }
+    });
+})();
+</script>
+<script src="/static/drawing-tools.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --bg-primary: #131722;
+    --bg-secondary: #1e222d;
+    --bg-tertiary: #2a2e39;
+    --border-color: #363a45;
+    --text-primary: #d1d4dc;
+    --text-secondary: #787b86;
+    --accent-blue: #2962ff;
+    --green: #089981;
+    --red: #f23645;
+    --ticker-green: #089981;
+    --ticker-red: #f23645;
+    --chart-bg: #131722;
+    --chart-grid: #1e222d;
+    --chart-watermark: rgba(209, 212, 220, 0.05);
+    --panel-bg: rgba(0, 0, 0, 0.85);
+    --overlay-bg: rgba(30, 34, 45, 0.85);
+}
+
+body.theme-light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f4f5f8;
+    --bg-tertiary: #e9ebee;
+    --border-color: #d6d8e0;
+    --text-primary: #131722;
+    --text-secondary: #5d606b;
+    --accent-blue: #1565c0;
+    --green: #089981;
+    --red: #d32f2f;
+    --ticker-green: #088a72;
+    --ticker-red: #d32f2f;
+    --chart-bg: #ffffff;
+    --chart-grid: #eef0f3;
+    --chart-watermark: rgba(19, 23, 34, 0.05);
+    --panel-bg: rgba(255, 255, 255, 0.95);
+    --overlay-bg: rgba(244, 245, 248, 0.92);
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Chart Grid ──────────────────────────────────────────── */
+.chart-grid {
+    flex: 1;
+    display: grid;
+    gap: 1px;
+    background: var(--border-color);
+    overflow: hidden;
+    min-width: 0;
+}
+
+.chart-grid[data-count="1"] { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.chart-grid[data-count="2"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+.chart-grid[data-count="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.chart-grid[data-count="6"] { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.chart-grid[data-count="8"] { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+/* ─── Chart Pane ──────────────────────────────────────────── */
+.chart-pane {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    position: relative;
+    overflow: hidden;
+}
+
+.symbol-input-wrap {
+    position: relative;
+}
+
+.symbol-input {
+    width: 100px;
+    height: 22px;
+    padding: 0 6px;
+    background: var(--overlay-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.symbol-input:focus {
+    border-color: var(--accent-blue);
+}
+
+.symbol-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 200px;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: none;
+}
+
+.symbol-dropdown.visible { display: block; }
+
+.symbol-option {
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.symbol-option:hover {
+    background: var(--bg-tertiary);
+}
+
+.timeframe-select {
+    height: 22px;
+    padding: 0 4px;
+    background: var(--overlay-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 10px;
+    outline: none;
+    cursor: pointer;
+}
+
+.timeframe-select:focus {
+    border-color: var(--accent-blue);
+}
+
+/* Pane Action Buttons */
+.pane-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--overlay-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.pane-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+/* Fullscreen pane */
+.chart-pane.fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    border-radius: 0;
+}
+
+/* Ticker Bar (on chart, after OHLC) */
+.ticker-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    transition: background 0.3s;
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+
+.ticker-ltp {
+    font-weight: 700;
+    font-size: 12px;
+    transition: color 0.2s;
+}
+
+.ticker-change {
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.ticker-bar.flash-green {
+    animation: flashGreen 0.6s ease-out;
+}
+
+.ticker-bar.flash-red {
+    animation: flashRed 0.6s ease-out;
+}
+
+@keyframes flashGreen {
+    0% { background: rgba(8, 153, 129, 0.4); }
+    100% { background: transparent; }
+}
+
+@keyframes flashRed {
+    0% { background: rgba(242, 54, 69, 0.4); }
+    100% { background: transparent; }
+}
+
+/* Chart Container */
+.chart-container {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+}
+
+/* Loading overlay */
+.loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+    z-index: 5;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.loading-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Watermark */
+.chart-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--chart-watermark);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ohlc-legend {
+    font-size: 10px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    pointer-events: none;
+    display: inline;
+    white-space: nowrap;
+}
+
+/* Chart Overlay - top left (symbol → OHLC → price) */
+.chart-overlay-top {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    right: 75px;
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    z-index: 20;
+    pointer-events: auto;
+}
+
+/* Chart Overlay - top right (timeframe, screenshot, fullscreen) */
+.chart-overlay-right {
+    position: absolute;
+    top: 6px;
+    right: 70px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 20;
+}
+
+/* Q (Highest Quarterly Volume) hover tooltip */
+.q-tooltip {
+    position: absolute;
+    display: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 30;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.q-tooltip b { color: #089981; font-weight: 600; }
+
+/* ─── Drawing Tools Sidebar ─────────────────────────────── */
+.main-area {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.drawing-sidebar {
+    width: 42px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+    gap: 2px;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.draw-tool-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+}
+
+.draw-tool-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.draw-tool-btn.active {
+    background: rgba(41, 98, 255, 0.15);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+.draw-tool-btn[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    left: 44px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--text-primary);
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.draw-separator {
+    width: 26px;
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+.sidebar-spacer {
+    flex: 1;
+}
+
+.sidebar-control {
+    width: 34px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 2px 0;
+}
+
+.sidebar-label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.sidebar-select {
+    width: 34px;
+    height: 28px;
+    padding: 0 2px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 10px;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+    text-align: center;
+}
+
+.sidebar-select:focus {
+    border-color: var(--accent-blue);
+}
+
+/* Sidebar flyout menus (generic) */
+.sidebar-flyout {
+    display: none;
+    position: fixed;
+    min-width: 120px;
+    background: #1e1e2e;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    z-index: 9998;
+    padding: 6px 0;
+}
+.sidebar-flyout.open { display: block; }
+.sidebar-flyout-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    color: var(--text-secondary);
+    gap: 8px;
+    transition: background 0.1s;
+}
+.sidebar-flyout-row:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.sidebar-flyout-row.selected { color: var(--accent-blue); font-weight: 600; }
+.sidebar-flyout-row.selected::before {
+    content: '\2713';
+    font-size: 11px;
+    color: var(--accent-blue);
+    margin-right: 2px;
+}
+
+.sidebar-live {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Drawing overlay canvas */
+.drawing-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+
+.drawing-canvas.active {
+    pointer-events: all;
+    cursor: crosshair;
+}
+
+.drawing-canvas.interacting {
+    pointer-events: all;
+}
+
+/* Delete button on drawings */
+.drawing-delete-btn {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: var(--red);
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 10px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-secondary); }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* Indicator flyout menu */
+.indi-menu-btn {
+    width: 34px;
+    height: 28px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 9px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.indi-menu-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.indi-menu-btn.has-active { color: var(--accent-blue); border-color: var(--accent-blue); }
+
+.indi-flyout {
+    display: none;
+    position: fixed;
+    min-width: 180px;
+    background: #1e1e2e;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    z-index: 9998;
+    padding: 6px 0;
+}
+.indi-flyout.open { display: block; }
+.indi-flyout-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    color: var(--text-secondary);
+    gap: 8px;
+    transition: background 0.1s;
+}
+.indi-flyout-row:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.indi-flyout-row .indi-check {
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid var(--text-secondary);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 10px;
+}
+.indi-flyout-row.active .indi-check {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #fff;
+}
+.indi-flyout-row .indi-name { flex: 1; }
+.indi-flyout-row .indi-hint {
+    font-size: 9px;
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+.indi-flyout-title {
+    padding: 4px 12px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
+}
+
+/* Indicator settings modal */
+.indi-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+.indi-modal-overlay.active { display: flex; }
+.indi-modal {
+    background: #1e1e2e;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    width: 280px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.indi-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.indi-modal-close {
+    background: none; border: none; color: var(--text-secondary);
+    font-size: 18px; cursor: pointer; line-height: 1;
+}
+.indi-modal-close:hover { color: var(--text-primary); }
+.indi-modal-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.indi-modal-body label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.indi-modal-body input {
+    width: 90px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 4px 6px;
+    font-size: 12px;
+}
+.indi-modal-footer {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-color);
+    text-align: right;
+}
+.indi-modal-apply {
+    background: #089981;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 16px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.indi-modal-apply:hover { background: #0ab090; }
+
+/* SmartVPSG data panel */
+.smartvpsg-panel {
+    position: absolute;
+    top: 50px;
+    right: 75px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-primary);
+    z-index: 10;
+    pointer-events: none;
+    display: none;
+}
+.smartvpsg-panel div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 1px 0;
+}
+.smartvpsg-panel .pos { color: #089981; }
+.smartvpsg-panel .neg { color: #f23645; }
+</style>
+</head>
+<body>
+
+<!-- Main Area with Drawing Sidebar + Chart Grid -->
+<div class="main-area">
+    <!-- Drawing Tools Sidebar -->
+    <div class="drawing-sidebar" id="drawingSidebar">
+        <button class="draw-tool-btn" data-tool="cursor" title="Cursor (Esc)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/></svg>
+        </button>
+        <div class="draw-separator"></div>
+        <div class="sidebar-control" title="Line Tools">
+            <span class="sidebar-label">Line</span>
+            <button class="indi-menu-btn" id="lineToolsBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="4"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-control" title="Shape Tools">
+            <span class="sidebar-label">Draw</span>
+            <button class="indi-menu-btn" id="shapeToolsBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1"/></svg>
+            </button>
+        </div>
+        <div class="draw-separator"></div>
+        <button class="draw-tool-btn" data-tool="delete-all" title="Delete All Drawings" style="color: var(--red);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
+        <div class="draw-separator"></div>
+        <!-- Type, Range, Charts controls -->
+        <div class="sidebar-control" title="Candle Types">
+            <span class="sidebar-label">Bar</span>
+            <button class="indi-menu-btn" id="barMenuBtn">C</button>
+        </div>
+        <div class="sidebar-control" title="Time Duration">
+            <span class="sidebar-label">Time</span>
+            <button class="indi-menu-btn" id="timeMenuBtn">1Y</button>
+        </div>
+        <div class="sidebar-control" title="Indicators" style="position:relative">
+            <span class="sidebar-label">Indi</span>
+            <button class="indi-menu-btn" id="indiMenuBtn">fx</button>
+        </div>
+        <div class="sidebar-control" title="Watchlist">
+            <span class="sidebar-label">List</span>
+            <button class="indi-menu-btn" id="watchlistMenuBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-control" title="Sync Across Panes">
+            <span class="sidebar-label">Sync</span>
+            <button class="indi-menu-btn" id="syncMenuBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+        </div>
+        <!-- Spacer pushes bottom actions down -->
+        <div class="sidebar-spacer"></div>
+
+        <!-- Bottom actions: Theme, Chart, Alert, Screenshot, Fullscreen, Live -->
+        <div class="sidebar-control" title="Toggle Theme">
+            <span class="sidebar-label">Theme</span>
+            <button class="indi-menu-btn" id="themeToggleBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-control" title="No of Charts">
+            <span class="sidebar-label">Chart</span>
+            <button class="indi-menu-btn" id="chartMenuBtn">4</button>
+        </div>
+        <div class="sidebar-control" title="Alerts">
+            <span class="sidebar-label">Alert</span>
+            <button class="indi-menu-btn" id="alertMenuBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            </button>
+        </div>
+        <button class="draw-tool-btn" id="pageScreenshot" title="Screenshot Page">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M5 7h.01M19 7h.01"/></svg>
+        </button>
+        <button class="draw-tool-btn" id="pageFullscreen" title="Fullscreen Page">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+        <div class="sidebar-live" title="Live"><span class="status-dot"></span></div>
+    </div>
+
+    <!-- Chart Grid -->
+    <div class="chart-grid" id="chartGrid"></div>
+</div>
+
+<!-- Sidebar Flyout Menus (fixed, outside sidebar overflow) -->
+<div class="sidebar-flyout" id="lineToolsFlyout">
+    <div class="sidebar-flyout-row" data-tool="trendline">Trend Line</div>
+    <div class="sidebar-flyout-row" data-tool="ray">Ray</div>
+    <div class="sidebar-flyout-row" data-tool="horizontal">Horizontal Line</div>
+    <div class="sidebar-flyout-row" data-tool="vertical">Vertical Line</div>
+</div>
+
+<div class="sidebar-flyout" id="shapeToolsFlyout">
+    <div class="sidebar-flyout-row" data-tool="channel">Parallel Channel</div>
+    <div class="sidebar-flyout-row" data-tool="rectangle">Rectangle</div>
+    <div class="sidebar-flyout-row" data-tool="pricerange">Price Range</div>
+    <div class="sidebar-flyout-row" data-tool="daterange">Date Range</div>
+    <div class="sidebar-flyout-row" data-tool="datepricerange">Date & Price Range</div>
+    <div class="sidebar-flyout-row" data-tool="text">Text</div>
+    <div class="sidebar-flyout-row" data-tool="comment">Comment</div>
+    <div class="sidebar-flyout-row" data-tool="fibretracement">Fib Retracement</div>
+    <div class="sidebar-flyout-row" data-tool="fibextension">Fib Extension</div>
+</div>
+
+<div class="sidebar-flyout" id="barFlyout">
+    <div class="sidebar-flyout-row selected" data-val="candles">Candles</div>
+    <div class="sidebar-flyout-row" data-val="bars">Bars</div>
+    <div class="sidebar-flyout-row" data-val="heikinashi">Heikin Ashi</div>
+</div>
+
+<div class="sidebar-flyout" id="timeFlyout">
+    <div class="sidebar-flyout-row" data-val="30">1 Month</div>
+    <div class="sidebar-flyout-row" data-val="90">3 Months</div>
+    <div class="sidebar-flyout-row" data-val="180">6 Months</div>
+    <div class="sidebar-flyout-row selected" data-val="365">1 Year</div>
+    <div class="sidebar-flyout-row" data-val="730">2 Years</div>
+    <div class="sidebar-flyout-row" data-val="1095">3 Years</div>
+    <div class="sidebar-flyout-row" data-val="1825">5 Years</div>
+    <div class="sidebar-flyout-row" data-val="2555">7 Years</div>
+    <div class="sidebar-flyout-row" data-val="3650">10 Years</div>
+</div>
+
+<div class="sidebar-flyout" id="chartFlyout">
+    <div class="sidebar-flyout-row" data-val="1">1 Chart</div>
+    <div class="sidebar-flyout-row" data-val="2">2 Charts</div>
+    <div class="sidebar-flyout-row selected" data-val="4">4 Charts</div>
+    <div class="sidebar-flyout-row" data-val="6">6 Charts</div>
+    <div class="sidebar-flyout-row" data-val="8">8 Charts</div>
+</div>
+
+<div class="sidebar-flyout" id="syncFlyout">
+    <div class="sidebar-flyout-row" data-sync="crosshair">Crosshair</div>
+    <div class="sidebar-flyout-row" data-sync="timeRange">Time Range</div>
+    <div class="sidebar-flyout-row" data-sync="symbol">Symbol</div>
+</div>
+
+<!-- Indicator Flyout -->
+<div class="indi-flyout" id="indiFlyout">
+    <div class="indi-flyout-title">Indicators</div>
+    <div class="indi-flyout-row" data-indi="smartvpsg">
+        <span class="indi-check"></span>
+        <span class="indi-name">SmartVPSG</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="supreseps">
+        <span class="indi-check"></span>
+        <span class="indi-name">SupResEPS</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="rsi">
+        <span class="indi-check"></span>
+        <span class="indi-name">RSI</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="macd">
+        <span class="indi-check"></span>
+        <span class="indi-name">MACD</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="rs">
+        <span class="indi-check"></span>
+        <span class="indi-name">Rel. Strength</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+</div>
+
+<!-- Indicator Settings Modal -->
+<div class="indi-modal-overlay" id="indiModalOverlay">
+    <div class="indi-modal">
+        <div class="indi-modal-header">
+            <span id="indiModalTitle">Indicator Settings</span>
+            <button class="indi-modal-close" id="indiModalClose">&times;</button>
+        </div>
+        <div class="indi-modal-body" id="indiModalSmartVPSG">
+            <label>Min Volume<input type="number" id="indi_minVolume" value="1000000" step="100000"></label>
+            <label>Price Move %<input type="number" id="indi_priceMove" value="3" step="0.5" min="0.1"></label>
+            <label>Vol Spike Lookback<input type="number" id="indi_volLookback" value="9" min="1" max="50"></label>
+            <label>Avg Vol Period<input type="number" id="indi_avgLookback" value="21" min="5" max="100"></label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_showVolProfile" style="width:auto;margin:0"> Show Volume Profile</label>
+            <label>Volume Profile Buckets<input type="number" id="indi_vpBuckets" value="30" min="10" max="100"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalSupResEPS" style="display:none">
+            <label>MA 10 Length<input type="number" id="indi_ma10" value="10" min="2" max="100"></label>
+            <label>MA 20 Length<input type="number" id="indi_ma20" value="20" min="2" max="200"></label>
+            <label>MA 50 Length<input type="number" id="indi_ma50" value="50" min="5" max="300"></label>
+            <label>MA 200 Length<input type="number" id="indi_ma200" value="200" min="50" max="500"></label>
+            <label>Pivot Lookback<input type="number" id="indi_pivotLen" value="15" min="3" max="50"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalRSI" style="display:none">
+            <label>Period<input type="number" id="indi_rsiPeriod" value="14" min="2" max="100"></label>
+            <label>Overbought<input type="number" id="indi_rsiOB" value="70" min="50" max="95"></label>
+            <label>Oversold<input type="number" id="indi_rsiOS" value="30" min="5" max="50"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalMACD" style="display:none">
+            <label>Fast Length<input type="number" id="indi_macdFast" value="12" min="2" max="50"></label>
+            <label>Slow Length<input type="number" id="indi_macdSlow" value="26" min="5" max="100"></label>
+            <label>Signal Length<input type="number" id="indi_macdSignal" value="9" min="2" max="50"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalRS" style="display:none">
+            <label>Benchmark
+                <select id="indi_rsBenchmark" style="width:100%;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+                    <option value="NIFTY 500">Nifty 500</option>
+                    <option value="NIFTY 50">Nifty 50</option>
+                    <option value="NIFTY BANK">Nifty Bank</option>
+                    <option value="NIFTY MIDCAP 150">Nifty Midcap 150</option>
+                    <option value="NIFTY MIDCAP 100">Nifty Midcap 100</option>
+                    <option value="NIFTY SMALLCAP 250">Nifty Smallcap 250</option>
+                    <option value="NIFTY SMALLCAP 100">Nifty Smallcap 100</option>
+                    <option value="NIFTY MIDSMALL 400">Nifty MidSmall 400</option>
+                    <option value="FINNIFTY">Nifty Fin Services</option>
+                </select>
+            </label>
+            <label>MA Period<input type="number" id="indi_rsMaPeriod" value="50" min="5" max="200"></label>
+        </div>
+        <div class="indi-modal-footer">
+            <button class="indi-modal-apply" id="indiModalApply">Apply</button>
+        </div>
+    </div>
+</div>
+
+<!-- Alert Flyout (active alerts list) -->
+<div class="sidebar-flyout" id="alertFlyout" style="min-width:240px">
+    <div class="indi-flyout-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Alerts</span>
+        <button id="alertNewBtn" style="background:var(--accent-blue);border:none;color:#fff;font-size:10px;padding:3px 8px;border-radius:3px;cursor:pointer">+ New</button>
+    </div>
+    <div id="alertList" style="max-height:250px;overflow-y:auto;padding:4px 0">
+        <div style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">No active alerts</div>
+    </div>
+</div>
+
+<!-- Watchlist Flyout -->
+<div class="sidebar-flyout" id="watchlistFlyout" style="min-width:260px;max-width:300px">
+    <div class="indi-flyout-title" style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+        <select id="wlSelect" style="flex:1;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:3px 6px;font-size:11px;max-width:120px"></select>
+        <button id="wlNewBtn" title="New Watchlist" style="background:var(--accent-blue);border:none;color:#fff;font-size:10px;padding:3px 6px;border-radius:3px;cursor:pointer">+</button>
+        <button id="wlRenameBtn" title="Rename" style="background:none;border:1px solid var(--border-color);color:var(--text-secondary);font-size:10px;padding:3px 6px;border-radius:3px;cursor:pointer">&#9998;</button>
+        <button id="wlDeleteBtn" title="Delete Watchlist" style="background:none;border:1px solid var(--border-color);color:#f23645;font-size:10px;padding:3px 6px;border-radius:3px;cursor:pointer">&times;</button>
+    </div>
+    <div style="padding:4px 10px;display:flex;gap:4px">
+        <input type="text" id="wlSearchInput" placeholder="Search & add symbol..." style="flex:1;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:11px;text-transform:uppercase">
+        <label id="wlUploadLabel" title="Upload .txt" style="background:none;border:1px solid var(--border-color);color:var(--text-secondary);font-size:10px;padding:4px 6px;border-radius:3px;cursor:pointer;display:flex;align-items:center">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <input type="file" id="wlFileInput" accept=".txt" style="display:none">
+        </label>
+    </div>
+    <div id="wlSearchResults" style="max-height:120px;overflow-y:auto;padding:0 10px;display:none"></div>
+    <div id="wlStockList" style="max-height:320px;overflow-y:auto;padding:4px 0"></div>
+    <div style="padding:4px 10px;font-size:10px;color:var(--text-secondary)" id="wlCount">0 / 450</div>
+</div>
+
+<!-- Create Alert Modal -->
+<div class="indi-modal-overlay" id="alertModalOverlay">
+    <div class="indi-modal" style="width:320px">
+        <div class="indi-modal-header">
+            <span>Create Alert</span>
+            <button class="indi-modal-close" id="alertModalClose">&times;</button>
+        </div>
+        <div class="indi-modal-body">
+            <label>Symbol<input type="text" id="alert_symbol" value="" placeholder="e.g. RELIANCE" style="text-transform:uppercase"></label>
+            <label>Condition
+                <select id="alert_condition" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+                    <option value="price">Price</option>
+                    <option value="volume">Volume</option>
+                    <option value="drawing">Drawing Cross</option>
+                </select>
+            </label>
+            <label id="alert_drawing_label" style="display:none">Drawing
+                <select id="alert_drawing" style="width:100%;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px"></select>
+            </label>
+            <label>Type
+                <select id="alert_type" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+                    <option value="crossing_up">Crossing Up</option>
+                    <option value="crossing_down">Crossing Down</option>
+                    <option value="in_range">In Range</option>
+                </select>
+            </label>
+            <label>Value<input type="number" id="alert_value" value="" step="0.01" placeholder="Target value"></label>
+            <label id="alert_value2_label" style="display:none">Upper Value<input type="number" id="alert_value2" value="" step="0.01" placeholder="Upper bound"></label>
+            <label>Trigger
+                <select id="alert_trigger" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+                    <option value="once">Once</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                </select>
+            </label>
+            <label id="alert_hours_label" style="display:none">Every (hours)
+                <select id="alert_hours" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+                    <option value="1">1 hour</option>
+                    <option value="2">2 hours</option>
+                    <option value="3">3 hours</option>
+                    <option value="4">4 hours</option>
+                    <option value="6">6 hours</option>
+                    <option value="8">8 hours</option>
+                    <option value="12">12 hours</option>
+                </select>
+            </label>
+            <label id="alert_time_label" style="display:none">At time
+                <input type="time" id="alert_time" value="09:15" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px">
+            </label>
+            <label>Expiration<input type="date" id="alert_expiry" style="width:90px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px"></label>
+            <label>Message<input type="text" id="alert_message" value="" placeholder="Auto-generated" readonly style="opacity:0.7"></label>
+        </div>
+        <div class="indi-modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="alertModalCancel" style="background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-primary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px">Cancel</button>
+            <button id="alertModalCreate" style="background:var(--accent-blue);border:none;color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Create</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── Configuration ────────────────────────────────────────────────────────────
+const API_BASE = '';
+const DEFAULT_SYMBOLS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC'];
+const TIMEFRAMES = [
+    { value: '30m', label: '30min', days: 15 },
+    { value: '1h', label: '1H', days: 30 },
+    { value: '1d', label: '1D', days: 365 },
+    { value: '1w', label: '1W', days: 730 },
+    { value: '1mo', label: '1M', days: 1825 },
+];
+const VIEW_RANGES = [
+    { value: 30, label: '1M' },
+    { value: 90, label: '3M' },
+    { value: 180, label: '6M' },
+    { value: 365, label: '1Y' },
+    { value: 730, label: '2Y' },
+    { value: 1095, label: '3Y' },
+    { value: 1825, label: '5Y' },
+    { value: 2555, label: '7Y' },
+    { value: 3650, label: '10Y' },
+];
+let globalChartType = localStorage.getItem('globalChartType') || 'candles';
+let globalViewRange = parseInt(localStorage.getItem('globalViewRange') || '365');
+const TICK_POLL_INTERVAL = 1000;    // 1 Hz batched live-tick poll for all visible panes
+const HEALTH_POLL_INTERVAL = 10000; // 10 s server health poll
+
+// ─── /api/health poll (server liveness + Angel session/WS status) ────────────
+let _lastHealth = null;
+let _lastHealthAt = 0;  // wall-clock when _lastHealth was last set
+async function pollHealth() {
+    try {
+        const r = await fetch(`${API_BASE}/api/health`, { cache: 'no-store' });
+        const h = await r.json();
+        _lastHealth = h;
+        _lastHealthAt = Date.now();
+        const dot = document.querySelector('.status-dot');
+        if (!dot) return;
+        const healthy = h.angel_session && h.angel_ws_connected;
+        dot.style.background = healthy ? '#00e676' : '#ffb300';
+        const cache = h.candle_cache || {};
+        dot.parentElement?.setAttribute(
+            'title',
+            `Angel:${h.angel_session ? 'on' : 'off'} · AngelWS:${h.angel_ws_connected ? 'on' : 'off'}`
+            + ` · cache:${cache.size}/${(cache.hit_rate * 100).toFixed(0)}%`
+            + ` · uptime:${h.uptime_sec}s`
+        );
+    } catch (e) {
+        const dot = document.querySelector('.status-dot');
+        if (dot) dot.style.background = '#f23645';
+    }
+}
+
+// Self-rescheduling setTimeout chains (more resilient to background throttling
+// than setInterval). Each fired callback schedules the next.
+let _healthTimer = null;
+function scheduleHealth(delayMs) {
+    if (_healthTimer) clearTimeout(_healthTimer);
+    _healthTimer = setTimeout(async () => {
+        try { await pollHealth(); } finally { scheduleHealth(HEALTH_POLL_INTERVAL); }
+    }, delayMs);
+}
+scheduleHealth(1500);
+
+// ─── Batched live-tick polling (replaces socket.io 'tick' fan-out) ───────────
+// One round-trip per second pulls the latest LTP for every visible pane's
+// symbol from the server's _LAST_TICKS dict (populated by the Angel WS thread).
+// No persistent connection, no reconnect dance, no FD leak, no long-poll spinner.
+let _tickTimer = null;
+let _subscribedSymbols = new Set();
+async function syncSubscriptions() {
+    const target = new Set(panes.map(p => (p.symbol || '').toUpperCase()).filter(Boolean));
+    const toAdd = [...target].filter(s => !_subscribedSymbols.has(s));
+    const toRemove = [..._subscribedSymbols].filter(s => !target.has(s));
+    if (toAdd.length) {
+        try {
+            await fetch(`${API_BASE}/api/subscribe`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbols: toAdd })
+            });
+            toAdd.forEach(s => _subscribedSymbols.add(s));
+        } catch (e) { /* will retry on next sync */ }
+    }
+    if (toRemove.length) {
+        try {
+            await fetch(`${API_BASE}/api/unsubscribe`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbols: toRemove })
+            });
+            toRemove.forEach(s => _subscribedSymbols.delete(s));
+        } catch (e) {}
+    }
+}
+async function pollTicks() {
+    if (!panes.length) return;
+    const symbols = [...new Set(panes.map(p => (p.symbol || '').toUpperCase()).filter(Boolean))];
+    if (!symbols.length) return;
+    let ticks = {};
+    try {
+        const r = await fetch(`${API_BASE}/api/ticks?symbols=${encodeURIComponent(symbols.join(','))}`, { cache: 'no-store' });
+        const j = await r.json();
+        ticks = j.ticks || {};
+    } catch (e) {
+        return;  // silent: next poll will retry
+    }
+    panes.forEach(pane => {
+        const sym = (pane.symbol || '').toUpperCase();
+        const t = ticks[sym];
+        if (!t || !t.ltp) return;
+        updateTicker(pane, t.ltp, t.change || 0);
+        if (typeof checkAlerts === 'function') {
+            checkAlerts(pane.symbol, t.ltp, t.volume || 0);
+        }
+        // Merge live LTP into current bar (intraday only — daily bars get
+        // their final close from the next /api/historical refresh).
+        if (pane.lastLtp !== null && t.ltp !== pane.lastLtp) {
+            const lastCandle = pane._lastCandle;
+            if (lastCandle) {
+                const updated = {
+                    time: lastCandle.time,
+                    open: lastCandle.open,
+                    high: Math.max(lastCandle.high, t.ltp),
+                    low: Math.min(lastCandle.low, t.ltp),
+                    close: t.ltp,
+                };
+                pane.series.update(updated);
+                pane._lastCandle = updated;
+            }
+        }
+        pane.lastLtp = t.ltp;
+    });
+}
+function scheduleTicks(delayMs) {
+    if (_tickTimer) clearTimeout(_tickTimer);
+    _tickTimer = setTimeout(async () => {
+        try { await syncSubscriptions(); await pollTicks(); }
+        finally { scheduleTicks(TICK_POLL_INTERVAL); }
+    }, delayMs);
+}
+scheduleTicks(800);
+
+// ─── Self-heal on tab regain visibility / focus / bfcache restore ────────────
+// With pure HTTP polling there is no WebSocket reconnect dance — "self-heal"
+// is simply forcing the next health/tick poll immediately and, if the JS
+// pause was long, reloading candle data. Three triggers cover every macOS /
+// browser case:
+//   visibilitychange : Chrome tab background/foreground
+//   focus            : Cmd+Tab back to Safari/Chrome (App Nap resume)
+//   pageshow.persisted: Safari bfcache restore on back/forward navigation
+function _selfHeal(reason) {
+    const wallGapSec = _lastHealthAt ? Math.round((Date.now() - _lastHealthAt) / 1000) : null;
+    console.log(`[heal] ${reason} (gap=${wallGapSec}s); resuming polls`);
+    const dot = document.querySelector('.status-dot');
+    if (dot) dot.style.background = '#ffb300';  // amber while rehydrating
+    scheduleHealth(0);
+    scheduleTicks(0);
+    if (wallGapSec != null && wallGapSec > 120 && panes.length) {
+        // Long pause: candle data may be stale. Invalidate the in-memory
+        // last bar so a stale tick can't merge into it, then sequentially
+        // reload (pane 0 first so the user sees a chart immediately).
+        panes.forEach(p => p._lastCandle = null);
+        setTimeout(async () => {
+            try { await loadChartData(panes[0]); } catch (e) {}
+            for (let i = 1; i < panes.length; i++) {
+                try { loadChartData(panes[i]); } catch (e) {}
+            }
+        }, 200);
+    }
+}
+let _lastHealAt = 0;  // throttle: ignore heals fired within 3 s of each other
+function _maybeHeal(reason) {
+    const now = Date.now();
+    if (now - _lastHealAt < 3000) return;
+    _lastHealAt = now;
+    _selfHeal(reason);
+}
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) _maybeHeal('visibilitychange');
+});
+window.addEventListener('focus', () => {
+    if (_lastHealthAt && Date.now() - _lastHealthAt > 15000) _maybeHeal('focus');
+});
+window.addEventListener('pageshow', (e) => {
+    if (e.persisted) _maybeHeal('pageshow-bfcache');
+});
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let chartCount = parseInt(localStorage.getItem('chartCount') || '4');
+let panes = []; // { id, chart, series, volumeSeries, symbol, interval, pollTimer, lastLtp }
+let symbolCache = [];
+
+// ─── Theme state ────────────────────────────────────────────────────────────
+let chartTheme = localStorage.getItem('chartTheme') || 'dark';
+
+// ─── Sync state (Crosshair / Time Range / Symbol across panes) ─────────────
+let chartSync = (() => {
+    try { return Object.assign({crosshair:false,timeRange:false,symbol:false}, JSON.parse(localStorage.getItem('chartSync')||'{}')); }
+    catch(e) { return {crosshair:false,timeRange:false,symbol:false}; }
+})();
+let _syncing = false; // re-entrancy guard for cross-pane broadcasts
+function _broadcastSync(srcPane, fn) {
+    if (_syncing) return;
+    _syncing = true;
+    try { panes.forEach(p => { if (p !== srcPane) { try { fn(p); } catch(e) {} } }); }
+    finally { Promise.resolve().then(() => { _syncing = false; }); }
+}
+
+const THEME_COLORS = {
+    dark: {
+        bg: '#131722', grid: '#1e222d', text: '#d1d4dc',
+        crossLine: '#758696', axisBg: '#2a2e39', borderCol: '#2a2e39',
+        upColor: '#089981', downColor: '#f23645',
+    },
+    light: {
+        bg: '#ffffff', grid: '#eef0f3', text: '#131722',
+        crossLine: '#9098a8', axisBg: '#d6d8e0', borderCol: '#d6d8e0',
+        upColor: '#089981', downColor: '#d32f2f',
+    },
+};
+
+function applyTheme(theme) {
+    chartTheme = theme;
+    document.body.classList.toggle('theme-light', theme === 'light');
+    localStorage.setItem('chartTheme', theme);
+    const t = THEME_COLORS[theme] || THEME_COLORS.dark;
+    panes.forEach(p => {
+        try {
+            p.chart.applyOptions({
+                layout: { background: { type: 'solid', color: t.bg }, textColor: t.text },
+                grid:   { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+                crosshair: {
+                    vertLine: { color: t.crossLine, labelBackgroundColor: t.axisBg },
+                    horzLine: { color: t.crossLine, labelBackgroundColor: t.axisBg },
+                },
+                rightPriceScale: { borderColor: t.borderCol },
+                timeScale: { borderColor: t.borderCol },
+            });
+            if (p.drawingCanvas) { /* canvas redraw is triggered by chart events */ }
+        } catch(e) {}
+    });
+}
+
+function setupThemeToggle() {
+    const btn = document.getElementById('themeToggleBtn');
+    if (!btn) return;
+    applyTheme(chartTheme);
+    btn.addEventListener('click', () => {
+        applyTheme(chartTheme === 'dark' ? 'light' : 'dark');
+    });
+}
+
+// ─── Heikin Ashi computation ───────────────────────────────────────────────
+function toHeikinAshi(candles) {
+    const out = [];
+    let prevHaOpen = null, prevHaClose = null;
+    for (let i = 0; i < candles.length; i++) {
+        const c = candles[i];
+        const haClose = (c.open + c.high + c.low + c.close) / 4;
+        const haOpen = (i === 0 || prevHaOpen === null)
+            ? (c.open + c.close) / 2
+            : (prevHaOpen + prevHaClose) / 2;
+        const haHigh = Math.max(c.high, haOpen, haClose);
+        const haLow  = Math.min(c.low,  haOpen, haClose);
+        out.push({ time: c.time, open: haOpen, high: haHigh, low: haLow, close: haClose });
+        prevHaOpen = haOpen;
+        prevHaClose = haClose;
+    }
+    return out;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    loadSymbols();
+    setupCountDropdown();
+    setupSyncFlyout();
+    setupPageActions();
+    setupThemeToggle();
+    setChartCount(chartCount);
+    if (window.initDrawingTools) window.initDrawingTools();
+});
+
+function setupSyncFlyout() {
+    const btn = document.getElementById('syncMenuBtn');
+    const flyout = document.getElementById('syncFlyout');
+    if (!btn || !flyout) return;
+    function refresh() {
+        flyout.querySelectorAll('.sidebar-flyout-row').forEach(r => {
+            r.classList.toggle('selected', !!chartSync[r.dataset.sync]);
+        });
+        const anyOn = chartSync.crosshair || chartSync.timeRange || chartSync.symbol;
+        btn.style.color = anyOn ? 'var(--accent-blue)' : '';
+    }
+    refresh();
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
+        const rect = btn.getBoundingClientRect();
+        flyout.style.left = (rect.right + 6) + 'px';
+        flyout.style.top = rect.top + 'px';
+        flyout.classList.add('open');
+    });
+    flyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const k = row.dataset.sync;
+            chartSync[k] = !chartSync[k];
+            localStorage.setItem('chartSync', JSON.stringify(chartSync));
+            refresh();
+        });
+    });
+}
+
+// Escape key exits pane fullscreen
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const fs = document.querySelector('.chart-pane.fullscreen');
+        if (fs) {
+            const pane = panes.find(p => p.el === fs);
+            if (pane) toggleFullscreen(pane);
+        }
+    }
+});
+
+// Reset page fullscreen button icon on exit
+document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('pageFullscreen');
+    if (!document.fullscreenElement && btn) {
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    }
+});
+
+function setupCountDropdown() {
+    // Bar, Time, Chart flyout menus
+    const barBtn = document.getElementById('barMenuBtn');
+    const timeBtn = document.getElementById('timeMenuBtn');
+    const chartBtn = document.getElementById('chartMenuBtn');
+    const barFlyout = document.getElementById('barFlyout');
+    const timeFlyout = document.getElementById('timeFlyout');
+    const chartFlyout = document.getElementById('chartFlyout');
+
+    // Set initial button labels from stored values
+    const barLabels = { candles: 'C', bars: 'B', heikinashi: 'H' };
+    const timeLabels = { '30': '1M', '90': '3M', '180': '6M', '365': '1Y', '730': '2Y', '1095': '3Y', '1825': '5Y', '2555': '7Y', '3650': '10Y' };
+    barBtn.textContent = barLabels[globalChartType] || 'C';
+    timeBtn.textContent = timeLabels[String(globalViewRange)] || '1Y';
+    chartBtn.textContent = String(chartCount);
+
+    // Mark initial selected rows
+    barFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.toggle('selected', r.dataset.val === globalChartType));
+    timeFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.toggle('selected', r.dataset.val === String(globalViewRange)));
+    chartFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.toggle('selected', r.dataset.val === String(chartCount)));
+
+    function openFlyout(btn, flyout) {
+        // Close all flyouts first
+        document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
+        const rect = btn.getBoundingClientRect();
+        flyout.style.left = (rect.right + 6) + 'px';
+        flyout.style.top = rect.top + 'px';
+        flyout.classList.add('open');
+    }
+
+    barBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(barBtn, barFlyout); });
+    timeBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(timeBtn, timeFlyout); });
+    chartBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(chartBtn, chartFlyout); });
+
+    // Bar flyout selection
+    barFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            globalChartType = row.dataset.val;
+            localStorage.setItem('globalChartType', globalChartType);
+            barBtn.textContent = barLabels[globalChartType];
+            barFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            barFlyout.classList.remove('open');
+            panes.forEach(p => switchChartType(p, globalChartType));
+        });
+    });
+
+    // Time flyout selection
+    timeFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            globalViewRange = parseInt(row.dataset.val);
+            localStorage.setItem('globalViewRange', globalViewRange);
+            timeBtn.textContent = timeLabels[row.dataset.val];
+            timeFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            timeFlyout.classList.remove('open');
+            panes.forEach(p => loadChartData(p));
+        });
+    });
+
+    // Chart count flyout selection
+    chartFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            chartFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            chartFlyout.classList.remove('open');
+            chartBtn.textContent = row.dataset.val;
+            setChartCount(parseInt(row.dataset.val));
+        });
+    });
+
+    // Drawing tools flyouts
+    const lineToolsBtn = document.getElementById('lineToolsBtn');
+    const shapeToolsBtn = document.getElementById('shapeToolsBtn');
+    const lineToolsFlyout = document.getElementById('lineToolsFlyout');
+    const shapeToolsFlyout = document.getElementById('shapeToolsFlyout');
+
+    lineToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(lineToolsBtn, lineToolsFlyout); });
+    shapeToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(shapeToolsBtn, shapeToolsFlyout); });
+
+    // Line tools selection
+    lineToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            lineToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            lineToolsFlyout.classList.remove('open');
+            // Activate the drawing tool
+            const tool = row.dataset.tool;
+            document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.remove('active'));
+            if (window.activateDrawingTool) window.activateDrawingTool(tool);
+        });
+    });
+
+    // Shape tools selection
+    shapeToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            shapeToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            shapeToolsFlyout.classList.remove('open');
+            // Activate the drawing tool
+            const tool = row.dataset.tool;
+            document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.remove('active'));
+            if (window.activateDrawingTool) window.activateDrawingTool(tool);
+        });
+    });
+}
+
+function setupPageActions() {
+    const fsBtn = document.getElementById('pageFullscreen');
+    const ssBtn = document.getElementById('pageScreenshot');
+    if (fsBtn) fsBtn.addEventListener('click', togglePageFullscreen);
+    if (ssBtn) ssBtn.addEventListener('click', takePageScreenshot);
+}
+
+function togglePageFullscreen() {
+    const btn = document.getElementById('pageFullscreen');
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    } else {
+        document.exitFullscreen();
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    }
+}
+
+function takePageScreenshot() {
+    const grid = document.getElementById('chartGrid');
+    if (!panes || !panes.length) return;
+    // Composite each pane (chart + drawings + volume profile) into a per-pane
+    // canvas at the actual rendered size, then arrange them in the same grid.
+    const tiles = panes.map(p => _composePaneCanvas(p)).filter(Boolean);
+    if (!tiles.length) return;
+    const cols = (getComputedStyle(grid).gridTemplateColumns || '').split(' ').filter(Boolean).length || 1;
+    const rows = Math.ceil(tiles.length / cols);
+    // Use the largest tile dimensions so heterogeneous pane sizes still align.
+    const cw = Math.max(...tiles.map(t => t.width));
+    const ch = Math.max(...tiles.map(t => t.height));
+    const combined = document.createElement('canvas');
+    combined.width = cw * cols;
+    combined.height = ch * rows;
+    const ctx = combined.getContext('2d');
+    ctx.fillStyle = '#131722';
+    ctx.fillRect(0, 0, combined.width, combined.height);
+    tiles.forEach((tile, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        ctx.drawImage(tile, col * cw, row * ch);
+    });
+    _saveCanvasAsPng(combined, `trading_dashboard_${new Date().toISOString().slice(0,10)}.png`);
+}
+
+// Composite one pane into a single canvas: chart base + drawing overlay +
+// volume-profile overlay + watermark text. Returns null if pane has no chart.
+function _composePaneCanvas(pane) {
+    if (!pane || !pane.chart || typeof pane.chart.takeScreenshot !== 'function') return null;
+    let base;
+    try { base = pane.chart.takeScreenshot(); } catch (e) { return null; }
+    if (!base) return null;
+    const out = document.createElement('canvas');
+    out.width = base.width;
+    out.height = base.height;
+    const ctx = out.getContext('2d');
+    // 1. Chart base
+    ctx.drawImage(base, 0, 0);
+    // 2. Drawing overlay (trendlines, rays, etc. live on a separate canvas)
+    if (pane.drawingCanvas && pane.drawingCanvas.width > 0) {
+        try {
+            ctx.drawImage(pane.drawingCanvas, 0, 0, out.width, out.height);
+        } catch (e) { /* drawing canvas tainted or zero size, skip */ }
+    }
+    // 3. Volume profile overlay (right side, when SmartVPSG is on)
+    const vp = pane.el && pane.el.querySelector('.vp-canvas');
+    if (vp && vp.width > 0 && getComputedStyle(vp).display !== 'none') {
+        try {
+            const r = vp.getBoundingClientRect();
+            const pr = pane.el.querySelector('.chart-container').getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            ctx.drawImage(vp, (r.left - pr.left) * dpr, (r.top - pr.top) * dpr, r.width * dpr, r.height * dpr);
+        } catch (e) { /* skip */ }
+    }
+    // 4. Watermark (symbol + interval) baked in for context
+    try {
+        const dpr = window.devicePixelRatio || 1;
+        const fontPx = Math.round(28 * dpr);
+        ctx.font = `600 ${fontPx}px -apple-system, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(209, 212, 220, 0.18)';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`${pane.symbol}  ${pane.interval}`, 12 * dpr, 8 * dpr);
+    } catch (e) {}
+    return out;
+}
+
+// Trigger a download for a canvas. Falls back to opening in a new tab if the
+// download click is blocked (Safari is occasionally picky with blob URLs).
+function _saveCanvasAsPng(canvas, filename) {
+    canvas.toBlob((blob) => {
+        if (!blob) {
+            try { window.open(canvas.toDataURL('image/png'), '_blank'); } catch (e) {}
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            try { document.body.removeChild(a); } catch (e) {}
+            URL.revokeObjectURL(url);
+        }, 100);
+    }, 'image/png');
+}
+
+function setChartCount(count) {
+    chartCount = count;
+    localStorage.setItem('chartCount', count);
+    
+    // Update button label
+    const chartBtn = document.getElementById('chartMenuBtn');
+    if (chartBtn) chartBtn.textContent = String(count);
+    
+    // Rebuild grid
+    const grid = document.getElementById('chartGrid');
+    grid.setAttribute('data-count', count);
+    
+    // Cleanup existing panes
+    panes.forEach(p => {
+        if (p.pollTimer) clearInterval(p.pollTimer);
+        if (p.chart) p.chart.remove();
+    });
+    panes = [];
+    grid.innerHTML = '';
+    
+    // Load saved pane configs
+    const saved = JSON.parse(localStorage.getItem('paneConfigs') || '[]');
+    
+    for (let i = 0; i < count; i++) {
+        const config = saved[i] || { symbol: DEFAULT_SYMBOLS[i] || 'RELIANCE', interval: '1d' };
+        createPane(grid, i, config.symbol, config.interval || '1d', true /* skipInitialLoad */);
+    }
+
+    // Sequential hydration: paint pane 0 first so user sees a chart in ~300ms,
+    // then fan out the rest in parallel. This avoids 4-way thundering-herd on
+    // first paint and also gives the LRU cache a head-start for repeated
+    // symbols / benchmark across panes.
+    (async () => {
+        if (panes.length === 0) return;
+        try { await loadChartData(panes[0]); } catch(e) { console.error(e); }
+        for (let i = 1; i < panes.length; i++) {
+            loadChartData(panes[i]);  // intentionally not awaited
+        }
+    })();
+}
+
+function createPane(container, idx, symbol, interval, skipInitialLoad) {
+    const paneEl = document.createElement('div');
+    paneEl.className = 'chart-pane';
+    paneEl.id = `pane-${idx}`;
+    
+    paneEl.innerHTML = `
+        <div class="chart-container">
+            <div class="loading-overlay active"><div class="loading-spinner"></div></div>
+            <div class="chart-watermark">${symbol}</div>
+            <div class="q-tooltip"></div>
+            <div class="chart-overlay-top">
+                <div class="symbol-input-wrap">
+                    <input type="text" class="symbol-input" value="${symbol}" placeholder="Symbol..." autocomplete="off" spellcheck="false">
+                    <div class="symbol-dropdown"></div>
+                </div>
+                <div class="ohlc-legend"></div>
+                <div class="ticker-bar">
+                    <span class="ticker-ltp">--</span>
+                    <span class="ticker-change">--</span>
+                </div>
+            </div>
+            <div class="chart-overlay-right">
+                <select class="timeframe-select">
+                    <option value="30m">30min</option>
+                    <option value="1h">1H</option>
+                    <option value="1d" ${interval === '1d' ? 'selected' : ''}>1D</option>
+                    <option value="1w">1W</option>
+                    <option value="1mo">1M</option>
+                </select>
+                <button class="pane-btn btn-screenshot" title="Screenshot">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M5 7h.01M19 7h.01"/></svg>
+                </button>
+                <button class="pane-btn btn-fullscreen" title="Fullscreen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    container.appendChild(paneEl);
+    
+    const chartContainer = paneEl.querySelector('.chart-container');
+    const chart = LightweightCharts.createChart(chartContainer, {
+        layout: {
+            background: { type: 'solid', color: '#131722' },
+            textColor: '#d1d4dc',
+            fontSize: 11,
+        },
+        grid: {
+            vertLines: { color: '#1e222d' },
+            horzLines: { color: '#1e222d' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
+            horzLine: { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
+        },
+        rightPriceScale: {
+            borderColor: '#2a2e39',
+            scaleMargins: { top: 0.1, bottom: 0.2 },
+        },
+        timeScale: {
+            borderColor: '#2a2e39',
+            timeVisible: true,
+            secondsVisible: false,
+        },
+        handleScroll: { vertTouchDrag: true },
+        handleScale: {
+            axisPressedMouseMove: { time: true, price: true },
+            axisDoubleClickReset: { time: true, price: true },
+        },
+    });
+    
+    // Create series based on global chart type
+    let candleSeries;
+    if (globalChartType === 'bars') {
+        candleSeries = chart.addBarSeries({
+            upColor: '#089981',
+            downColor: '#f23645',
+            thinBars: false,
+        });
+    } else {
+        // 'candles' and 'heikinashi' both use candlestick series (HA just feeds different data)
+        candleSeries = chart.addCandlestickSeries({
+            upColor: '#089981',
+            downColor: '#f23645',
+            borderUpColor: '#089981',
+            borderDownColor: '#f23645',
+            wickUpColor: '#089981',
+            wickDownColor: '#f23645',
+        });
+    }
+    
+    const volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+    });
+    
+    const volMaSeries = chart.addLineSeries({
+        color: '#f5a623',
+        lineWidth: 1.5,
+        priceScaleId: '',
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+    });
+    
+    const pane = {
+        id: idx,
+        el: paneEl,
+        chart,
+        series: candleSeries,
+        volumeSeries,
+        volMaSeries,
+        symbol,
+        interval,
+        chartType: globalChartType,
+        pollTimer: null,
+        lastLtp: null,
+    };
+    panes.push(pane);
+    
+    // OHLCV legend - always visible, updates on crosshair move
+    const ohlcLegend = paneEl.querySelector('.ohlc-legend');
+    pane._updateOhlcLegend = function(candle, vol) {
+        if (!candle) return;
+        const chg = candle.close - candle.open;
+        const chgPct = candle.open !== 0 ? ((chg / candle.open) * 100) : 0;
+        const color = chg >= 0 ? '#089981' : '#f23645';
+        const sign = chg >= 0 ? '+' : '';
+        const volStr = vol && vol.value ? (vol.value >= 1e7 ? (vol.value/1e7).toFixed(2)+'Cr' : vol.value >= 1e5 ? (vol.value/1e5).toFixed(2)+'L' : vol.value.toLocaleString()) : '--';
+        ohlcLegend.innerHTML = `<span style="color:#787b86">O</span> <span style="color:${color}">${candle.open.toFixed(2)}</span> <span style="color:#787b86">H</span> <span style="color:${color}">${candle.high.toFixed(2)}</span> <span style="color:#787b86">L</span> <span style="color:${color}">${candle.low.toFixed(2)}</span> <span style="color:#787b86">C</span> <span style="color:${color}">${candle.close.toFixed(2)}</span> <span style="color:#787b86">V</span> <span style="color:${color}">${volStr}</span> <span style="color:${color}">${sign}${chg.toFixed(2)} (${sign}${chgPct.toFixed(2)}%)</span>`;
+    };
+    const qTooltip = paneEl.querySelector('.q-tooltip');
+    chart.subscribeCrosshairMove((param) => {
+        if (!param || !param.time || !param.seriesData) {
+            if (qTooltip) qTooltip.style.display = 'none';
+            return;
+        }
+        const candle = param.seriesData.get(pane.series);
+        const vol = param.seriesData.get(volumeSeries);
+        if (candle) pane._updateOhlcLegend(candle, vol);
+        // Q-marker tooltip
+        if (qTooltip) {
+            const qVol = pane._qVolumeMap && pane._qVolumeMap.get(param.time);
+            if (qVol && param.point) {
+                const v = qVol >= 1e7 ? (qVol/1e7).toFixed(2)+' Cr'
+                        : qVol >= 1e5 ? (qVol/1e5).toFixed(2)+' L'
+                        : qVol.toLocaleString();
+                qTooltip.innerHTML = `Highest Quarterly Volume<br><b>${v}</b>`;
+                const cw = chartContainer.clientWidth;
+                let left = param.point.x + 12;
+                if (left + 180 > cw) left = param.point.x - 180;
+                qTooltip.style.left = left + 'px';
+                qTooltip.style.top = Math.max(4, param.point.y - 36) + 'px';
+                qTooltip.style.display = 'block';
+            } else {
+                qTooltip.style.display = 'none';
+            }
+        }
+        // Crosshair sync across panes
+        if (chartSync.crosshair && candle) {
+            _broadcastSync(pane, (target) => {
+                let price = candle.close;
+                if (target._candles) {
+                    const tc = target._candles.find(c => c.time === param.time);
+                    if (tc) price = tc.close;
+                }
+                target.chart.setCrosshairPosition(price, param.time, target.series);
+            });
+        }
+    });
+    // Time range sync across panes
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (!range || !chartSync.timeRange) return;
+        _broadcastSync(pane, (target) => {
+            target.chart.timeScale().setVisibleLogicalRange(range);
+        });
+    });
+
+    // Wire up events
+    setupSymbolInput(pane);
+    setupTimeframeSelect(pane);
+    setupPaneActions(pane);
+    
+    // Load data (skipped during setChartCount() so caller can do sequential hydration)
+    if (!skipInitialLoad) loadChartData(pane);
+    startQuotePoll(pane);
+    
+    // Attach drawing canvas
+    if (window.attachDrawingCanvas) window.attachDrawingCanvas(pane);
+    
+    // Expose panes globally for drawing tools
+    window.panes = panes;
+    
+    // Apply current theme to the freshly-created chart
+    try {
+        const t = THEME_COLORS[chartTheme] || THEME_COLORS.dark;
+        chart.applyOptions({
+            layout: { background: { type: 'solid', color: t.bg }, textColor: t.text },
+            grid:   { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+            crosshair: {
+                vertLine: { color: t.crossLine, labelBackgroundColor: t.axisBg },
+                horzLine: { color: t.crossLine, labelBackgroundColor: t.axisBg },
+            },
+            rightPriceScale: { borderColor: t.borderCol },
+            timeScale: { borderColor: t.borderCol },
+        });
+    } catch(e) {}
+    
+    // Scroll on price axis to shrink/expand chart vertically (per-pane only)
+    let scaleTop = 0.1;
+    let scaleBottom = 0.2;
+    chartContainer.addEventListener('wheel', (e) => {
+        // Detect if scroll is on the right price scale area (last ~60px of width)
+        const rect = chartContainer.getBoundingClientRect();
+        const xInContainer = e.clientX - rect.left;
+        if (xInContainer > rect.width - 60) {
+            e.preventDefault();
+            const step = 0.03;
+            if (e.deltaY > 0) {
+                // scroll down = shrink (increase margins)
+                scaleTop = Math.min(0.45, scaleTop + step);
+                scaleBottom = Math.min(0.45, scaleBottom + step);
+            } else {
+                // scroll up = expand (decrease margins)
+                scaleTop = Math.max(0.0, scaleTop - step);
+                scaleBottom = Math.max(0.05, scaleBottom - step);
+            }
+            chart.applyOptions({
+                rightPriceScale: { scaleMargins: { top: scaleTop, bottom: scaleBottom } }
+            });
+        }
+    }, { passive: false });
+    
+    // Resize observer
+    const ro = new ResizeObserver(() => chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight }));
+    ro.observe(chartContainer);
+}
+
+// ─── Symbol Input ─────────────────────────────────────────────────────────────
+function setupSymbolInput(pane) {
+    const input = pane.el.querySelector('.symbol-input');
+    const dropdown = pane.el.querySelector('.symbol-dropdown');
+    let debounceTimer = null;
+    
+    input.addEventListener('focus', () => {
+        if (input.value.trim().length >= 4) showDropdown(dropdown, input.value);
+    });
+    
+    input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => showDropdown(dropdown, input.value), 150);
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            dropdown.classList.remove('visible');
+            changeSymbol(pane, input.value.trim().toUpperCase());
+        }
+        if (e.key === 'Escape') {
+            dropdown.classList.remove('visible');
+            input.blur();
+        }
+    });
+    
+    // Close dropdown on outside click
+    document.addEventListener('click', (e) => {
+        if (!pane.el.querySelector('.symbol-input-wrap').contains(e.target)) {
+            dropdown.classList.remove('visible');
+        }
+    });
+}
+
+let _searchDebounce = null;
+async function showDropdown(dropdown, query) {
+    const q = query.trim().toUpperCase();
+    if (q.length < 4) {
+        dropdown.classList.remove('visible');
+        return;
+    }
+    
+    // Search server for matches across all exchanges
+    try {
+        const resp = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        const filtered = (data.results || []).slice(0, 20);
+        if (filtered.length === 0) {
+            dropdown.classList.remove('visible');
+            return;
+        }
+        dropdown.innerHTML = filtered.map(s => `<div class="symbol-option" data-symbol="${s}">${s}</div>`).join('');
+        dropdown.classList.add('visible');
+    } catch(e) {
+        // Fallback to local cache
+        let filtered = symbolCache.filter(s => s.startsWith(q));
+        if (filtered.length === 0) filtered = symbolCache.filter(s => s.includes(q));
+        filtered = filtered.slice(0, 20);
+        if (filtered.length === 0) { dropdown.classList.remove('visible'); return; }
+        dropdown.innerHTML = filtered.map(s => `<div class="symbol-option" data-symbol="${s}">${s}</div>`).join('');
+        dropdown.classList.add('visible');
+    }
+    
+    dropdown.querySelectorAll('.symbol-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const sym = opt.dataset.symbol;
+            const paneEl = dropdown.closest('.chart-pane');
+            const pane = panes.find(p => p.el === paneEl);
+            paneEl.querySelector('.symbol-input').value = sym;
+            dropdown.classList.remove('visible');
+            changeSymbol(pane, sym);
+        });
+    });
+}
+
+function changeSymbol(pane, symbol) {
+    if (!symbol || symbol === pane.symbol) return;
+    pane.symbol = symbol;
+    pane.lastLtp = null;
+    pane._lastCandle = null;  // prevent stale-bar tick merge after symbol switch
+    pane.el.querySelector('.symbol-input').value = symbol;
+    pane.el.querySelector('.chart-watermark').textContent = symbol;
+    pane.el.querySelector('.ticker-ltp').textContent = '--';
+    pane.el.querySelector('.ticker-change').textContent = '--';
+    pane.el.querySelector('.ticker-bar').className = 'ticker-bar';
+    loadChartData(pane);
+    // Update server-side subscriptions and pull a fresh tick now
+    syncSubscriptions().then(() => scheduleTicks(0)).catch(() => {});
+    savePaneConfigs();
+    // Symbol sync across panes (re-entrancy-guarded)
+    if (chartSync.symbol) {
+        _broadcastSync(pane, (target) => changeSymbol(target, symbol));
+    }
+}
+
+// ─── Timeframe Select (per-pane) ──────────────────────────────────────────────
+function setupTimeframeSelect(pane) {
+    const select = pane.el.querySelector('.timeframe-select');
+    select.value = pane.interval;
+    select.addEventListener('change', () => {
+        pane.interval = select.value;
+        loadChartData(pane);
+        savePaneConfigs();
+    });
+}
+
+function switchChartType(pane, type) {
+    pane.chartType = type;
+    const chart = pane.chart;
+    
+    // Remove old series
+    chart.removeSeries(pane.series);
+    
+    // Create new series based on type
+    if (type === 'bars') {
+        pane.series = chart.addBarSeries({
+            upColor: '#089981',
+            downColor: '#f23645',
+            thinBars: false,
+        });
+    } else {
+        // 'candles' and 'heikinashi' both render as candlesticks
+        pane.series = chart.addCandlestickSeries({
+            upColor: '#089981',
+            downColor: '#f23645',
+            borderUpColor: '#089981',
+            borderDownColor: '#f23645',
+            wickUpColor: '#089981',
+            wickDownColor: '#f23645',
+        });
+    }
+    
+    // Reload data into new series
+    loadChartData(pane);
+}
+
+// ─── Fullscreen ───────────────────────────────────────────────────────────────
+function setupPaneActions(pane) {
+    const fsBtn = pane.el.querySelector('.btn-fullscreen');
+    const ssBtn = pane.el.querySelector('.btn-screenshot');
+    
+    fsBtn.addEventListener('click', () => toggleFullscreen(pane));
+    ssBtn.addEventListener('click', () => takeScreenshot(pane));
+}
+
+function toggleFullscreen(pane) {
+    const el = pane.el;
+    const isFs = el.classList.toggle('fullscreen');
+    const btn = el.querySelector('.btn-fullscreen');
+    
+    if (isFs) {
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    } else {
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    }
+    
+    // Trigger chart resize
+    setTimeout(() => {
+        const container = el.querySelector('.chart-container');
+        pane.chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    }, 50);
+}
+
+// ─── Screenshot ──────────────────────────────────────────────────────────────
+function takeScreenshot(pane) {
+    const out = _composePaneCanvas(pane);
+    if (!out) return;
+    _saveCanvasAsPng(out, `${pane.symbol}_${pane.interval}_${new Date().toISOString().slice(0,10)}.png`);
+}
+
+// ─── Data Loading ─────────────────────────────────────────────────────────────
+// Apply all currently-active indicators to a pane using its cached candles.
+// Called from loadChartData() after a fresh fetch, AND directly from the
+// indicator-toggle handler so toggling never refetches HTTP data.
+async function applyAllIndicators(pane) {
+    const candles = pane._candles;
+    const volumes = pane._volumes;
+    if (!candles || !volumes) {
+        // First load hasn't completed yet; full path will apply indicators after fetch.
+        return loadChartData(pane);
+    }
+
+    // Adjust scale margins based on active sub-pane indicators
+    const subPaneIndicators = ['rsi', 'macd', 'rs'].filter(i => activeIndicators.has(i));
+    const subCount = subPaneIndicators.length;
+    const subPaneHeight = 0.10;
+    const bottomReserve = 0.08 + subCount * subPaneHeight;
+    pane.series.priceScale().applyOptions({
+        scaleMargins: { top: 0.05, bottom: Math.min(bottomReserve, 0.62) },
+    });
+    pane.volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: Math.max(0.8 - subCount * subPaneHeight, 0.4), bottom: subCount > 0 ? subCount * subPaneHeight : 0 },
+    });
+
+    let allMarkers = [];
+    if (activeIndicators.has('smartvpsg')) {
+        const m = applySmartVPSG(pane, candles, volumes);
+        if (m) allMarkers = allMarkers.concat(m);
+    }
+    if (activeIndicators.has('supreseps')) {
+        const m = applySupResEPS(pane, candles, volumes);
+        if (m) allMarkers = allMarkers.concat(m);
+    }
+    if (activeIndicators.has('rsi'))  applyRSI(pane, candles);
+    if (activeIndicators.has('macd')) applyMACD(pane, candles);
+    if (activeIndicators.has('rs'))   await applyRelativeStrength(pane, candles);
+
+    if (subCount > 0) {
+        let slotIdx = 0;
+        subPaneIndicators.forEach(indi => {
+            const top = 1.0 - (subCount - slotIdx) * subPaneHeight;
+            const margins = { top: Math.max(top, 0.4), bottom: slotIdx > 0 ? (slotIdx * subPaneHeight) : 0.0 };
+            if (indi === 'rsi' && pane._rsiSeries) {
+                pane._rsiSeries.priceScale().applyOptions({ scaleMargins: margins });
+            } else if (indi === 'macd' && pane._macdSeries) {
+                pane._macdSeries.macd.priceScale().applyOptions({ scaleMargins: margins });
+            } else if (indi === 'rs' && pane._rsSeries) {
+                pane._rsSeries.line.priceScale().applyOptions({ scaleMargins: margins });
+            }
+            slotIdx++;
+        });
+    }
+    allMarkers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+    pane.series.setMarkers(allMarkers);
+}
+
+async function loadChartData(pane) {
+    const loading = pane.el.querySelector('.loading-overlay');
+    loading.classList.add('active');
+    const days = globalViewRange || 365;
+    const url = `${API_BASE}/api/historical?symbol=${encodeURIComponent(pane.symbol)}&interval=${pane.interval}&days=${days}`;
+    
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        
+        if (data.candles && data.candles.length > 0) {
+            const candles = data.candles.map(c => ({
+                time: c.time,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            }));
+            
+            const volumes = data.candles.map(c => ({
+                time: c.time,
+                value: c.volume,
+                color: c.close >= c.open ? 'rgba(8,153,129,0.3)' : 'rgba(242,54,69,0.3)',
+            }));
+            
+            // Heikin Ashi: transform candles for series display only.
+            // Indicators (SmartVPSG, MAs, RSI, etc.) continue to use real OHLC.
+            const seriesCandles = (globalChartType === 'heikinashi') ? toHeikinAshi(candles) : candles;
+            pane.series.setData(seriesCandles);
+            pane._lastCandle = candles.length ? candles[candles.length - 1] : null;
+            pane.volumeSeries.setData(volumes);
+            
+            // 10-day volume moving average
+            const volMaData = [];
+            for (let i = 0; i < volumes.length; i++) {
+                if (i < 9) continue;
+                let sum = 0;
+                for (let j = i - 9; j <= i; j++) sum += volumes[j].value;
+                volMaData.push({ time: volumes[i].time, value: sum / 10 });
+            }
+            pane.volMaSeries.setData(volMaData);
+            
+            // Mark green bars that set a new running quarterly high volume with "Q"
+            const qMarkers = [];
+            const qVolumeMap = new Map(); // time -> volume (for hover tooltip)
+            const quarterMaxSoFar = {}; // tracks running max per quarter
+            data.candles.forEach((c, i) => {
+                if (c.close < c.open) return; // only green bars
+                const d = typeof c.time === 'string' ? new Date(c.time + 'T00:00:00') : new Date(c.time * 1000);
+                const q = `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`;
+                const prevMax = quarterMaxSoFar[q] || 0;
+                if (c.volume > prevMax) {
+                    quarterMaxSoFar[q] = c.volume;
+                    qMarkers.push({
+                        time: c.time,
+                        position: 'aboveBar',
+                        color: '#089981',
+                        shape: 'text',
+                        text: 'Q',
+                        size: 0,
+                    });
+                    qVolumeMap.set(c.time, c.volume);
+                }
+            });
+            qMarkers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+            pane.volumeSeries.setMarkers(qMarkers);
+            pane._qVolumeMap = qVolumeMap;
+            
+            // Cache for indicator-only re-applies (avoids refetch on toggle)
+            pane._candles = candles;
+            pane._volumes = volumes;
+            
+            await applyAllIndicators(pane);
+            
+            pane.chart.timeScale().fitContent();
+            
+            // Update ticker from last candle
+            const last = candles[candles.length - 1];
+            const prev = candles.length > 1 ? candles[candles.length - 2] : last;
+            updateTicker(pane, last.close, last.close - prev.close);
+            
+            // Show last candle OHLCV in legend always
+            if (pane._updateOhlcLegend) {
+                const lastVol = volumes[volumes.length - 1];
+                pane._updateOhlcLegend(last, lastVol);
+            }
+        } else {
+            pane.series.setData([]);
+            pane.volumeSeries.setData([]);
+        }
+    } catch (err) {
+        console.error(`Failed to load data for ${pane.symbol}:`, err);
+    }
+    
+    loading.classList.remove('active');
+}
+
+// ─── Per-pane subscription kick (sync subs + immediate tick poll) ───────────
+// With batched polling, all panes share one /api/ticks call every second.
+// This function only ensures the server has subscribed to this pane's symbol
+// on Angel WS and triggers an early poll so the user sees a price quickly.
+function startQuotePoll(pane) {
+    syncSubscriptions().then(() => scheduleTicks(0)).catch(() => {});
+}
+
+// ─── Ticker Bar Updates ───────────────────────────────────────────────────────
+function updateTicker(pane, ltp, change) {
+    const tickerBar = pane.el.querySelector('.ticker-bar');
+    const ltpEl = pane.el.querySelector('.ticker-ltp');
+    const changeEl = pane.el.querySelector('.ticker-change');
+    
+    const prevLtp = pane.lastLtp;
+    const isUp = change >= 0;
+    const pctChange = ltp > 0 ? ((change / (ltp - change)) * 100) : 0;
+    
+    ltpEl.textContent = ltp.toFixed(2);
+    ltpEl.style.color = isUp ? 'var(--ticker-green)' : 'var(--ticker-red)';
+    
+    changeEl.textContent = `${isUp ? '+' : ''}${change.toFixed(2)} (${isUp ? '+' : ''}${pctChange.toFixed(2)}%)`;
+    changeEl.style.color = isUp ? 'var(--ticker-green)' : 'var(--ticker-red)';
+    
+    // Flash effect on price change
+    if (prevLtp !== null && ltp !== prevLtp) {
+        tickerBar.classList.remove('flash-green', 'flash-red');
+        void tickerBar.offsetWidth; // force reflow
+        tickerBar.classList.add(ltp > prevLtp ? 'flash-green' : 'flash-red');
+    }
+}
+
+// ─── Symbol Cache ─────────────────────────────────────────────────────────────
+async function loadSymbols() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/symbols`);
+        const data = await resp.json();
+        if (data.symbols) {
+            symbolCache = data.symbols;
+        }
+    } catch (err) {
+        symbolCache = DEFAULT_SYMBOLS;
+    }
+}
+
+// ─── Persistence ──────────────────────────────────────────────────────────────
+function savePaneConfigs() {
+    const configs = panes.map(p => ({ symbol: p.symbol, interval: p.interval }));
+    localStorage.setItem('paneConfigs', JSON.stringify(configs));
+}
+
+// ─── SmartVPSG Indicator ──────────────────────────────────────────────────────
+const smartVPSGSettings = (() => {
+    const def = {
+        minVolume: 1000000,
+        priceMoveThresh: 3,
+        volLookback: 9,
+        avgLookback: 21,
+        showVolProfile: false,
+        vpBuckets: 30,
+    };
+    try {
+        const saved = JSON.parse(localStorage.getItem('smartVPSGOpts') || '{}');
+        // Only carry forward keys that still exist in def; drops stale
+        // entries (e.g. legacy showVwap / showAnchoredVwap / anchorDate).
+        const out = { ...def };
+        for (const k of Object.keys(def)) if (k in saved) out[k] = saved[k];
+        return out;
+    } catch(e) { return def; }
+})();
+function saveSmartVPSGSettings() {
+    try { localStorage.setItem('smartVPSGOpts', JSON.stringify(smartVPSGSettings)); } catch(e) {}
+}
+
+function applySmartVPSG(pane, candles, volumes) {
+    if (!candles || candles.length < 2) return;
+    const markers = [];
+    const { minVolume, priceMoveThresh, volLookback, avgLookback } = smartVPSGSettings;
+
+    // Compute 52-week high/low, avg volume, relative volume
+    const closes = candles.map(c => c.close);
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const vols = volumes.map(v => v.value);
+
+    const last = candles.length - 1;
+    const _52wBars = Math.min(252, candles.length);
+    let _52wHigh = -Infinity, _52wLow = Infinity;
+    for (let i = last; i > last - _52wBars; i--) {
+        if (highs[i] > _52wHigh) _52wHigh = highs[i];
+        if (lows[i] < _52wLow) _52wLow = lows[i];
+    }
+
+    const avgVolSlice = vols.slice(Math.max(0, vols.length - avgLookback));
+    const avgVol = avgVolSlice.reduce((a, b) => a + b, 0) / avgVolSlice.length;
+    const currentVol = vols[last];
+    const rVol = avgVol > 0 ? (currentVol / avgVol) : 0;
+    const percOff52wH = (closes[last] / _52wHigh - 1) * 100;
+    const percOff52wL = (closes[last] / _52wLow - 1) * 100;
+
+    // Format volume in Lakhs/Crores
+    const fmtVol = (v) => v >= 1e7 ? (v / 1e7).toFixed(2) + 'Cr' : v >= 1e5 ? (v / 1e5).toFixed(2) + 'L' : v.toLocaleString();
+
+    for (let i = 1; i < candles.length; i++) {
+        const c = candles[i];
+        const prev = candles[i - 1];
+        const vol = vols[i];
+
+        // Gap-up: low > prev high
+        const isGapUp = c.low > prev.high;
+
+        // Volume spike: vol > highest of last 9 bars AND >= minVolume
+        let highestVol9 = 0;
+        for (let j = Math.max(0, i - volLookback); j < i; j++) {
+            if (vols[j] > highestVol9) highestVol9 = vols[j];
+        }
+        const isVolSpike = vol > highestVol9 && vol >= minVolume;
+
+        // Price move > 3% up with volume spike
+        const priceMoveUp = c.close >= prev.close * (1 + priceMoveThresh / 100);
+
+        if (isGapUp) {
+            markers.push({
+                time: c.time,
+                position: 'aboveBar',
+                color: '#f1f0f5',
+                shape: 'text',
+                text: 'G',
+                size: 0,
+            });
+        }
+        if (priceMoveUp && isVolSpike) {
+            markers.push({
+                time: c.time,
+                position: 'belowBar',
+                color: '#00ffff',
+                shape: 'arrowUp',
+                size: 1,
+            });
+        }
+    }
+
+    // Return markers (caller will merge and set)
+    markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+
+    // ─── Volume Profile (canvas overlay on right side) ────────────────────
+    renderVolumeProfile(pane, candles, vols);
+
+    // Show data panel
+    let panel = pane.el.querySelector('.smartvpsg-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'smartvpsg-panel';
+        pane.el.querySelector('.chart-container').appendChild(panel);
+    }
+    panel.style.display = 'block';
+    panel.innerHTML = `
+        <div><span>Avg Vol 21D</span><span class="${avgVol >= 1000000 ? 'pos' : 'neg'}">${fmtVol(avgVol)}</span></div>
+        <div><span>Avg ₹ Vol</span><span>${fmtVol(avgVol * closes[last])}</span></div>
+        <div><span>R.Vol (x)</span><span class="${rVol >= 1 ? 'pos' : 'neg'}">${rVol.toFixed(2)}x</span></div>
+        <div><span>52wH</span><span>${_52wHigh.toFixed(2)}</span></div>
+        <div><span>% off 52wH</span><span class="${percOff52wH >= -15 ? 'pos' : 'neg'}">${percOff52wH.toFixed(2)}%</span></div>
+        <div><span>% off 52wL</span><span class="${percOff52wL >= 50 ? 'pos' : 'neg'}">${percOff52wL.toFixed(2)}%</span></div>
+    `;
+    return markers;
+}
+
+// ─── Volume Profile canvas overlay ───────────────────────────────────────────
+function renderVolumeProfile(pane, candles, vols) {
+    const container = pane.el.querySelector('.chart-container');
+    if (!container) return;
+    let canvas = container.querySelector('.vp-canvas');
+    if (!smartVPSGSettings.showVolProfile) {
+        if (canvas) canvas.style.display = 'none';
+        if (pane._vpUnsubscribe) { pane._vpUnsubscribe(); pane._vpUnsubscribe = null; }
+        return;
+    }
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.className = 'vp-canvas';
+        canvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:2';
+        container.appendChild(canvas);
+    }
+    canvas.style.display = 'block';
+    pane._vpCandles = candles;
+    pane._vpVols = vols;
+    function draw() {
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        // Determine visible time range
+        const range = pane.chart.timeScale().getVisibleRange();
+        const fromT = range ? range.from : null;
+        const toT   = range ? range.to   : null;
+        const cs = pane._vpCandles || [];
+        const vs = pane._vpVols || [];
+        if (!cs.length) return;
+        // Filter visible candles
+        const norm = (t) => (typeof t === 'number') ? t : Math.floor(new Date(t + 'T00:00:00Z').getTime() / 1000);
+        let lo = Infinity, hi = -Infinity;
+        const filtered = [];
+        for (let i = 0; i < cs.length; i++) {
+            const ts = norm(cs[i].time);
+            if (fromT != null && ts < fromT) continue;
+            if (toT   != null && ts > toT)   continue;
+            filtered.push({ c: cs[i], v: vs[i] });
+            if (cs[i].low  < lo) lo = cs[i].low;
+            if (cs[i].high > hi) hi = cs[i].high;
+        }
+        if (!filtered.length || lo === Infinity) return;
+        const buckets = Math.max(10, Math.min(100, smartVPSGSettings.vpBuckets | 0 || 30));
+        const bucketVol = new Array(buckets).fill(0);
+        const span = hi - lo || 1;
+        const bucketSize = span / buckets;
+        for (const f of filtered) {
+            const mid = (f.c.high + f.c.low + f.c.close) / 3;
+            let bi = Math.floor((mid - lo) / bucketSize);
+            if (bi >= buckets) bi = buckets - 1;
+            if (bi < 0) bi = 0;
+            bucketVol[bi] += f.v;
+        }
+        const maxVol = Math.max(...bucketVol) || 1;
+        // Render: bars extend leftward from right edge, covering ~30% of width
+        const maxBarW = rect.width * 0.30;
+        const isLight = chartTheme === 'light';
+        const fillCol = isLight ? 'rgba(33,150,243,0.35)' : 'rgba(0,188,212,0.35)';
+        const pocCol  = isLight ? 'rgba(211,47,47,0.55)' : 'rgba(255,193,7,0.65)';
+        const pocIdx = bucketVol.indexOf(maxVol);
+        for (let b = 0; b < buckets; b++) {
+            const priceLo = lo + b * bucketSize;
+            const priceHi = priceLo + bucketSize;
+            const yTop = pane.series.priceToCoordinate(priceHi);
+            const yBot = pane.series.priceToCoordinate(priceLo);
+            if (yTop == null || yBot == null) continue;
+            const h = Math.max(1, yBot - yTop);
+            const w = (bucketVol[b] / maxVol) * maxBarW;
+            ctx.fillStyle = (b === pocIdx) ? pocCol : fillCol;
+            ctx.fillRect(rect.width - w, yTop, w, h);
+        }
+    }
+    if (pane._vpUnsubscribe) { pane._vpUnsubscribe(); }
+    const ts = pane.chart.timeScale();
+    const handler = () => draw();
+    ts.subscribeVisibleTimeRangeChange(handler);
+    pane._vpUnsubscribe = () => { try { ts.unsubscribeVisibleTimeRangeChange(handler); } catch(e) {} };
+    draw();
+}
+
+function removeSmartVPSG(pane) {
+    const panel = pane.el.querySelector('.smartvpsg-panel');
+    if (panel) panel.style.display = 'none';
+    if (pane._vpUnsubscribe) { pane._vpUnsubscribe(); pane._vpUnsubscribe = null; }
+    const vp = pane.el.querySelector('.vp-canvas');
+    if (vp) vp.style.display = 'none';
+}
+
+// ─── SupResEPS Indicator ──────────────────────────────────────────────────────
+const supResEPSSettings = {
+    ma10: 10,
+    ma20: 20,
+    ma50: 50,
+    ma200: 200,
+    pivotLen: 15,
+};
+
+function computeSMA(closes, period) {
+    const result = [];
+    for (let i = 0; i < closes.length; i++) {
+        if (i < period - 1) { result.push(null); continue; }
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+        result.push(sum / period);
+    }
+    return result;
+}
+
+function applySupResEPS(pane, candles, volumes) {
+    if (!candles || candles.length < 10) return;
+    const { ma10, ma20, ma50, ma200, pivotLen } = supResEPSSettings;
+    const closes = candles.map(c => c.close);
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+
+    // Compute MAs
+    const sma10 = computeSMA(closes, ma10);
+    const sma20 = computeSMA(closes, ma20);
+    const sma50 = computeSMA(closes, ma50);
+    const sma200 = computeSMA(closes, ma200);
+
+    // Create/update MA line series
+    if (!pane._maSeries) {
+        pane._maSeries = {
+            ma10: pane.chart.addLineSeries({ color: '#ef5350', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+            ma20: pane.chart.addLineSeries({ color: '#2196f3', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+            ma50: pane.chart.addLineSeries({ color: '#9c27b0', lineWidth: 1.5, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+            ma200: pane.chart.addLineSeries({ color: '#ff9800', lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+        };
+    }
+
+    const toData = (arr) => arr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean);
+    pane._maSeries.ma10.setData(toData(sma10));
+    pane._maSeries.ma20.setData(toData(sma20));
+    pane._maSeries.ma50.setData(toData(sma50));
+    pane._maSeries.ma200.setData(toData(sma200));
+
+    // Pivot-based Support & Resistance detection
+    const markers = [];
+    const srLevels = []; // { type: 'S'|'R', price, startIdx }
+
+    for (let i = pivotLen; i < candles.length - pivotLen; i++) {
+        // Pivot High
+        let isPH = true;
+        for (let j = 1; j <= pivotLen; j++) {
+            if (highs[i] <= highs[i - j] || highs[i] <= highs[i + j]) { isPH = false; break; }
+        }
+        if (isPH) {
+            markers.push({
+                time: candles[i].time,
+                position: 'aboveBar',
+                color: '#f23645',
+                shape: 'text',
+                text: '▼',
+                size: 0,
+            });
+            srLevels.push({ type: 'R', price: highs[i], idx: i });
+        }
+
+        // Pivot Low
+        let isPL = true;
+        for (let j = 1; j <= pivotLen; j++) {
+            if (lows[i] >= lows[i - j] || lows[i] >= lows[i + j]) { isPL = false; break; }
+        }
+        if (isPL) {
+            markers.push({
+                time: candles[i].time,
+                position: 'belowBar',
+                color: '#089981',
+                shape: 'text',
+                text: '▲',
+                size: 0,
+            });
+            srLevels.push({ type: 'S', price: lows[i], idx: i });
+        }
+    }
+
+    // Draw S/R price lines (last 4 of each)
+    if (!pane._srLines) pane._srLines = [];
+    pane._srLines.forEach(l => pane.series.removePriceLine(l));
+    pane._srLines = [];
+
+    const recentR = srLevels.filter(s => s.type === 'R').slice(-4);
+    const recentS = srLevels.filter(s => s.type === 'S').slice(-4);
+    recentR.forEach(r => {
+        const pl = pane.series.createPriceLine({
+            price: r.price,
+            color: 'rgba(242,54,69,0.5)',
+            lineWidth: 1,
+            lineStyle: 2, // dashed
+            axisLabelVisible: false,
+        });
+        pane._srLines.push(pl);
+    });
+    recentS.forEach(s => {
+        const pl = pane.series.createPriceLine({
+            price: s.price,
+            color: 'rgba(8,153,129,0.5)',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: false,
+        });
+        pane._srLines.push(pl);
+    });
+
+    // Return markers (caller merges and sets)
+    markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+    return markers;
+}
+
+function removeSupResEPS(pane) {
+    if (pane._maSeries) {
+        Object.values(pane._maSeries).forEach(s => { try { pane.chart.removeSeries(s); } catch(e) {} });
+        pane._maSeries = null;
+    }
+    if (pane._srLines) {
+        pane._srLines.forEach(l => { try { pane.series.removePriceLine(l); } catch(e) {} });
+        pane._srLines = [];
+    }
+}
+
+// ─── RSI Indicator ────────────────────────────────────────────────────────────
+const rsiSettings = { period: 14, overbought: 70, oversold: 30 };
+
+function computeRSI(closes, period) {
+    const rsi = [];
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 0; i < closes.length; i++) {
+        if (i === 0) { rsi.push(null); continue; }
+        const change = closes[i] - closes[i - 1];
+        const gain = change > 0 ? change : 0;
+        const loss = change < 0 ? -change : 0;
+        if (i <= period) {
+            avgGain += gain;
+            avgLoss += loss;
+            if (i === period) {
+                avgGain /= period;
+                avgLoss /= period;
+                const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+                rsi.push(100 - (100 / (1 + rs)));
+            } else {
+                rsi.push(null);
+            }
+        } else {
+            avgGain = (avgGain * (period - 1) + gain) / period;
+            avgLoss = (avgLoss * (period - 1) + loss) / period;
+            const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+            rsi.push(100 - (100 / (1 + rs)));
+        }
+    }
+    return rsi;
+}
+
+function applyRSI(pane, candles) {
+    const { period, overbought, oversold } = rsiSettings;
+    const closes = candles.map(c => c.close);
+    const rsiData = computeRSI(closes, period);
+
+    if (!pane._rsiSeries) {
+        pane._rsiSeries = pane.chart.addLineSeries({
+            color: '#ab47bc',
+            lineWidth: 1.5,
+            priceScaleId: 'rsi',
+            lastValueVisible: true,
+            priceLineVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        pane._rsiSeries.priceScale().applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0.0 },
+            autoScale: true,
+        });
+        // OB/OS reference lines
+        pane._rsiOB = pane._rsiSeries.createPriceLine({ price: overbought, color: 'rgba(242,54,69,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+        pane._rsiOS = pane._rsiSeries.createPriceLine({ price: oversold, color: 'rgba(8,153,129,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+        pane._rsiMid = pane._rsiSeries.createPriceLine({ price: 50, color: 'rgba(120,123,134,0.3)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    }
+
+    // Update OB/OS lines if settings changed
+    if (pane._rsiOB) { pane._rsiSeries.removePriceLine(pane._rsiOB); pane._rsiOB = pane._rsiSeries.createPriceLine({ price: overbought, color: 'rgba(242,54,69,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); }
+    if (pane._rsiOS) { pane._rsiSeries.removePriceLine(pane._rsiOS); pane._rsiOS = pane._rsiSeries.createPriceLine({ price: oversold, color: 'rgba(8,153,129,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); }
+
+    const data = rsiData.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean);
+    pane._rsiSeries.setData(data);
+}
+
+function removeRSI(pane) {
+    if (pane._rsiSeries) {
+        try { pane.chart.removeSeries(pane._rsiSeries); } catch(e) {}
+        pane._rsiSeries = null;
+        pane._rsiOB = null;
+        pane._rsiOS = null;
+        pane._rsiMid = null;
+    }
+}
+
+// ─── MACD Indicator ───────────────────────────────────────────────────────────
+const macdSettings = { fast: 12, slow: 26, signal: 9 };
+
+function computeEMA(data, period) {
+    const ema = [];
+    const k = 2 / (period + 1);
+    for (let i = 0; i < data.length; i++) {
+        if (data[i] === null) { ema.push(null); continue; }
+        if (i === 0 || ema[i - 1] === null) {
+            ema.push(data[i]);
+        } else {
+            ema.push(data[i] * k + ema[i - 1] * (1 - k));
+        }
+    }
+    return ema;
+}
+
+function applyMACD(pane, candles) {
+    const { fast, slow, signal } = macdSettings;
+    const closes = candles.map(c => c.close);
+    const emaFast = computeEMA(closes, fast);
+    const emaSlow = computeEMA(closes, slow);
+
+    // MACD line = fast EMA - slow EMA
+    const macdLine = emaFast.map((v, i) => (v !== null && emaSlow[i] !== null) ? v - emaSlow[i] : null);
+    // Signal = EMA of MACD line
+    const signalLine = computeEMA(macdLine, signal);
+    // Histogram = MACD - Signal
+    const histogram = macdLine.map((v, i) => (v !== null && signalLine[i] !== null) ? v - signalLine[i] : null);
+
+    if (!pane._macdSeries) {
+        pane._macdSeries = {
+            macd: pane.chart.addLineSeries({
+                color: '#2196f3',
+                lineWidth: 1.5,
+                priceScaleId: 'macd',
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            }),
+            signal: pane.chart.addLineSeries({
+                color: '#ff9800',
+                lineWidth: 1,
+                priceScaleId: 'macd',
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            }),
+            hist: pane.chart.addHistogramSeries({
+                priceScaleId: 'macd',
+                priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+                lastValueVisible: false,
+                priceLineVisible: false,
+            }),
+        };
+        pane._macdSeries.macd.priceScale().applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0.0 },
+        });
+        // Zero line
+        pane._macdZero = pane._macdSeries.macd.createPriceLine({ price: 0, color: 'rgba(120,123,134,0.3)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    }
+
+    const toData = (arr) => arr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean);
+    pane._macdSeries.macd.setData(toData(macdLine));
+    pane._macdSeries.signal.setData(toData(signalLine));
+
+    // Histogram with color based on value and trend
+    const histData = histogram.map((v, i) => {
+        if (v === null) return null;
+        const color = v >= 0
+            ? (i > 0 && histogram[i-1] !== null && v >= histogram[i-1] ? '#26a69a' : '#b2dfdb')
+            : (i > 0 && histogram[i-1] !== null && v <= histogram[i-1] ? '#ef5350' : '#ffcdd2');
+        return { time: candles[i].time, value: v, color };
+    }).filter(Boolean);
+    pane._macdSeries.hist.setData(histData);
+}
+
+function removeMACD(pane) {
+    if (pane._macdSeries) {
+        try { pane.chart.removeSeries(pane._macdSeries.macd); } catch(e) {}
+        try { pane.chart.removeSeries(pane._macdSeries.signal); } catch(e) {}
+        try { pane.chart.removeSeries(pane._macdSeries.hist); } catch(e) {}
+        pane._macdSeries = null;
+        pane._macdZero = null;
+    }
+}
+
+// ─── Relative Strength Indicator ──────────────────────────────────────────────
+const rsSettings = { benchmark: 'NIFTY 500', maPeriod: 50 };
+let _rsBenchmarkCache = {};        // resolved candles { 'NIFTY 500_365': [...] }
+let _rsBenchmarkInFlight = {};     // in-flight Promise dedup so 4 panes hit /api once
+
+async function fetchBenchmarkData(benchmark, days) {
+    const cacheKey = `${benchmark}_${days}`;
+    if (_rsBenchmarkCache[cacheKey]) return _rsBenchmarkCache[cacheKey];
+    if (_rsBenchmarkInFlight[cacheKey]) return _rsBenchmarkInFlight[cacheKey];
+    const p = (async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/api/historical?symbol=${encodeURIComponent(benchmark)}&interval=1d&days=${days}`);
+            const data = await resp.json();
+            if (data.candles && data.candles.length > 0) {
+                _rsBenchmarkCache[cacheKey] = data.candles;
+                return data.candles;
+            }
+        } catch(e) { console.error('RS benchmark fetch failed:', e); }
+        return null;
+    })();
+    _rsBenchmarkInFlight[cacheKey] = p;
+    try { return await p; } finally { delete _rsBenchmarkInFlight[cacheKey]; }
+}
+
+async function applyRelativeStrength(pane, candles) {
+    const { benchmark, maPeriod } = rsSettings;
+    const days = globalViewRange || 365;
+    const benchCandles = await fetchBenchmarkData(benchmark, days);
+    if (!benchCandles || benchCandles.length === 0) return;
+
+    // Build lookup: time -> close for benchmark
+    const benchMap = {};
+    benchCandles.forEach(c => { benchMap[c.time] = c.close; });
+
+    // Compute RS ratio = stock close / benchmark close (normalized)
+    const rsData = [];
+    let firstRatio = null;
+    for (let i = 0; i < candles.length; i++) {
+        const benchClose = benchMap[candles[i].time];
+        if (benchClose && benchClose > 0) {
+            const ratio = candles[i].close / benchClose;
+            if (firstRatio === null) firstRatio = ratio;
+            rsData.push({ time: candles[i].time, value: (ratio / firstRatio) * 100 });
+        }
+    }
+
+    // RS moving average
+    const rsValues = rsData.map(d => d.value);
+    const rsMa = computeSMA(rsValues, maPeriod);
+    const rsMaData = rsMa.map((v, i) => v !== null ? { time: rsData[i].time, value: v } : null).filter(Boolean);
+
+    if (!pane._rsSeries) {
+        pane._rsSeries = {
+            line: pane.chart.addLineSeries({
+                color: '#00bcd4',
+                lineWidth: 1.5,
+                priceScaleId: 'rs',
+                lastValueVisible: true,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            }),
+            ma: pane.chart.addLineSeries({
+                color: '#ff5722',
+                lineWidth: 1,
+                lineStyle: 2,
+                priceScaleId: 'rs',
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+            }),
+        };
+        pane._rsSeries.line.priceScale().applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0.0 },
+        });
+        // 100 reference line (equal performance)
+        pane._rsRef = pane._rsSeries.line.createPriceLine({ price: 100, color: 'rgba(120,123,134,0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+    }
+
+    pane._rsSeries.line.setData(rsData);
+    pane._rsSeries.ma.setData(rsMaData);
+
+    // Show RS label panel
+    let panel = pane.el.querySelector('.rs-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'rs-panel';
+        panel.style.cssText = 'position:absolute;bottom:4px;left:8px;font-size:10px;color:#787b86;z-index:5;pointer-events:none';
+        pane.el.querySelector('.chart-container').appendChild(panel);
+    }
+    panel.style.display = 'block';
+    const lastRS = rsData.length > 0 ? rsData[rsData.length - 1].value : 0;
+    const rsColor = lastRS >= 100 ? '#089981' : '#f23645';
+    panel.innerHTML = `<span style="color:${rsColor}">RS vs ${benchmark}: ${lastRS.toFixed(2)}</span>`;
+}
+
+function removeRelativeStrength(pane) {
+    if (pane._rsSeries) {
+        try { pane.chart.removeSeries(pane._rsSeries.line); } catch(e) {}
+        try { pane.chart.removeSeries(pane._rsSeries.ma); } catch(e) {}
+        pane._rsSeries = null;
+        pane._rsRef = null;
+    }
+    const panel = pane.el.querySelector('.rs-panel');
+    if (panel) panel.style.display = 'none';
+}
+
+// ─── Indicator Flyout Menu ────────────────────────────────────────────────────
+const activeIndicators = new Set();
+const indiFlyout = document.getElementById('indiFlyout');
+const indiMenuBtn = document.getElementById('indiMenuBtn');
+
+// Open/close flyout on INDI button click
+indiMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.sidebar-flyout').forEach(f => f.classList.remove('open'));
+    const rect = indiMenuBtn.getBoundingClientRect();
+    indiFlyout.style.left = (rect.right + 6) + 'px';
+    indiFlyout.style.top = rect.top + 'px';
+    indiFlyout.classList.toggle('open');
+});
+// Close all flyouts when clicking outside
+document.addEventListener('click', (e) => {
+    const allFlyouts = document.querySelectorAll('.sidebar-flyout, .indi-flyout');
+    const allBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn'), document.getElementById('alertMenuBtn'), document.getElementById('watchlistMenuBtn')];
+    const clickedInsideFlyout = [...allFlyouts].some(f => f.contains(e.target));
+    const clickedBtn = allBtns.some(b => b === e.target || b?.contains(e.target));
+    if (!clickedInsideFlyout && !clickedBtn) {
+        allFlyouts.forEach(f => f.classList.remove('open'));
+    }
+});
+
+// Toggle indicators on left-click
+document.querySelectorAll('.indi-flyout-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const indi = row.dataset.indi;
+        if (activeIndicators.has(indi)) {
+            activeIndicators.delete(indi);
+            row.classList.remove('active');
+            panes.forEach(pane => {
+                if (indi === 'smartvpsg') removeSmartVPSG(pane);
+                if (indi === 'supreseps') removeSupResEPS(pane);
+                if (indi === 'rsi') removeRSI(pane);
+                if (indi === 'macd') removeMACD(pane);
+                if (indi === 'rs') removeRelativeStrength(pane);
+            });
+        } else {
+            activeIndicators.add(indi);
+            row.classList.add('active');
+        }
+        // Update button highlight
+        indiMenuBtn.classList.toggle('has-active', activeIndicators.size > 0);
+        // Re-apply indicators using cached candles — no /api/historical refetch.
+        panes.forEach(pane => applyAllIndicators(pane));
+    });
+
+    // Right-click opens settings for that specific indicator
+    row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openIndiSettings(row.dataset.indi);
+    });
+});
+
+// ─── Indicator Settings Modal ─────────────────────────────────────────────────
+const indiModal = document.getElementById('indiModalOverlay');
+
+function openIndiSettings(indi) {
+    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalRSI', 'indiModalMACD', 'indiModalRS'];
+    allPanels.forEach(id => document.getElementById(id).style.display = 'none');
+    const title = document.getElementById('indiModalTitle');
+    if (indi === 'supreseps') {
+        document.getElementById('indiModalSupResEPS').style.display = '';
+        title.textContent = 'SupResEPS Settings';
+        document.getElementById('indi_ma10').value = supResEPSSettings.ma10;
+        document.getElementById('indi_ma20').value = supResEPSSettings.ma20;
+        document.getElementById('indi_ma50').value = supResEPSSettings.ma50;
+        document.getElementById('indi_ma200').value = supResEPSSettings.ma200;
+        document.getElementById('indi_pivotLen').value = supResEPSSettings.pivotLen;
+    } else if (indi === 'rsi') {
+        document.getElementById('indiModalRSI').style.display = '';
+        title.textContent = 'RSI Settings';
+        document.getElementById('indi_rsiPeriod').value = rsiSettings.period;
+        document.getElementById('indi_rsiOB').value = rsiSettings.overbought;
+        document.getElementById('indi_rsiOS').value = rsiSettings.oversold;
+    } else if (indi === 'macd') {
+        document.getElementById('indiModalMACD').style.display = '';
+        title.textContent = 'MACD Settings';
+        document.getElementById('indi_macdFast').value = macdSettings.fast;
+        document.getElementById('indi_macdSlow').value = macdSettings.slow;
+        document.getElementById('indi_macdSignal').value = macdSettings.signal;
+    } else if (indi === 'rs') {
+        document.getElementById('indiModalRS').style.display = '';
+        title.textContent = 'Relative Strength Settings';
+        document.getElementById('indi_rsBenchmark').value = rsSettings.benchmark;
+        document.getElementById('indi_rsMaPeriod').value = rsSettings.maPeriod;
+    } else {
+        document.getElementById('indiModalSmartVPSG').style.display = '';
+        title.textContent = 'SmartVPSG Settings';
+        document.getElementById('indi_minVolume').value = smartVPSGSettings.minVolume;
+        document.getElementById('indi_priceMove').value = smartVPSGSettings.priceMoveThresh;
+        document.getElementById('indi_volLookback').value = smartVPSGSettings.volLookback;
+        document.getElementById('indi_avgLookback').value = smartVPSGSettings.avgLookback;
+        document.getElementById('indi_showVolProfile').checked = !!smartVPSGSettings.showVolProfile;
+        document.getElementById('indi_vpBuckets').value = smartVPSGSettings.vpBuckets || 30;
+    }
+    indiModal.dataset.indi = indi;
+    indiFlyout.classList.remove('open');
+    indiModal.classList.add('active');
+}
+
+document.getElementById('indiModalClose').addEventListener('click', () => {
+    indiModal.classList.remove('active');
+});
+indiModal.addEventListener('click', (e) => {
+    if (e.target === indiModal) indiModal.classList.remove('active');
+});
+document.getElementById('indiModalApply').addEventListener('click', () => {
+    const indi = indiModal.dataset.indi;
+    if (indi === 'supreseps') {
+        supResEPSSettings.ma10 = parseInt(document.getElementById('indi_ma10').value) || 10;
+        supResEPSSettings.ma20 = parseInt(document.getElementById('indi_ma20').value) || 20;
+        supResEPSSettings.ma50 = parseInt(document.getElementById('indi_ma50').value) || 50;
+        supResEPSSettings.ma200 = parseInt(document.getElementById('indi_ma200').value) || 200;
+        supResEPSSettings.pivotLen = parseInt(document.getElementById('indi_pivotLen').value) || 15;
+    } else if (indi === 'rsi') {
+        rsiSettings.period = parseInt(document.getElementById('indi_rsiPeriod').value) || 14;
+        rsiSettings.overbought = parseInt(document.getElementById('indi_rsiOB').value) || 70;
+        rsiSettings.oversold = parseInt(document.getElementById('indi_rsiOS').value) || 30;
+    } else if (indi === 'macd') {
+        macdSettings.fast = parseInt(document.getElementById('indi_macdFast').value) || 12;
+        macdSettings.slow = parseInt(document.getElementById('indi_macdSlow').value) || 26;
+        macdSettings.signal = parseInt(document.getElementById('indi_macdSignal').value) || 9;
+    } else if (indi === 'rs') {
+        rsSettings.benchmark = document.getElementById('indi_rsBenchmark').value;
+        rsSettings.maPeriod = parseInt(document.getElementById('indi_rsMaPeriod').value) || 50;
+        _rsBenchmarkCache = {}; // clear cache on benchmark change
+    } else {
+        smartVPSGSettings.minVolume = parseInt(document.getElementById('indi_minVolume').value) || 1000000;
+        smartVPSGSettings.priceMoveThresh = parseFloat(document.getElementById('indi_priceMove').value) || 3;
+        smartVPSGSettings.volLookback = parseInt(document.getElementById('indi_volLookback').value) || 9;
+        smartVPSGSettings.avgLookback = parseInt(document.getElementById('indi_avgLookback').value) || 21;
+        smartVPSGSettings.showVolProfile = !!document.getElementById('indi_showVolProfile').checked;
+        smartVPSGSettings.vpBuckets = parseInt(document.getElementById('indi_vpBuckets').value) || 30;
+        saveSmartVPSGSettings();
+        // Re-create on the next reload (remove stale series first)
+        panes.forEach(p => removeSmartVPSG(p));
+    }
+    indiModal.classList.remove('active');
+    // Remove series before re-applying so they get re-created with new settings
+    if (indi === 'rsi') panes.forEach(p => removeRSI(p));
+    if (indi === 'macd') panes.forEach(p => removeMACD(p));
+    if (indi === 'rs') panes.forEach(p => removeRelativeStrength(p));
+    // Re-apply indicators using cached candles — no /api/historical refetch.
+    panes.forEach(pane => applyAllIndicators(pane));
+});
+
+// ─── Alert System ─────────────────────────────────────────────────────────────
+const alertFlyout = document.getElementById('alertFlyout');
+const alertMenuBtn = document.getElementById('alertMenuBtn');
+const alertModal = document.getElementById('alertModalOverlay');
+let alerts = JSON.parse(localStorage.getItem('chartAlerts') || '[]');
+
+// Request notification permission on first use
+function requestNotifPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+// Alert flyout open/close
+alertMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
+    const rect = alertMenuBtn.getBoundingClientRect();
+    alertFlyout.style.left = (rect.right + 6) + 'px';
+    alertFlyout.style.top = rect.top + 'px';
+    renderAlertList();
+    alertFlyout.classList.toggle('open');
+});
+
+// New alert button
+document.getElementById('alertNewBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    alertFlyout.classList.remove('open');
+    openAlertModal();
+});
+
+// Show/hide range field
+document.getElementById('alert_type').addEventListener('change', () => {
+    const isRange = document.getElementById('alert_type').value === 'in_range';
+    document.getElementById('alert_value2_label').style.display = isRange ? '' : 'none';
+    updateAlertMessage();
+});
+
+// Drawing-cross: when condition=drawing, show drawing picker and hide static value field
+document.getElementById('alert_condition').addEventListener('change', () => {
+    const isDrawing = document.getElementById('alert_condition').value === 'drawing';
+    document.getElementById('alert_drawing_label').style.display = isDrawing ? '' : 'none';
+    if (isDrawing) populateAlertDrawingList();
+    updateAlertMessage();
+});
+
+function populateAlertDrawingList() {
+    const sym = document.getElementById('alert_symbol').value.trim().toUpperCase();
+    const select = document.getElementById('alert_drawing');
+    select.innerHTML = '';
+    const all = window.drawingsState && window.drawingsState.drawings || {};
+    const items = [];
+    Object.entries(all).forEach(([paneId, list]) => {
+        const pane = (window.panes || []).find(p => String(p.id) === String(paneId));
+        if (!pane) return;
+        if (pane.symbol !== sym) return;
+        (list || []).forEach((d, i) => {
+            if (!['horizontal', 'trendline', 'ray'].includes(d.type)) return;
+            const did = d.id || (d.id = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8));
+            let label = d.type;
+            if (d.type === 'horizontal') label = `Horizontal @ ${d.points[0].price.toFixed(2)}`;
+            else if (d.type === 'trendline' || d.type === 'ray') {
+                label = `${d.type === 'ray' ? 'Ray' : 'Trendline'} ${d.points[0].price.toFixed(2)}→${d.points[1].price.toFixed(2)}`;
+            }
+            items.push({ id: did, label, paneId });
+        });
+    });
+    // Persist any newly-assigned IDs
+    try { localStorage.setItem('chartDrawings', JSON.stringify(all)); } catch(e) {}
+    if (!items.length) {
+        select.innerHTML = '<option value="">(no horizontal/trendline drawings on this symbol)</option>';
+        return;
+    }
+    select.innerHTML = items.map(it => `<option value="${it.id}">${it.label}</option>`).join('');
+}
+
+// Show/hide hourly/daily sub-options
+document.getElementById('alert_trigger').addEventListener('change', () => {
+    const trig = document.getElementById('alert_trigger').value;
+    document.getElementById('alert_hours_label').style.display = trig === 'hourly' ? '' : 'none';
+    document.getElementById('alert_time_label').style.display = trig === 'daily' ? '' : 'none';
+});
+
+// Auto-generate message on field changes
+['alert_symbol', 'alert_condition', 'alert_type', 'alert_value', 'alert_value2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', updateAlertMessage);
+    if (el) el.addEventListener('change', updateAlertMessage);
+});
+
+function updateAlertMessage() {
+    const sym = document.getElementById('alert_symbol').value.trim().toUpperCase();
+    const cond = document.getElementById('alert_condition').value;
+    const type = document.getElementById('alert_type').value.replace(/_/g, ' ');
+    const val = document.getElementById('alert_value').value;
+    const val2 = document.getElementById('alert_value2').value;
+    let msg = `${sym} ${cond} ${type} ${val}`;
+    if (document.getElementById('alert_type').value === 'in_range' && val2) msg += `-${val2}`;
+    document.getElementById('alert_message').value = msg;
+}
+
+function openAlertModal(symbol) {
+    requestNotifPermission();
+    const sym = symbol || (panes.length > 0 ? panes[0].symbol : '');
+    document.getElementById('alert_symbol').value = sym;
+    document.getElementById('alert_condition').value = 'price';
+    document.getElementById('alert_type').value = 'crossing_up';
+    document.getElementById('alert_value').value = '';
+    document.getElementById('alert_value2').value = '';
+    document.getElementById('alert_trigger').value = 'once';
+    document.getElementById('alert_hours_label').style.display = 'none';
+    document.getElementById('alert_time_label').style.display = 'none';
+    document.getElementById('alert_value2_label').style.display = 'none';
+    document.getElementById('alert_drawing_label').style.display = 'none';
+    document.getElementById('alert_message').value = '';
+    // Default expiry: 30 days from now
+    const exp = new Date();
+    exp.setDate(exp.getDate() + 30);
+    document.getElementById('alert_expiry').value = exp.toISOString().slice(0, 10);
+    alertModal.classList.add('active');
+    updateAlertMessage();
+}
+
+document.getElementById('alertModalClose').addEventListener('click', () => alertModal.classList.remove('active'));
+document.getElementById('alertModalCancel').addEventListener('click', () => alertModal.classList.remove('active'));
+alertModal.addEventListener('click', (e) => { if (e.target === alertModal) alertModal.classList.remove('active'); });
+
+document.getElementById('alertModalCreate').addEventListener('click', () => {
+    const symbol = document.getElementById('alert_symbol').value.trim().toUpperCase();
+    const condition = document.getElementById('alert_condition').value;
+    const type = document.getElementById('alert_type').value;
+    const value = parseFloat(document.getElementById('alert_value').value);
+    const value2 = parseFloat(document.getElementById('alert_value2').value);
+    const trigger = document.getElementById('alert_trigger').value;
+    const expiry = document.getElementById('alert_expiry').value;
+    const message = document.getElementById('alert_message').value.trim();
+    const drawingId = (condition === 'drawing') ? document.getElementById('alert_drawing').value : null;
+
+    if (!symbol) return;
+    if (condition === 'drawing') {
+        if (!drawingId) return;
+    } else {
+        if (isNaN(value)) return;
+        if (type === 'in_range' && isNaN(value2)) return;
+    }
+
+    const alert = {
+        id: Date.now(),
+        symbol,
+        condition,
+        type,
+        value: condition === 'drawing' ? null : value,
+        value2: (condition !== 'drawing' && type === 'in_range') ? value2 : null,
+        drawingId,
+        trigger,
+        triggerHours: trigger === 'hourly' ? parseInt(document.getElementById('alert_hours').value) : null,
+        triggerTime: trigger === 'daily' ? document.getElementById('alert_time').value : null,
+        expiry,
+        message: document.getElementById('alert_message').value,
+        active: true,
+        lastTriggered: null,
+        prevPrice: null,
+        prevVolume: null,
+    };
+
+    alerts.push(alert);
+    saveAlerts();
+    alertModal.classList.remove('active');
+    // Show flyout with updated list
+    alertMenuBtn.classList.add('has-active');
+});
+
+function saveAlerts() {
+    localStorage.setItem('chartAlerts', JSON.stringify(alerts));
+    alertMenuBtn.classList.toggle('has-active', alerts.some(a => a.active));
+}
+
+function renderAlertList() {
+    const list = document.getElementById('alertList');
+    const active = alerts.filter(a => a.active);
+    if (active.length === 0) {
+        list.innerHTML = '<div style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">No active alerts</div>';
+        return;
+    }
+    list.innerHTML = active.map(a => `
+        <div class="sidebar-flyout-row" style="justify-content:space-between;font-size:11px;padding:5px 12px">
+            <div style="display:flex;flex-direction:column;gap:1px">
+                <span style="color:var(--text-primary);font-weight:600">${a.symbol}</span>
+                <span style="color:var(--text-secondary);font-size:10px">${a.condition} ${a.type.replace('_',' ')} ${a.value}${a.value2 ? '-'+a.value2 : ''}</span>
+            </div>
+            <button onclick="deleteAlert(${a.id})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px" title="Delete">&times;</button>
+        </div>
+    `).join('');
+}
+
+window.deleteAlert = function(id) {
+    alerts = alerts.filter(a => a.id !== id);
+    saveAlerts();
+    renderAlertList();
+};
+
+// Lookup a drawing by id across all panes, return its current price-level
+// (interpolated at "now" for trendlines, constant for horizontal lines).
+function findDrawingLevel(drawingId) {
+    if (!drawingId) return null;
+    const all = (window.drawingsState && window.drawingsState.drawings) || {};
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const list of Object.values(all)) {
+        for (const d of (list || [])) {
+            if (d.id !== drawingId) continue;
+            if (d.type === 'horizontal') return d.points[0].price;
+            if ((d.type === 'trendline' || d.type === 'ray') && d.points.length >= 2) {
+                const toSec = (t) => (typeof t === 'number') ? t : Math.floor(new Date(t + 'T00:00:00Z').getTime() / 1000);
+                const t1 = toSec(d.points[0].time);
+                const t2 = toSec(d.points[1].time);
+                const p1 = d.points[0].price;
+                const p2 = d.points[1].price;
+                if (t2 === t1) return p2;
+                const slope = (p2 - p1) / (t2 - t1);
+                // For ray we extrapolate; for trendline we clamp within segment.
+                let lvl = p1 + slope * (nowSec - t1);
+                if (d.type === 'trendline') {
+                    if (nowSec < Math.min(t1, t2) || nowSec > Math.max(t1, t2)) return null;
+                }
+                return lvl;
+            }
+            return null;
+        }
+    }
+    return null;
+}
+
+// ─── Alert Check Engine (runs on each quote poll) ─────────────────────────────
+function checkAlerts(symbol, ltp, volume) {
+    if (!symbol || !ltp) return;
+    const now = new Date();
+
+    alerts.forEach(alert => {
+        if (!alert.active) return;
+        if (alert.symbol !== symbol) return;
+        if (alert.expiry && new Date(alert.expiry) < now) { alert.active = false; return; }
+
+        // Throttle by trigger type
+        if (alert.lastTriggered) {
+            const elapsed = now - new Date(alert.lastTriggered);
+            if (alert.trigger === 'once') return; // already fired
+            if (alert.trigger === 'hourly') {
+                const hours = alert.triggerHours || 1;
+                if (elapsed < hours * 3600000) return;
+            }
+            if (alert.trigger === 'daily') {
+                if (elapsed < 86400000) return;
+            }
+        }
+
+        // Daily trigger: only fire near the specified time (within 30s window)
+        if (alert.trigger === 'daily' && alert.triggerTime) {
+            const [hh, mm] = alert.triggerTime.split(':').map(Number);
+            const nowMins = now.getHours() * 60 + now.getMinutes();
+            const targetMins = hh * 60 + mm;
+            if (Math.abs(nowMins - targetMins) > 0) return; // only check at exact minute
+        }
+
+        const val = alert.condition === 'volume' ? volume : ltp;
+        const prev = alert.condition === 'volume' ? alert.prevVolume : alert.prevPrice;
+        let triggered = false;
+
+        if (alert.condition === 'drawing') {
+            // Find the drawing by ID; compute its current price-level value at "now".
+            const lvl = findDrawingLevel(alert.drawingId);
+            if (lvl !== null) {
+                if (alert.type === 'crossing_up') {
+                    if (alert.prevPrice !== null && alert.prevPrice < lvl && ltp >= lvl) triggered = true;
+                } else if (alert.type === 'crossing_down') {
+                    if (alert.prevPrice !== null && alert.prevPrice > lvl && ltp <= lvl) triggered = true;
+                } else {
+                    // Any cross
+                    if (alert.prevPrice !== null && ((alert.prevPrice < lvl && ltp >= lvl) || (alert.prevPrice > lvl && ltp <= lvl))) triggered = true;
+                }
+            }
+        } else if (alert.type === 'crossing_up') {
+            if (prev !== null && prev < alert.value && val >= alert.value) triggered = true;
+        } else if (alert.type === 'crossing_down') {
+            if (prev !== null && prev > alert.value && val <= alert.value) triggered = true;
+        } else if (alert.type === 'in_range') {
+            if (val >= alert.value && val <= alert.value2) triggered = true;
+        }
+
+        // Update prev values
+        if (alert.condition === 'volume') alert.prevVolume = volume;
+        else alert.prevPrice = ltp;
+
+        if (triggered) {
+            fireAlert(alert);
+            alert.lastTriggered = now.toISOString();
+            if (alert.trigger === 'once') alert.active = false;
+        }
+    });
+
+    saveAlerts();
+}
+
+function fireAlert(alert) {
+    // Browser notification
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Alert: ' + alert.symbol, {
+            body: alert.message,
+            icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%232196f3"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+            requireInteraction: true,
+        });
+    }
+    // Audio beep
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = 'sine';
+        gain.gain.value = 0.3;
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+        setTimeout(() => {
+            const osc2 = ctx.createOscillator();
+            osc2.connect(gain);
+            osc2.frequency.value = 1100;
+            osc2.type = 'sine';
+            osc2.start();
+            osc2.stop(ctx.currentTime + 0.3);
+        }, 350);
+    } catch(e) {}
+    // Visual flash on button
+    alertMenuBtn.style.color = '#f23645';
+    setTimeout(() => { alertMenuBtn.style.color = ''; }, 2000);
+}
+
+// Add alertMenuBtn to the global close-outside handler
+(function() {
+    const origBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn')];
+    origBtns.push(alertMenuBtn);
+    origBtns.push(document.getElementById('watchlistMenuBtn'));
+})();
+
+// Initialize alert button state
+alertMenuBtn.classList.toggle('has-active', alerts.some(a => a.active));
+// Initialize prevPrice for existing alerts from first poll
+alerts.forEach(a => { if (a.prevPrice === null) a.prevPrice = null; });
+
+// ─── Watchlist System ─────────────────────────────────────────────────────────
+const MAX_WATCHLISTS = 45;
+const MAX_STOCKS_PER_WL = 450;
+const wlMenuBtn = document.getElementById('watchlistMenuBtn');
+const wlFlyout = document.getElementById('watchlistFlyout');
+const wlSelect = document.getElementById('wlSelect');
+const wlSearchInput = document.getElementById('wlSearchInput');
+const wlSearchResults = document.getElementById('wlSearchResults');
+const wlStockList = document.getElementById('wlStockList');
+const wlCount = document.getElementById('wlCount');
+const wlFileInput = document.getElementById('wlFileInput');
+
+let watchlists = JSON.parse(localStorage.getItem('chartWatchlists') || '[]');
+let activeWLIndex = parseInt(localStorage.getItem('chartActiveWL') || '0');
+
+// Ensure at least one watchlist exists
+if (watchlists.length === 0) {
+    watchlists.push({ name: 'Watchlist 1', stocks: [] });
+    saveWatchlists();
+}
+if (activeWLIndex >= watchlists.length) activeWLIndex = 0;
+
+function saveWatchlists() {
+    localStorage.setItem('chartWatchlists', JSON.stringify(watchlists));
+    localStorage.setItem('chartActiveWL', String(activeWLIndex));
+}
+
+function renderWLSelect() {
+    wlSelect.innerHTML = watchlists.map((wl, i) =>
+        `<option value="${i}" ${i === activeWLIndex ? 'selected' : ''}>${wl.name} (${wl.stocks.length})</option>`
+    ).join('');
+}
+
+function renderWLStocks() {
+    const wl = watchlists[activeWLIndex];
+    if (!wl || wl.stocks.length === 0) {
+        wlStockList.innerHTML = '<div style="padding:8px 14px;font-size:11px;color:var(--text-secondary)">Empty watchlist</div>';
+        wlCount.textContent = '0 / ' + MAX_STOCKS_PER_WL;
+        return;
+    }
+    wlStockList.innerHTML = wl.stocks.map((sym, idx) =>
+        `<div class="wl-stock-row" data-symbol="${sym}" style="display:flex;align-items:center;padding:3px 10px;cursor:pointer;font-size:11px;color:var(--text-primary);gap:4px">
+            <span class="wl-stock-name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sym}</span>
+            <span class="wl-chg" data-sym="${sym}" style="font-size:10px;color:var(--text-secondary);white-space:nowrap">--</span>
+            <button class="wl-remove-btn" data-idx="${idx}" style="background:none;border:none;color:#f23645;font-size:14px;cursor:pointer;padding:0 2px;line-height:1" title="Remove">&times;</button>
+        </div>`
+    ).join('');
+    wlCount.textContent = `${wl.stocks.length} / ${MAX_STOCKS_PER_WL}`;
+    // Fetch quotes for visible stocks
+    fetchWLQuotes(wl.stocks);
+}
+
+let _wlQuoteAbort = null;
+async function fetchWLQuotes(stocks) {
+    if (_wlQuoteAbort) _wlQuoteAbort.abort();
+    _wlQuoteAbort = new AbortController();
+    const signal = _wlQuoteAbort.signal;
+    // Fetch in batches of 5 to avoid hammering
+    const batchSize = 5;
+    for (let i = 0; i < stocks.length; i += batchSize) {
+        if (signal.aborted) return;
+        const batch = stocks.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (sym) => {
+            try {
+                const resp = await fetch(`${API_BASE}/api/quote?symbol=${encodeURIComponent(sym)}`, { signal });
+                const data = await resp.json();
+                if (data.ltp && data.ltp > 0) {
+                    const change = data.change || 0;
+                    const prevClose = data.close || (data.ltp - change);
+                    const pct = prevClose > 0 ? (change / prevClose * 100) : 0;
+                    const color = change >= 0 ? '#089981' : '#f23645';
+                    const sign = change >= 0 ? '+' : '';
+                    const el = wlStockList.querySelector(`.wl-chg[data-sym="${sym}"]`);
+                    if (el) el.innerHTML = `<span style="color:${color}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(1)}%)</span>`;
+                }
+            } catch(e) { /* ignore aborted or failed */ }
+        }));
+    }
+}
+
+// Open/close watchlist flyout
+wlMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
+    const rect = wlMenuBtn.getBoundingClientRect();
+    wlFlyout.style.left = (rect.right + 6) + 'px';
+    wlFlyout.style.top = rect.top + 'px';
+    renderWLSelect();
+    renderWLStocks();
+    wlFlyout.classList.toggle('open');
+});
+
+// Switch watchlist
+wlSelect.addEventListener('change', () => {
+    activeWLIndex = parseInt(wlSelect.value);
+    saveWatchlists();
+    renderWLStocks();
+});
+
+// New watchlist
+document.getElementById('wlNewBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (watchlists.length >= MAX_WATCHLISTS) {
+        alert(`Maximum ${MAX_WATCHLISTS} watchlists allowed`);
+        return;
+    }
+    const name = prompt('Watchlist name:', `Watchlist ${watchlists.length + 1}`);
+    if (!name || !name.trim()) return;
+    watchlists.push({ name: name.trim(), stocks: [] });
+    activeWLIndex = watchlists.length - 1;
+    saveWatchlists();
+    renderWLSelect();
+    renderWLStocks();
+});
+
+// Rename watchlist
+document.getElementById('wlRenameBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const wl = watchlists[activeWLIndex];
+    if (!wl) return;
+    const name = prompt('Rename watchlist:', wl.name);
+    if (!name || !name.trim()) return;
+    wl.name = name.trim();
+    saveWatchlists();
+    renderWLSelect();
+});
+
+// Delete watchlist
+document.getElementById('wlDeleteBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (watchlists.length <= 1) {
+        alert('Cannot delete the last watchlist');
+        return;
+    }
+    if (!confirm(`Delete "${watchlists[activeWLIndex].name}"?`)) return;
+    watchlists.splice(activeWLIndex, 1);
+    activeWLIndex = Math.min(activeWLIndex, watchlists.length - 1);
+    saveWatchlists();
+    renderWLSelect();
+    renderWLStocks();
+});
+
+// Search & add stock
+let wlSearchTimeout = null;
+wlSearchInput.addEventListener('input', () => {
+    clearTimeout(wlSearchTimeout);
+    const q = wlSearchInput.value.trim().toUpperCase();
+    if (q.length < 2) { wlSearchResults.style.display = 'none'; return; }
+    wlSearchTimeout = setTimeout(async () => {
+        // Local filter first
+        let matches = symbolCache.filter(s => s.startsWith(q)).slice(0, 15);
+        // If not enough, try API
+        if (matches.length < 5 && q.length >= 4) {
+            try {
+                const resp = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}`);
+                const data = await resp.json();
+                if (data.results) matches = [...new Set([...matches, ...data.results])].slice(0, 20);
+            } catch(e) {}
+        }
+        if (matches.length === 0) {
+            wlSearchResults.style.display = 'none';
+            return;
+        }
+        wlSearchResults.style.display = 'block';
+        wlSearchResults.innerHTML = matches.map(s =>
+            `<div class="wl-search-item" data-symbol="${s}" style="padding:4px 6px;font-size:11px;cursor:pointer;color:var(--text-primary);border-radius:3px">${s}</div>`
+        ).join('');
+        wlSearchResults.querySelectorAll('.wl-search-item').forEach(item => {
+            item.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                addStockToWL(item.dataset.symbol);
+                wlSearchInput.value = '';
+                wlSearchResults.style.display = 'none';
+            });
+            item.addEventListener('mouseenter', () => { item.style.background = 'var(--bg-secondary)'; });
+            item.addEventListener('mouseleave', () => { item.style.background = ''; });
+        });
+    }, 200);
+});
+
+wlSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        const sym = wlSearchInput.value.trim().toUpperCase();
+        if (sym) {
+            addStockToWL(sym);
+            wlSearchInput.value = '';
+            wlSearchResults.style.display = 'none';
+        }
+    }
+});
+
+function addStockToWL(symbol) {
+    const wl = watchlists[activeWLIndex];
+    if (!wl) return;
+    if (wl.stocks.length >= MAX_STOCKS_PER_WL) {
+        alert(`Maximum ${MAX_STOCKS_PER_WL} stocks per watchlist`);
+        return;
+    }
+    const sym = symbol.toUpperCase().trim();
+    if (!sym) return;
+    if (wl.stocks.includes(sym)) return; // no duplicates
+    wl.stocks.push(sym);
+    saveWatchlists();
+    renderWLSelect();
+    renderWLStocks();
+}
+
+// File upload handler
+wlFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        const text = ev.target.result;
+        const lines = text.split(/[\r\n]+/);
+        const wl = watchlists[activeWLIndex];
+        let added = 0;
+        lines.forEach(line => {
+            let sym = line.trim().replace(/,$/, ''); // remove trailing comma
+            // Remove exchange prefix (NSE: or BSE:)
+            if (sym.includes(':')) sym = sym.split(':')[1];
+            sym = sym.toUpperCase().trim();
+            if (!sym) return;
+            if (wl.stocks.length >= MAX_STOCKS_PER_WL) return;
+            if (wl.stocks.includes(sym)) return;
+            wl.stocks.push(sym);
+            added++;
+        });
+        saveWatchlists();
+        renderWLSelect();
+        renderWLStocks();
+        wlFileInput.value = ''; // reset
+    };
+    reader.readAsText(file);
+});
+
+// Click stock → open chart; click remove → remove stock
+wlStockList.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Remove button
+    const removeBtn = e.target.closest('.wl-remove-btn');
+    if (removeBtn) {
+        const idx = parseInt(removeBtn.dataset.idx);
+        const wl = watchlists[activeWLIndex];
+        wl.stocks.splice(idx, 1);
+        saveWatchlists();
+        renderWLSelect();
+        renderWLStocks();
+        return;
+    }
+    // Stock name click → open chart
+    const row = e.target.closest('.wl-stock-row');
+    if (row) {
+        const sym = row.dataset.symbol;
+        if (sym && panes.length > 0) {
+            changeSymbol(panes[0], sym);
+            wlFlyout.classList.remove('open');
+        }
+    }
+});
+
+// Hover effect for stock rows
+wlStockList.addEventListener('mouseover', (e) => {
+    const row = e.target.closest('.wl-stock-row');
+    if (row) row.style.background = 'var(--bg-secondary)';
+});
+wlStockList.addEventListener('mouseout', (e) => {
+    const row = e.target.closest('.wl-stock-row');
+    if (row) row.style.background = '';
+});
+
+</script>
+</body>
+</html>
