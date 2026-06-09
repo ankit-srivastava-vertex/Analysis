@@ -892,5 +892,7 @@ if __name__ == "__main__":
     threading.Thread(target=_ws_reconnect_watchdog, daemon=True).start()
     # Production WSGI server (waitress): threaded, no FD leak, no eventlet,
     # cross-platform (Windows/macOS/Linux). Replaces Werkzeug dev server.
+    # threads=16 so a reload doesn't head-of-line block on prior page's
+    # in-flight /api/historical fetches still occupying worker threads.
     from waitress import serve
-    serve(app, host="127.0.0.1", port=port, threads=8, ident="tradingcharts")
+    serve(app, host="127.0.0.1", port=port, threads=16, ident="tradingcharts")

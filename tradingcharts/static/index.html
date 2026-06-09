@@ -1101,12 +1101,29 @@ let globalViewRange = parseInt(localStorage.getItem('globalViewRange') || '365')
 const TICK_POLL_INTERVAL = 1000;    // 1 Hz batched live-tick poll for all visible panes
 const HEALTH_POLL_INTERVAL = 10000; // 10 s server health poll
 
+// ─── Page-scoped AbortController ────────────────────────────────────────────
+// On reload (right-click Reload, F5, Cmd+R) the previous document's in-flight
+// fetches keep running on the server's worker pool until they complete, which
+// starves the new page's pane 0 fetch. Aborting them on `pagehide` frees
+// those threads instantly. _fetchSignal() also adds a per-call timeout so a
+// hung Angel API surfaces as an error instead of an infinite spinner.
+const _pageAbort = new AbortController();
+window.addEventListener('pagehide', () => { try { _pageAbort.abort(); } catch (e) {} });
+function _fetchSignal(timeoutMs) {
+    if (typeof AbortSignal !== 'undefined'
+        && typeof AbortSignal.any === 'function'
+        && typeof AbortSignal.timeout === 'function') {
+        return AbortSignal.any([_pageAbort.signal, AbortSignal.timeout(timeoutMs)]);
+    }
+    return _pageAbort.signal;  // older-browser fallback (no timeout)
+}
+
 // ─── /api/health poll (server liveness + Angel session/WS status) ────────────
 let _lastHealth = null;
 let _lastHealthAt = 0;  // wall-clock when _lastHealth was last set
 async function pollHealth() {
     try {
-        const r = await fetch(`${API_BASE}/api/health`, { cache: 'no-store' });
+        const r = await fetch(`${API_BASE}/api/health`, { cache: 'no-store', signal: _fetchSignal(8000) });
         const h = await r.json();
         _lastHealth = h;
         _lastHealthAt = Date.now();
@@ -1173,7 +1190,7 @@ async function pollTicks() {
     if (!symbols.length) return;
     let ticks = {};
     try {
-        const r = await fetch(`${API_BASE}/api/ticks?symbols=${encodeURIComponent(symbols.join(','))}`, { cache: 'no-store' });
+        const r = await fetch(`${API_BASE}/api/ticks?symbols=${encodeURIComponent(symbols.join(','))}`, { cache: 'no-store', signal: _fetchSignal(5000) });
         const j = await r.json();
         ticks = j.ticks || {};
     } catch (e) {
@@ -1235,11 +1252,8 @@ function _selfHeal(reason) {
         // last bar so a stale tick can't merge into it, then sequentially
         // reload (pane 0 first so the user sees a chart immediately).
         panes.forEach(p => p._lastCandle = null);
-        setTimeout(async () => {
-            try { await loadChartData(panes[0]); } catch (e) {}
-            for (let i = 1; i < panes.length; i++) {
-                try { loadChartData(panes[i]); } catch (e) {}
-            }
+        setTimeout(() => {
+            Promise.allSettled(panes.map(p => loadChartData(p)));
         }, 200);
     }
 }
@@ -1652,17 +1666,10 @@ function setChartCount(count) {
         createPane(grid, i, config.symbol, config.interval || '1d', true /* skipInitialLoad */);
     }
 
-    // Sequential hydration: paint pane 0 first so user sees a chart in ~300ms,
-    // then fan out the rest in parallel. This avoids 4-way thundering-herd on
-    // first paint and also gives the LRU cache a head-start for repeated
-    // symbols / benchmark across panes.
-    (async () => {
-        if (panes.length === 0) return;
-        try { await loadChartData(panes[0]); } catch(e) { console.error(e); }
-        for (let i = 1; i < panes.length; i++) {
-            loadChartData(panes[i]);  // intentionally not awaited
-        }
-    })();
+    // Parallel hydration: all panes load concurrently so a single slow pane
+    // (e.g. Angel cold-cache miss) never blocks the others. Promise.allSettled
+    // swallows individual failures so one bad symbol can't reject the boot.
+    if (panes.length) Promise.allSettled(panes.map(p => loadChartData(p)));
 }
 
 function createPane(container, idx, symbol, interval, skipInitialLoad) {
@@ -2142,7 +2149,7 @@ async function loadChartData(pane) {
     const url = `${API_BASE}/api/historical?symbol=${encodeURIComponent(pane.symbol)}&interval=${pane.interval}&days=${days}`;
     
     try {
-        const resp = await fetch(url);
+        const resp = await fetch(url, { signal: _fetchSignal(10000) });
         const data = await resp.json();
         
         if (data.candles && data.candles.length > 0) {
@@ -2799,7 +2806,7 @@ async function fetchBenchmarkData(benchmark, days) {
     if (_rsBenchmarkInFlight[cacheKey]) return _rsBenchmarkInFlight[cacheKey];
     const p = (async () => {
         try {
-            const resp = await fetch(`${API_BASE}/api/historical?symbol=${encodeURIComponent(benchmark)}&interval=1d&days=${days}`);
+            const resp = await fetch(`${API_BASE}/api/historical?symbol=${encodeURIComponent(benchmark)}&interval=1d&days=${days}`, { signal: _fetchSignal(10000) });
             const data = await resp.json();
             if (data.candles && data.candles.length > 0) {
                 _rsBenchmarkCache[cacheKey] = data.candles;
