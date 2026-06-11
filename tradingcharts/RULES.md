@@ -1,8 +1,8 @@
 # tradingcharts — Non-Negotiable Rules
 
-**Goal:** ship something *better than TradingView*. The eight pillars below are
+**Goal:** ship something *better than TradingView*. The nine pillars below are
 **RULES, not preferences**. Every code change to anything under
-`tradingcharts/`, `angel_client.py`, or `data_provider.py` MUST pass all eight.
+`tradingcharts/`, `angel_client.py`, or `data_provider.py` MUST pass all nine.
 A change that violates any pillar is rejected, even if it ships a feature.
 
 Read this file before touching the code. Re-read after writing the code.
@@ -159,6 +159,61 @@ Verify, then ship.
   on waitress; do not announce it on the network. If multi-user hosting is
   ever required, add TLS + auth in front before exposing.
 
+## Pillar 9 — Multiscreen parity (main ↔ multiscreen)
+- The main app (`tradingcharts/`, port 5050) and the multiscreen sidecar
+  (`tradingcharts/multiscreen/`, port 5051) are **two faces of the same
+  product**. They **MUST** be identical in every aspect: features,
+  endpoints, UI, behavior, performance, error paths, and security posture.
+  A user switching between the two **MUST NOT** be able to tell the
+  difference except for the URL and per-workspace state isolation.
+- **Every change** — creation, modification, deletion, refactor, dependency
+  bump, security fix, performance tweak, UI tweak, bug fix — made anywhere
+  under `tradingcharts/` (excluding `tradingcharts/multiscreen/` itself)
+  **MUST** be evaluated for multiscreen impact in the same PR / commit, and
+  any required mirror change made in `multiscreen/` before merging.
+- **Auto-mirrored by design (verify, don't assume):**
+  - `static/*` is served by multiscreen from the same `../static/` folder
+    via `send_from_directory`. Changes to `index.html`, `drawing-tools.js`,
+    CSS, vendored libs are reflected automatically. **Verify** post-change
+    by reloading `http://127.0.0.1:5051/w/default`.
+  - All `/api/*` routes except `/api/state` are reverse-proxied to upstream
+    5050. New endpoints on the main app are reachable from multiscreen with
+    no edits **iff** they live under `/api/`.
+- **Requires explicit mirror edits in `multiscreen/server.py`:**
+  - Any new server-side persisted state → add a per-workspace handler that
+    writes to `multiscreen/state/<wsid>.json`, never to the global
+    `state/state.json`.
+  - Any new non-`/api/*` route on the main app (e.g. `/foo`, `/export/...`)
+    → either proxy it explicitly or refuse with a documented reason.
+  - Any change to the HTML injection contract (e.g. new global the page
+    expects) → update the `<head>` substitution in `_serve_workspace_html`.
+  - Any new env var, port, or upstream dep → add a `MULTISCREEN_*` mirror
+    or document why parity is intentionally broken.
+- **Identical security posture.** Every Pillar 8 rule applies to multiscreen
+  unchanged: bind `127.0.0.1`, no secrets in responses, allowlist input
+  validation on `/api/state` (`wsid` against the `WORKSPACES` whitelist), no
+  path traversal in `state/<wsid>.json` writes, no SSRF in the proxy
+  (upstream is hard-coded), CORS locked to localhost.
+- **Identical performance budget.** Multiscreen workspaces **MUST** meet the
+  same Pillar 6 latencies (first paint < 1 s, indicator toggle < 50 ms,
+  60 fps pan/zoom) as the main app. Reverse-proxy overhead is allowed but
+  must not push any metric over its main-app budget.
+- **Verification required after every main-app change:**
+  1. Smoke-test the same flow on `http://127.0.0.1:5050/` and
+     `http://127.0.0.1:5051/w/default`.
+  2. Confirm `/multiscreen/health` is 200 with all four workspaces listed.
+  3. Confirm per-workspace state isolation is intact: setting a value in
+     `ws2` does not appear in `ws3` or `default`.
+  4. Confirm no new console error appears in the multiscreen tab that
+     wasn't already on the main tab.
+- **Deletions mirror too.** Removing a feature, endpoint, file, or CSS
+  selector from the main app **MUST** be removed from multiscreen in the
+  same change — no orphan references, no dead routes, no stale shim.
+- **Single source of truth wherever possible.** Prefer extending the main
+  app + proxying over duplicating logic in multiscreen. Local handlers in
+  `multiscreen/server.py` are reserved for things that genuinely cannot be
+  shared (per-workspace state, HTML injection, the shim).
+
 ---
 
 ## Engineering invariants (derived from the pillars)
@@ -225,3 +280,10 @@ Every PR / commit touching `tradingcharts/`, `angel_client.py`,
 - [ ] **No new outbound host.** Only Angel, yfinance, jugaad, and the
       vendored-CDN fallbacks may be contacted from the server or browser.
 - [ ] **`.env` still gitignored** and not served by any route.
+- [ ] **Multiscreen parity preserved** (Pillar 9). Change tested on both
+      `http://127.0.0.1:5050/` and `http://127.0.0.1:5051/w/default`.
+      `/multiscreen/health` still 200. Per-workspace state isolation
+      still intact (set value in `ws2`, confirm absent in `ws3` /
+      `default`). Any new non-`/api/*` route, persisted state, HTML
+      contract change, or env var has its `multiscreen/` mirror in the
+      same change — no orphans on either side.

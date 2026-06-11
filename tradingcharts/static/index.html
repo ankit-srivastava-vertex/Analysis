@@ -39,21 +39,52 @@
 
     // 2) Mirror writes back (debounced).
     let pushTimer = null;
-    function pushNow() {
+    let pendingDirty = false;
+    function buildPayload() {
         const payload = {};
         for (const k of TRACKED_KEYS) {
             const v = localStorage.getItem(k);
             if (v !== null) payload[k] = v;
         }
-        fetch('/api/state', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        }).catch(e => console.warn('[state] push failed:', e));
+        return payload;
+    }
+    function pushNow() {
+        pendingDirty = false;
+        // keepalive lets the request survive page navigation/reload, unlike a
+        // plain fetch which the browser cancels during teardown.
+        try {
+            fetch('/api/state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildPayload()),
+                keepalive: true,
+            }).catch(e => console.warn('[state] push failed:', e));
+        } catch (e) { console.warn('[state] push threw:', e); }
+    }
+    function flushSync() {
+        // Unload-time flush. sendBeacon is queued by the browser and delivered
+        // even after the page is gone — the only reliable mechanism here.
+        if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+        if (!pendingDirty) return;
+        pendingDirty = false;
+        try {
+            const body = new Blob([JSON.stringify(buildPayload())], { type: 'application/json' });
+            const ok = navigator.sendBeacon && navigator.sendBeacon('/api/state', body);
+            if (!ok) {
+                // Fallback: keepalive fetch (best-effort).
+                fetch('/api/state', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildPayload()),
+                    keepalive: true,
+                }).catch(() => {});
+            }
+        } catch (e) { console.warn('[state] beacon failed:', e); }
     }
     function schedulePush() {
+        pendingDirty = true;
         if (pushTimer) clearTimeout(pushTimer);
-        pushTimer = setTimeout(pushNow, 400);
+        pushTimer = setTimeout(() => { pushTimer = null; pushNow(); }, 400);
     }
     const _origSet = Storage.prototype.setItem;
     const _origRemove = Storage.prototype.removeItem;
@@ -67,9 +98,12 @@
         if (this === localStorage && TRACKED_KEYS.indexOf(k) !== -1) schedulePush();
         return r;
     };
-    // Flush on tab close.
-    window.addEventListener('beforeunload', () => {
-        if (pushTimer) { clearTimeout(pushTimer); pushNow(); }
+    // Flush on tab close / reload / mobile background. pagehide fires on
+    // reload and bfcache-ejection; visibilitychange covers mobile background.
+    window.addEventListener('pagehide', flushSync);
+    window.addEventListener('beforeunload', flushSync);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushSync();
     });
 })();
 </script>
@@ -474,7 +508,6 @@ body {
 .sidebar-label {
     font-size: 9px;
     color: var(--text-secondary);
-    text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 2px;
 }
@@ -530,6 +563,17 @@ body {
     color: var(--accent-blue);
     margin-right: 2px;
 }
+.sidebar-flyout-row .tool-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin-left: auto;
+    color: var(--text-primary);
+}
+.sidebar-flyout-row.selected .tool-icon { color: var(--accent-blue); }
 
 .sidebar-live {
     width: 34px;
@@ -785,6 +829,18 @@ body {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1"/></svg>
             </button>
         </div>
+        <div class="sidebar-control" title="Fibonacci Tools">
+            <span class="sidebar-label">Fib</span>
+            <button class="indi-menu-btn" id="fibToolsBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="5" x2="21" y2="5"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/><line x1="3" y1="19" x2="21" y2="19"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-control" title="Elliott Wave Tools">
+            <span class="sidebar-label">Elliott</span>
+            <button class="indi-menu-btn" id="elliottToolsBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 18 7 12 11 16 15 6 19 14 21 9"/></svg>
+            </button>
+        </div>
         <div class="draw-separator"></div>
         <button class="draw-tool-btn" data-tool="delete-all" title="Delete All Drawings" style="color: var(--red);">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
@@ -813,6 +869,12 @@ body {
             <span class="sidebar-label">Sync</span>
             <button class="indi-menu-btn" id="syncMenuBtn">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-control" title="Indexes">
+            <span class="sidebar-label">Index</span>
+            <button class="indi-menu-btn" id="indexMenuBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg>
             </button>
         </div>
         <!-- Spacer pushes bottom actions down -->
@@ -850,22 +912,91 @@ body {
 
 <!-- Sidebar Flyout Menus (fixed, outside sidebar overflow) -->
 <div class="sidebar-flyout" id="lineToolsFlyout">
-    <div class="sidebar-flyout-row" data-tool="trendline">Trend Line</div>
-    <div class="sidebar-flyout-row" data-tool="ray">Ray</div>
-    <div class="sidebar-flyout-row" data-tool="horizontal">Horizontal Line</div>
-    <div class="sidebar-flyout-row" data-tool="vertical">Vertical Line</div>
+    <div class="sidebar-flyout-row" data-tool="trendline">
+        <span>Trend Line</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="ray">
+        <span>Ray</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/><polyline points="13 4 20 4 20 11"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="horizontal">
+        <span>Horizontal Line</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="vertical">
+        <span>Vertical Line</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="3" x2="12" y2="21"/></svg></span>
+    </div>
 </div>
 
 <div class="sidebar-flyout" id="shapeToolsFlyout">
-    <div class="sidebar-flyout-row" data-tool="channel">Parallel Channel</div>
-    <div class="sidebar-flyout-row" data-tool="rectangle">Rectangle</div>
-    <div class="sidebar-flyout-row" data-tool="pricerange">Price Range</div>
-    <div class="sidebar-flyout-row" data-tool="daterange">Date Range</div>
-    <div class="sidebar-flyout-row" data-tool="datepricerange">Date & Price Range</div>
-    <div class="sidebar-flyout-row" data-tool="text">Text</div>
-    <div class="sidebar-flyout-row" data-tool="comment">Comment</div>
-    <div class="sidebar-flyout-row" data-tool="fibretracement">Fib Retracement</div>
-    <div class="sidebar-flyout-row" data-tool="fibextension">Fib Extension</div>
+    <div class="sidebar-flyout-row" data-tool="channel">
+        <span>Parallel Channel</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="9" x2="21" y2="5"/><line x1="3" y1="19" x2="21" y2="15"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="rectangle">
+        <span>Rectangle</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="pricerange">
+        <span>Price Range</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="14" height="14" rx="1"/><line x1="3" y1="6" x2="3" y2="18"/><polyline points="1.5 8 3 6 4.5 8"/><polyline points="1.5 16 3 18 4.5 16"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="daterange">
+        <span>Date Range</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="14" rx="1"/><line x1="6" y1="21" x2="18" y2="21"/><polyline points="8 19.5 6 21 8 22.5"/><polyline points="16 19.5 18 21 16 22.5"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="datepricerange">
+        <span>Date &amp; Price Range</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="14" height="14" rx="1"/><line x1="3" y1="5" x2="3" y2="17"/><line x1="7" y1="21" x2="19" y2="21"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="text">
+        <span>Text</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="6" x2="19" y2="6"/><line x1="12" y1="6" x2="12" y2="20"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="longposition">
+        <span>Long Position</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="5" fill="currentColor" opacity="0.25"/><rect x="4" y="14" width="16" height="5" fill="currentColor" opacity="0.5"/><polyline points="8 13 12 9 16 13"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="shortposition">
+        <span>Short Position</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="5" fill="currentColor" opacity="0.5"/><rect x="4" y="14" width="16" height="5" fill="currentColor" opacity="0.25"/><polyline points="8 11 12 15 16 11"/></svg></span>
+    </div>
+</div>
+
+<div class="sidebar-flyout" id="fibToolsFlyout">
+    <div class="sidebar-flyout-row" data-tool="fibretracement">
+        <span>Fib Retracement</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="5" x2="21" y2="5"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/><line x1="3" y1="19" x2="21" y2="19"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="fibextension">
+        <span>Fib Extension</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="4" y1="20" x2="20" y2="4" stroke-dasharray="2 2"/></svg></span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="fibchannel">
+        <span>Fib Channel</span>
+        <span class="tool-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="4"/><line x1="3" y1="13" x2="21" y2="10"/><line x1="3" y1="19" x2="21" y2="16"/></svg></span>
+    </div>
+</div>
+
+<div class="sidebar-flyout" id="elliottToolsFlyout">
+    <div class="sidebar-flyout-row" data-tool="elliott12345">
+        <span>Elliott Impulse (12345)</span>
+        <span class="tool-icon" style="font-size:10px;font-weight:700;font-family:inherit;">12345</span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="elliottabc">
+        <span>Elliott Correction (ABC)</span>
+        <span class="tool-icon" style="font-size:10px;font-weight:700;font-family:inherit;">ABC</span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="elliottabcde">
+        <span>Elliott Triangle (ABCDE)</span>
+        <span class="tool-icon" style="font-size:9px;font-weight:700;font-family:inherit;">ABCDE</span>
+    </div>
+    <div class="sidebar-flyout-row" data-tool="elliottwxy">
+        <span>Elliott Double Combo (WXY)</span>
+        <span class="tool-icon" style="font-size:10px;font-weight:700;font-family:inherit;">WXY</span>
+    </div>
 </div>
 
 <div class="sidebar-flyout" id="barFlyout">
@@ -898,6 +1029,19 @@ body {
     <div class="sidebar-flyout-row" data-sync="crosshair">Crosshair</div>
     <div class="sidebar-flyout-row" data-sync="timeRange">Time Range</div>
     <div class="sidebar-flyout-row" data-sync="symbol">Symbol</div>
+</div>
+
+<div class="sidebar-flyout" id="indexFlyout">
+    <div class="sidebar-flyout-row" data-ticker="^NSEI">Nifty 50</div>
+    <div class="sidebar-flyout-row" data-ticker="^CRSLDX">Nifty 500</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSEBANK">Nifty Bank</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSEFIN">Nifty Fin Services</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSEMID100">Nifty Midcap 100</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSEMID150">Nifty Midcap 150</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSESML100">Nifty Smallcap 100</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSESML250">Nifty Smallcap 250</div>
+    <div class="sidebar-flyout-row" data-ticker="^NSEMS400">Nifty MidSmall 400</div>
+    <div class="sidebar-flyout-row" data-ticker="^BSESN">Sensex</div>
 </div>
 
 <!-- Indicator Flyout -->
@@ -1363,6 +1507,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSymbols();
     setupCountDropdown();
     setupSyncFlyout();
+    setupIndexFlyout();
     setupPageActions();
     setupThemeToggle();
     setChartCount(chartCount);
@@ -1396,6 +1541,52 @@ function setupSyncFlyout() {
             chartSync[k] = !chartSync[k];
             localStorage.setItem('chartSync', JSON.stringify(chartSync));
             refresh();
+        });
+    });
+}
+
+function setupIndexFlyout() {
+    const btn = document.getElementById('indexMenuBtn');
+    const flyout = document.getElementById('indexFlyout');
+    if (!btn || !flyout) return;
+    const rows = [...flyout.querySelectorAll('.sidebar-flyout-row')];
+    const indexTickers = new Set(rows.map(r => r.dataset.ticker.toUpperCase()));
+
+    function refresh() {
+        const current = new Set((panes || []).map(p => (p.symbol || '').toUpperCase()));
+        rows.forEach(r => r.classList.toggle('selected', current.has(r.dataset.ticker.toUpperCase())));
+    }
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
+        refresh();
+        const rect = btn.getBoundingClientRect();
+        flyout.style.left = (rect.right + 6) + 'px';
+        flyout.style.top = rect.top + 'px';
+        flyout.classList.add('open');
+    });
+
+    rows.forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ticker = row.dataset.ticker;
+            const tickerUC = ticker.toUpperCase();
+            // If already shown on some pane, treat click as visual uncheck (pane stays).
+            const already = (panes || []).find(p => (p.symbol || '').toUpperCase() === tickerUC);
+            if (already) {
+                row.classList.remove('selected');
+                return;
+            }
+            // Find the leftmost pane not currently displaying any selected index.
+            const target = (panes || []).find(p => !indexTickers.has((p.symbol || '').toUpperCase()));
+            if (!target) {
+                // Cap reached: every pane already shows an index. Ignore.
+                return;
+            }
+            if (window.clearPaneDrawings) window.clearPaneDrawings(target.id);
+            changeSymbol(target, ticker);
+            row.classList.add('selected');
         });
     });
 }
@@ -1496,11 +1687,17 @@ function setupCountDropdown() {
     // Drawing tools flyouts
     const lineToolsBtn = document.getElementById('lineToolsBtn');
     const shapeToolsBtn = document.getElementById('shapeToolsBtn');
+    const fibToolsBtn = document.getElementById('fibToolsBtn');
+    const elliottToolsBtn = document.getElementById('elliottToolsBtn');
     const lineToolsFlyout = document.getElementById('lineToolsFlyout');
     const shapeToolsFlyout = document.getElementById('shapeToolsFlyout');
+    const fibToolsFlyout = document.getElementById('fibToolsFlyout');
+    const elliottToolsFlyout = document.getElementById('elliottToolsFlyout');
 
     lineToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(lineToolsBtn, lineToolsFlyout); });
     shapeToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(shapeToolsBtn, shapeToolsFlyout); });
+    fibToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(fibToolsBtn, fibToolsFlyout); });
+    elliottToolsBtn.addEventListener('click', (e) => { e.stopPropagation(); openFlyout(elliottToolsBtn, elliottToolsFlyout); });
 
     // Line tools selection
     lineToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
@@ -1524,6 +1721,31 @@ function setupCountDropdown() {
             row.classList.add('selected');
             shapeToolsFlyout.classList.remove('open');
             // Activate the drawing tool
+            const tool = row.dataset.tool;
+            document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.remove('active'));
+            if (window.activateDrawingTool) window.activateDrawingTool(tool);
+        });
+    });
+
+    // Fib & Elliott tools selection
+    fibToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fibToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            fibToolsFlyout.classList.remove('open');
+            const tool = row.dataset.tool;
+            document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.remove('active'));
+            if (window.activateDrawingTool) window.activateDrawingTool(tool);
+        });
+    });
+
+    elliottToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elliottToolsFlyout.querySelectorAll('.sidebar-flyout-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            elliottToolsFlyout.classList.remove('open');
             const tool = row.dataset.tool;
             document.querySelectorAll('.draw-tool-btn').forEach(b => b.classList.remove('active'));
             if (window.activateDrawingTool) window.activateDrawingTool(tool);
@@ -1665,6 +1887,10 @@ function setChartCount(count) {
         const config = saved[i] || { symbol: DEFAULT_SYMBOLS[i] || 'RELIANCE', interval: '1d' };
         createPane(grid, i, config.symbol, config.interval || '1d', true /* skipInitialLoad */);
     }
+
+    // Persist the trimmed/expanded pane list so a later refresh restores
+    // exactly the current number of panes (was previously left stale).
+    savePaneConfigs();
 
     // Parallel hydration: all panes load concurrently so a single slow pane
     // (e.g. Angel cold-cache miss) never blocks the others. Promise.allSettled
@@ -2286,8 +2512,13 @@ async function loadSymbols() {
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 function savePaneConfigs() {
-    const configs = panes.map(p => ({ symbol: p.symbol, interval: p.interval }));
-    localStorage.setItem('paneConfigs', JSON.stringify(configs));
+    // Preserve entries past the currently-visible pane count so shrinking the
+    // chart count and growing it back restores the prior symbols/intervals.
+    let prior = [];
+    try { prior = JSON.parse(localStorage.getItem('paneConfigs') || '[]'); } catch (e) { prior = []; }
+    const live = panes.map(p => ({ symbol: p.symbol, interval: p.interval }));
+    const merged = live.concat(prior.slice(live.length));
+    localStorage.setItem('paneConfigs', JSON.stringify(merged));
 }
 
 // ─── SmartVPSG Indicator ──────────────────────────────────────────────────────
@@ -2918,7 +3149,7 @@ indiMenuBtn.addEventListener('click', (e) => {
 // Close all flyouts when clicking outside
 document.addEventListener('click', (e) => {
     const allFlyouts = document.querySelectorAll('.sidebar-flyout, .indi-flyout');
-    const allBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn'), document.getElementById('alertMenuBtn'), document.getElementById('watchlistMenuBtn')];
+    const allBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn'), document.getElementById('alertMenuBtn'), document.getElementById('watchlistMenuBtn'), document.getElementById('indexMenuBtn'), document.getElementById('syncMenuBtn')];
     const clickedInsideFlyout = [...allFlyouts].some(f => f.contains(e.target));
     const clickedBtn = allBtns.some(b => b === e.target || b?.contains(e.target));
     if (!clickedInsideFlyout && !clickedBtn) {
