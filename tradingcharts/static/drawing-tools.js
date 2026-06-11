@@ -49,6 +49,14 @@ const COLORS = {
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 const FIB_EXT_LEVELS = [0, 0.618, 1, 1.272, 1.618, 2, 2.618];
 
+const ELLIOTT_LABELS = {
+    elliott12345: ['1', '2', '3', '4', '5'],
+    elliottabc: ['A', 'B', 'C'],
+    elliottabcde: ['A', 'B', 'C', 'D', 'E'],
+    elliottwxy: ['W', 'X', 'Y'],
+};
+const ELLIOTT_COLOR = '#26a69a';
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let activeTool = 'cursor';
 let drawingState = null; // { phase, points[], paneId }
@@ -502,6 +510,7 @@ function finishDrag(pane) {
 }
 
 function getPointsNeeded(type) {
+    if (ELLIOTT_LABELS[type]) return ELLIOTT_LABELS[type].length;
     switch (type) {
         case 'horizontal':
         case 'vertical':
@@ -517,6 +526,9 @@ function getPointsNeeded(type) {
         case 'fibextension':
             return 2;
         case 'channel':
+        case 'fibchannel':
+        case 'longposition':
+        case 'shortposition':
             return 3;
         default:
             return 2;
@@ -631,13 +643,39 @@ function isPointNearDrawing(coords, drawing, pane, threshold) {
             const d2 = distToSegment(coords, p3, p4);
             return d1 < threshold || d2 < threshold;
         }
+        case 'fibchannel': {
+            if (pts.length < 3) return false;
+            const d1 = distToSegment(coords, pts[0], pts[1]);
+            const dy = pts[2].y - pts[0].y;
+            const d2 = distToSegment(coords, { x: pts[0].x, y: pts[0].y + dy }, { x: pts[1].x, y: pts[1].y + dy });
+            return d1 < threshold || d2 < threshold;
+        }
+        case 'longposition':
+        case 'shortposition': {
+            if (pts.length < 3) return false;
+            const x1 = Math.min(pts[0].x, pts[1].x);
+            const x2 = Math.max(pts[0].x, pts[1].x);
+            const yLo = Math.min(pts[0].y, pts[1].y, pts[2].y);
+            const yHi = Math.max(pts[0].y, pts[1].y, pts[2].y);
+            return coords.x >= x1 - threshold && coords.x <= x2 + threshold &&
+                   coords.y >= yLo - threshold && coords.y <= yHi + threshold;
+        }
         case 'fibretracement':
         case 'fibextension': {
+            const minX = Math.min(pts[0].x, pts[1].x);
+            const maxX = Math.max(pts[0].x, pts[1].x);
             const minY = Math.min(pts[0].y, pts[1].y);
             const maxY = Math.max(pts[0].y, pts[1].y);
-            return coords.y >= minY - 20 && coords.y <= maxY + 20;
+            return coords.x >= minX - threshold && coords.x <= maxX + threshold &&
+                   coords.y >= minY - 20 && coords.y <= maxY + 20;
         }
         default:
+            if (ELLIOTT_LABELS[drawing.type]) {
+                for (let i = 0; i < pts.length - 1; i++) {
+                    if (distToSegment(coords, pts[i], pts[i + 1]) < threshold) return true;
+                }
+                return false;
+            }
             return false;
     }
 }
@@ -757,6 +795,20 @@ function renderDrawingWithOffset(ctx, drawing, pane, drag, isHighlighted) {
         case 'fibextension':
             if (pts.length >= 2) drawFibExtensionPixel(ctx, pts, pane, isHighlighted);
             break;
+        case 'fibchannel':
+            if (pts.length >= 3) drawFibChannel(ctx, pts, isHighlighted);
+            break;
+        case 'longposition':
+            if (pts.length >= 3) drawPositionTool(ctx, pts, isHighlighted);
+            break;
+        case 'shortposition':
+            if (pts.length >= 3) drawPositionTool(ctx, pts, isHighlighted);
+            break;
+        default:
+            if (ELLIOTT_LABELS[drawing.type]) {
+                drawElliottWave(ctx, pts, ELLIOTT_LABELS[drawing.type], isHighlighted);
+            }
+            break;
     }
 
     // Draw handles
@@ -777,34 +829,36 @@ function renderDrawingWithOffset(ctx, drawing, pane, drag, isHighlighted) {
 
 // Simplified pixel-based renderers for drag preview (price/date ranges don't need labels during drag)
 function drawPriceRangePixel(ctx, pts, pane, isHovered) {
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(pts[0].x, pts[1].x);
+    const maxX = Math.max(pts[0].x, pts[1].x);
+    const w = maxX - minX;
     const minY = Math.min(pts[0].y, pts[1].y);
     const maxY = Math.max(pts[0].y, pts[1].y);
     const h = maxY - minY;
     ctx.fillStyle = isHovered ? 'rgba(76, 175, 80, 0.25)' : COLORS.priceRange;
-    ctx.fillRect(0, minY, w, h);
+    ctx.fillRect(minX, minY, w, h);
     ctx.strokeStyle = isHovered ? COLORS.hover : COLORS.priceRangeBorder;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, minY); ctx.lineTo(w, minY);
-    ctx.moveTo(0, maxY); ctx.lineTo(w, maxY);
+    ctx.moveTo(minX, minY); ctx.lineTo(maxX, minY);
+    ctx.moveTo(minX, maxY); ctx.lineTo(maxX, maxY);
     ctx.stroke();
 }
 
 function drawDateRangePixel(ctx, pts, pane, isHovered) {
-    const canvas = pane.drawingCanvas;
-    const h = canvas.height / window.devicePixelRatio;
     const minX = Math.min(pts[0].x, pts[1].x);
     const maxX = Math.max(pts[0].x, pts[1].x);
     const w = maxX - minX;
+    const minY = Math.min(pts[0].y, pts[1].y);
+    const maxY = Math.max(pts[0].y, pts[1].y);
+    const h = maxY - minY;
     ctx.fillStyle = isHovered ? 'rgba(156, 39, 176, 0.25)' : COLORS.dateRange;
-    ctx.fillRect(minX, 0, w, h);
+    ctx.fillRect(minX, minY, w, h);
     ctx.strokeStyle = isHovered ? COLORS.hover : COLORS.dateRangeBorder;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(minX, 0); ctx.lineTo(minX, h);
-    ctx.moveTo(maxX, 0); ctx.lineTo(maxX, h);
+    ctx.moveTo(minX, minY); ctx.lineTo(minX, maxY);
+    ctx.moveTo(maxX, minY); ctx.lineTo(maxX, maxY);
     ctx.stroke();
 }
 
@@ -834,16 +888,16 @@ function drawTextAnnotationPixel(ctx, drawing, pt, isHovered) {
 }
 
 function drawFibRetracementPixel(ctx, pts, pane, isHovered) {
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(pts[0].x, pts[1].x);
+    const maxX = Math.max(pts[0].x, pts[1].x);
     const color = isHovered ? COLORS.hover : COLORS.fib;
     const yRange = pts[0].y - pts[1].y;
 
     FIB_LEVELS.forEach((level) => {
         const y = pts[1].y + yRange * level;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
+        ctx.moveTo(minX, y);
+        ctx.lineTo(maxX, y);
         ctx.strokeStyle = color;
         ctx.lineWidth = level === 0 || level === 1 ? 1.5 : 1;
         ctx.setLineDash(level === 0.5 ? [4, 4] : []);
@@ -852,21 +906,21 @@ function drawFibRetracementPixel(ctx, pts, pane, isHovered) {
         ctx.fillStyle = color;
         ctx.font = '10px -apple-system, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`${(level * 100).toFixed(1)}%`, w - 5, y - 3);
+        ctx.fillText(`${(level * 100).toFixed(1)}%`, maxX - 5, y - 3);
     });
 }
 
 function drawFibExtensionPixel(ctx, pts, pane, isHovered) {
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(pts[0].x, pts[1].x);
+    const maxX = Math.max(pts[0].x, pts[1].x);
     const color = isHovered ? COLORS.hover : '#9c27b0';
     const yRange = pts[0].y - pts[1].y;
 
     FIB_EXT_LEVELS.forEach((level) => {
         const y = pts[1].y + yRange * level;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
+        ctx.moveTo(minX, y);
+        ctx.lineTo(maxX, y);
         ctx.strokeStyle = color;
         ctx.lineWidth = level === 0 || level === 1 ? 1.5 : 1;
         ctx.setLineDash(level > 1 ? [6, 3] : []);
@@ -875,7 +929,7 @@ function drawFibExtensionPixel(ctx, pts, pane, isHovered) {
         ctx.fillStyle = color;
         ctx.font = '10px -apple-system, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`${(level * 100).toFixed(1)}%`, w - 5, y - 3);
+        ctx.fillText(`${(level * 100).toFixed(1)}%`, maxX - 5, y - 3);
     });
 }
 
@@ -926,6 +980,20 @@ function renderDrawing(ctx, drawing, pane, isHovered, isPreview) {
         case 'fibextension':
             if (pts.length >= 2) drawFibExtension(ctx, drawing.points, pane, isHovered);
             break;
+        case 'fibchannel':
+            if (pts.length >= 3) drawFibChannel(ctx, pts, isHovered);
+            break;
+        case 'longposition':
+            if (pts.length >= 3) drawPositionTool(ctx, pts, isHovered);
+            break;
+        case 'shortposition':
+            if (pts.length >= 3) drawPositionTool(ctx, pts, isHovered);
+            break;
+        default:
+            if (ELLIOTT_LABELS[drawing.type]) {
+                drawElliottWave(ctx, pts, ELLIOTT_LABELS[drawing.type], isHovered);
+            }
+            break;
     }
 
     // Draw handles on hover
@@ -942,6 +1010,35 @@ function renderDrawing(ctx, drawing, pane, isHovered, isPreview) {
     }
 
     ctx.restore();
+}
+
+function drawElliottWave(ctx, pts, labels, isHighlighted) {
+    if (!pts || pts.length < 1) return;
+    const color = isHighlighted ? COLORS.hover : ELLIOTT_COLOR;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isHighlighted ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    ctx.font = 'bold 12px -apple-system, sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < pts.length; i++) {
+        const label = labels[i] != null ? labels[i] : '';
+        if (!label) continue;
+        let dy = -12;
+        if (i > 0) {
+            dy = pts[i].y >= pts[i - 1].y ? 14 : -12;
+        } else if (pts.length > 1) {
+            dy = pts[1].y >= pts[i].y ? -12 : 14;
+        }
+        ctx.fillText(String(label), pts[i].x, pts[i].y + dy);
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
 }
 
 function drawHorizontalLine(ctx, pt, pane, color, price) {
@@ -1076,22 +1173,23 @@ function drawPriceRange(ctx, points, pane, isHovered) {
     const p2 = toPixel(points[1], pane);
     if (p1.x === null || p2.x === null) return;
 
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
+    const w = maxX - minX;
     const minY = Math.min(p1.y, p2.y);
     const maxY = Math.max(p1.y, p2.y);
     const h = maxY - minY;
 
-    // Fill the full-width band
+    // Fill the band between clicks
     ctx.fillStyle = isHovered ? 'rgba(76, 175, 80, 0.25)' : COLORS.priceRange;
-    ctx.fillRect(0, minY, w, h);
+    ctx.fillRect(minX, minY, w, h);
 
     // Top and bottom lines
     ctx.strokeStyle = isHovered ? COLORS.hover : COLORS.priceRangeBorder;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, minY); ctx.lineTo(w, minY);
-    ctx.moveTo(0, maxY); ctx.lineTo(w, maxY);
+    ctx.moveTo(minX, minY); ctx.lineTo(maxX, minY);
+    ctx.moveTo(minX, maxY); ctx.lineTo(maxX, maxY);
     ctx.stroke();
 
     // Price labels
@@ -1104,14 +1202,14 @@ function drawPriceRange(ctx, points, pane, isHovered) {
     ctx.font = '11px -apple-system, sans-serif';
     ctx.fillStyle = COLORS.priceRangeBorder;
     ctx.textAlign = 'left';
-    ctx.fillText(`₹${Math.abs(diff).toFixed(2)} (${Math.abs(pctDiff)}%)`, 8, midY + 4);
+    ctx.fillText(`₹${Math.abs(diff).toFixed(2)} (${Math.abs(pctDiff)}%)`, minX + 6, midY + 4);
 
-    // High/Low price labels on right
+    // High/Low price labels on right edge of the band
     ctx.textAlign = 'right';
     const highPrice = Math.max(price1, price2);
     const lowPrice = Math.min(price1, price2);
-    ctx.fillText(`₹${highPrice.toFixed(2)}`, w - 8, minY - 4);
-    ctx.fillText(`₹${lowPrice.toFixed(2)}`, w - 8, maxY + 14);
+    ctx.fillText(`₹${highPrice.toFixed(2)}`, maxX - 6, minY - 4);
+    ctx.fillText(`₹${lowPrice.toFixed(2)}`, maxX - 6, maxY + 14);
     ctx.textAlign = 'left';
 }
 
@@ -1120,22 +1218,23 @@ function drawDateRange(ctx, points, pane, isHovered) {
     const p2 = toPixel(points[1], pane);
     if (p1.x === null || p2.x === null) return;
 
-    const canvas = pane.drawingCanvas;
-    const h = canvas.height / window.devicePixelRatio;
     const minX = Math.min(p1.x, p2.x);
     const maxX = Math.max(p1.x, p2.x);
     const w = maxX - minX;
+    const minY = Math.min(p1.y, p2.y);
+    const maxY = Math.max(p1.y, p2.y);
+    const h = maxY - minY;
 
-    // Fill the full-height band
+    // Fill the band between clicks
     ctx.fillStyle = isHovered ? 'rgba(156, 39, 176, 0.25)' : COLORS.dateRange;
-    ctx.fillRect(minX, 0, w, h);
+    ctx.fillRect(minX, minY, w, h);
 
     // Left and right lines
     ctx.strokeStyle = isHovered ? COLORS.hover : COLORS.dateRangeBorder;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(minX, 0); ctx.lineTo(minX, h);
-    ctx.moveTo(maxX, 0); ctx.lineTo(maxX, h);
+    ctx.moveTo(minX, minY); ctx.lineTo(minX, maxY);
+    ctx.moveTo(maxX, minY); ctx.lineTo(maxX, maxY);
     ctx.stroke();
 
     // Date labels and bar count
@@ -1147,13 +1246,13 @@ function drawDateRange(ctx, points, pane, isHovered) {
     ctx.font = '11px -apple-system, sans-serif';
     ctx.fillStyle = COLORS.dateRangeBorder;
     ctx.textAlign = 'center';
-    ctx.fillText(`${days} bar${days !== 1 ? 's' : ''}`, midX, 16);
+    ctx.fillText(`${days} bar${days !== 1 ? 's' : ''}`, midX, minY + 14);
 
     // Date labels at bottom
     const d1 = new Date(Math.min(t1, t2) * 1000);
     const d2 = new Date(Math.max(t1, t2) * 1000);
     const fmt = d => `${d.getDate()}/${d.getMonth()+1}`;
-    ctx.fillText(`${fmt(d1)} → ${fmt(d2)}`, midX, h - 8);
+    ctx.fillText(`${fmt(d1)} → ${fmt(d2)}`, midX, maxY - 6);
     ctx.textAlign = 'left';
 }
 
@@ -1262,8 +1361,9 @@ function drawFibRetracement(ctx, points, pane, isHovered) {
     const p2 = toPixel(points[1], pane);
     if (p1.x === null || p2.x === null) return;
 
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
+    const w = maxX - minX;
     const priceRange = points[0].price - points[1].price;
     const color = isHovered ? COLORS.hover : COLORS.fib;
 
@@ -1273,8 +1373,8 @@ function drawFibRetracement(ctx, points, pane, isHovered) {
         if (pixel === null) return;
 
         ctx.beginPath();
-        ctx.moveTo(0, pixel);
-        ctx.lineTo(w, pixel);
+        ctx.moveTo(minX, pixel);
+        ctx.lineTo(maxX, pixel);
         ctx.strokeStyle = color;
         ctx.lineWidth = level === 0 || level === 1 ? 1.5 : 1;
         ctx.setLineDash(level === 0.5 ? [4, 4] : []);
@@ -1285,7 +1385,7 @@ function drawFibRetracement(ctx, points, pane, isHovered) {
         ctx.fillStyle = color;
         ctx.font = '10px -apple-system, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`${(level * 100).toFixed(1)}% (${price.toFixed(2)})`, w - 5, pixel - 3);
+        ctx.fillText(`${(level * 100).toFixed(1)}% (${price.toFixed(2)})`, maxX - 5, pixel - 3);
 
         // Fill between levels
         if (idx > 0) {
@@ -1293,7 +1393,7 @@ function drawFibRetracement(ctx, points, pane, isHovered) {
             const prevPixel = pane.series.priceToCoordinate(prevPrice);
             if (prevPixel !== null) {
                 ctx.fillStyle = COLORS.fibFill;
-                ctx.fillRect(0, Math.min(pixel, prevPixel), w, Math.abs(pixel - prevPixel));
+                ctx.fillRect(minX, Math.min(pixel, prevPixel), w, Math.abs(pixel - prevPixel));
             }
         }
     });
@@ -1304,8 +1404,8 @@ function drawFibExtension(ctx, points, pane, isHovered) {
     const p2 = toPixel(points[1], pane);
     if (p1.x === null || p2.x === null) return;
 
-    const canvas = pane.drawingCanvas;
-    const w = canvas.width / window.devicePixelRatio;
+    const minX = Math.min(p1.x, p2.x);
+    const maxX = Math.max(p1.x, p2.x);
     const priceRange = points[0].price - points[1].price;
     const color = isHovered ? COLORS.hover : '#9c27b0';
 
@@ -1315,8 +1415,8 @@ function drawFibExtension(ctx, points, pane, isHovered) {
         if (pixel === null) return;
 
         ctx.beginPath();
-        ctx.moveTo(0, pixel);
-        ctx.lineTo(w, pixel);
+        ctx.moveTo(minX, pixel);
+        ctx.lineTo(maxX, pixel);
         ctx.strokeStyle = color;
         ctx.lineWidth = level === 0 || level === 1 ? 1.5 : 1;
         ctx.setLineDash(level > 1 ? [6, 3] : []);
@@ -1326,8 +1426,87 @@ function drawFibExtension(ctx, points, pane, isHovered) {
         ctx.fillStyle = color;
         ctx.font = '10px -apple-system, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`${(level * 100).toFixed(1)}% (${price.toFixed(2)})`, w - 5, pixel - 3);
+        ctx.fillText(`${(level * 100).toFixed(1)}% (${price.toFixed(2)})`, maxX - 5, pixel - 3);
     });
+}
+
+function drawFibChannel(ctx, pts, isHovered) {
+    if (pts.length < 3) return;
+    const color = isHovered ? COLORS.hover : COLORS.fib;
+    const dy = pts[2].y - pts[0].y;
+
+    // Fib levels parallel to main trendline
+    FIB_LEVELS.forEach((level, idx) => {
+        const y0 = pts[0].y + dy * level;
+        const y1 = pts[1].y + dy * level;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, y0);
+        ctx.lineTo(pts[1].x, y1);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = level === 0 || level === 1 ? 1.5 : 1;
+        ctx.setLineDash(level === 0.5 ? [4, 4] : []);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = color;
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${(level * 100).toFixed(1)}%`, pts[1].x + 4, y1 + 3);
+
+        // Light fill between this level and previous
+        if (idx > 0) {
+            const prevLevel = FIB_LEVELS[idx - 1];
+            const py0 = pts[0].y + dy * prevLevel;
+            const py1 = pts[1].y + dy * prevLevel;
+            ctx.fillStyle = COLORS.fibFill;
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, py0);
+            ctx.lineTo(pts[1].x, py1);
+            ctx.lineTo(pts[1].x, y1);
+            ctx.lineTo(pts[0].x, y0);
+            ctx.closePath();
+            ctx.fill();
+        }
+    });
+}
+
+function drawPositionTool(ctx, pts, isHovered) {
+    if (pts.length < 3) return;
+    const x1 = Math.min(pts[0].x, pts[1].x);
+    const x2 = Math.max(pts[0].x, pts[1].x);
+    const w = x2 - x1;
+    const entryY = pts[0].y;
+    const targetY = pts[1].y;
+    const stopY = pts[2].y;
+
+    const greenFill = isHovered ? 'rgba(38, 166, 154, 0.30)' : 'rgba(38, 166, 154, 0.18)';
+    const redFill = isHovered ? 'rgba(239, 83, 80, 0.30)' : 'rgba(239, 83, 80, 0.18)';
+    const greenBorder = '#26a69a';
+    const redBorder = '#ef5350';
+    const entryBorder = isHovered ? COLORS.hover : '#9e9e9e';
+
+    // Profit zone (entry ↔ target)
+    ctx.fillStyle = greenFill;
+    ctx.fillRect(x1, Math.min(entryY, targetY), w, Math.abs(targetY - entryY));
+    ctx.strokeStyle = greenBorder;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x1, Math.min(entryY, targetY), w, Math.abs(targetY - entryY));
+
+    // Loss zone (entry ↔ stop)
+    ctx.fillStyle = redFill;
+    ctx.fillRect(x1, Math.min(entryY, stopY), w, Math.abs(stopY - entryY));
+    ctx.strokeStyle = redBorder;
+    ctx.strokeRect(x1, Math.min(entryY, stopY), w, Math.abs(stopY - entryY));
+
+    // Entry line (dashed)
+    ctx.strokeStyle = entryBorder;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x1, entryY);
+    ctx.lineTo(x2, entryY);
+    ctx.stroke();
+    ctx.setLineDash([]);
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -1388,5 +1567,16 @@ function loadDrawings() {
 
 // Expose state for pane access
 window.drawingsState = { drawings, getActiveTool: () => activeTool };
+
+// Clear all drawings on a single pane (used when its symbol is replaced).
+window.clearPaneDrawings = function(paneId) {
+    if (!paneId) return;
+    if (drawings[paneId]) {
+        delete drawings[paneId];
+        saveDrawings();
+    }
+    const pane = (window.panes || []).find(p => p.id === paneId);
+    if (pane) redrawAll(pane);
+};
 
 })();
