@@ -546,6 +546,7 @@ _INTERVAL_MAP = {
     "1h":  "ONE_HOUR",
     "30m": "THIRTY_MINUTE",
     "15m": "FIFTEEN_MINUTE",
+    "10m": "TEN_MINUTE",
     "5m":  "FIVE_MINUTE",
     "1m":  "ONE_MINUTE",
 }
