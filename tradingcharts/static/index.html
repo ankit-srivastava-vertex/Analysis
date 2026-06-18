@@ -416,7 +416,10 @@ body {
     border-radius: 4px;
     pointer-events: none;
     z-index: 30;
-    white-space: nowrap;
+    white-space: normal;
+    max-width: 320px;
+    line-height: 1.4;
+    word-wrap: break-word;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4);
 }
 .q-tooltip b { color: #089981; font-weight: 600; }
@@ -805,6 +808,24 @@ body {
 }
 .smartvpsg-panel .pos { color: #089981; }
 .smartvpsg-panel .neg { color: #f23645; }
+/* Institutional Accumulation data panel */
+.instaccum-panel {
+    position: absolute;
+    top: 50px;
+    left: 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-primary);
+    z-index: 10;
+    pointer-events: none;
+    display: none;
+}
+.instaccum-panel div { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; pointer-events: auto; cursor: help; }
+.instaccum-panel .pos { color: #089981; }
+.instaccum-panel .neg { color: #f23645; }
 </style>
 </head>
 <body>
@@ -869,12 +890,6 @@ body {
             <span class="sidebar-label">Sync</span>
             <button class="indi-menu-btn" id="syncMenuBtn">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            </button>
-        </div>
-        <div class="sidebar-control" title="Indexes">
-            <span class="sidebar-label">Index</span>
-            <button class="indi-menu-btn" id="indexMenuBtn">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg>
             </button>
         </div>
         <!-- Spacer pushes bottom actions down -->
@@ -1031,19 +1046,6 @@ body {
     <div class="sidebar-flyout-row" data-sync="symbol">Symbol</div>
 </div>
 
-<div class="sidebar-flyout" id="indexFlyout">
-    <div class="sidebar-flyout-row" data-ticker="^NSEI">Nifty 50</div>
-    <div class="sidebar-flyout-row" data-ticker="^CRSLDX">Nifty 500</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSEBANK">Nifty Bank</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSEFIN">Nifty Fin Services</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSEMID100">Nifty Midcap 100</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSEMID150">Nifty Midcap 150</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSESML100">Nifty Smallcap 100</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSESML250">Nifty Smallcap 250</div>
-    <div class="sidebar-flyout-row" data-ticker="^NSEMS400">Nifty MidSmall 400</div>
-    <div class="sidebar-flyout-row" data-ticker="^BSESN">Sensex</div>
-</div>
-
 <!-- Indicator Flyout -->
 <div class="indi-flyout" id="indiFlyout">
     <div class="indi-flyout-title">Indicators</div>
@@ -1054,7 +1056,12 @@ body {
     </div>
     <div class="indi-flyout-row" data-indi="supreseps">
         <span class="indi-check"></span>
-        <span class="indi-name">SupResEPS</span>
+        <span class="indi-name">SupRes</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="instaccum">
+        <span class="indi-check"></span>
+        <span class="indi-name">InstAccum</span>
         <span class="indi-hint">right-click: settings</span>
     </div>
     <div class="indi-flyout-row" data-indi="rsi">
@@ -1082,9 +1089,6 @@ body {
             <button class="indi-modal-close" id="indiModalClose">&times;</button>
         </div>
         <div class="indi-modal-body" id="indiModalSmartVPSG">
-            <label>Min Volume<input type="number" id="indi_minVolume" value="1000000" step="100000"></label>
-            <label>Price Move %<input type="number" id="indi_priceMove" value="3" step="0.5" min="0.1"></label>
-            <label>Vol Spike Lookback<input type="number" id="indi_volLookback" value="9" min="1" max="50"></label>
             <label>Avg Vol Period<input type="number" id="indi_avgLookback" value="21" min="5" max="100"></label>
             <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_showVolProfile" style="width:auto;margin:0"> Show Volume Profile</label>
             <label>Volume Profile Buckets<input type="number" id="indi_vpBuckets" value="30" min="10" max="100"></label>
@@ -1095,6 +1099,13 @@ body {
             <label>MA 50 Length<input type="number" id="indi_ma50" value="50" min="5" max="300"></label>
             <label>MA 200 Length<input type="number" id="indi_ma200" value="200" min="50" max="500"></label>
             <label>Pivot Lookback<input type="number" id="indi_pivotLen" value="15" min="3" max="50"></label>
+            <label>Zone Width (ATR×)<input type="number" id="indi_zoneAtr" value="0.6" step="0.1" min="0.1" max="3"></label>
+            <label>Levels / Side<input type="number" id="indi_maxPerSide" value="4" min="1" max="8"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalInstAccum" style="display:none">
+            <label>Pocket Pivot Lookback<input type="number" id="indi_ppLookback" value="10" min="3" max="50"></label>
+            <label>Money-Flow Divergence Lookback<input type="number" id="indi_mfLookback" value="20" min="5" max="100"></label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_showDeals" checked style="width:auto;margin:0"> Show Bulk/Block Deals</label>
         </div>
         <div class="indi-modal-body" id="indiModalRSI" style="display:none">
             <label>Period<input type="number" id="indi_rsiPeriod" value="14" min="2" max="100"></label>
@@ -1507,7 +1518,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSymbols();
     setupCountDropdown();
     setupSyncFlyout();
-    setupIndexFlyout();
     setupPageActions();
     setupThemeToggle();
     setChartCount(chartCount);
@@ -1541,52 +1551,6 @@ function setupSyncFlyout() {
             chartSync[k] = !chartSync[k];
             localStorage.setItem('chartSync', JSON.stringify(chartSync));
             refresh();
-        });
-    });
-}
-
-function setupIndexFlyout() {
-    const btn = document.getElementById('indexMenuBtn');
-    const flyout = document.getElementById('indexFlyout');
-    if (!btn || !flyout) return;
-    const rows = [...flyout.querySelectorAll('.sidebar-flyout-row')];
-    const indexTickers = new Set(rows.map(r => r.dataset.ticker.toUpperCase()));
-
-    function refresh() {
-        const current = new Set((panes || []).map(p => (p.symbol || '').toUpperCase()));
-        rows.forEach(r => r.classList.toggle('selected', current.has(r.dataset.ticker.toUpperCase())));
-    }
-
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        document.querySelectorAll('.sidebar-flyout, .indi-flyout').forEach(f => f.classList.remove('open'));
-        refresh();
-        const rect = btn.getBoundingClientRect();
-        flyout.style.left = (rect.right + 6) + 'px';
-        flyout.style.top = rect.top + 'px';
-        flyout.classList.add('open');
-    });
-
-    rows.forEach(row => {
-        row.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const ticker = row.dataset.ticker;
-            const tickerUC = ticker.toUpperCase();
-            // If already shown on some pane, treat click as visual uncheck (pane stays).
-            const already = (panes || []).find(p => (p.symbol || '').toUpperCase() === tickerUC);
-            if (already) {
-                row.classList.remove('selected');
-                return;
-            }
-            // Find the leftmost pane not currently displaying any selected index.
-            const target = (panes || []).find(p => !indexTickers.has((p.symbol || '').toUpperCase()));
-            if (!target) {
-                // Cap reached: every pane already shows an index. Ignore.
-                return;
-            }
-            if (window.clearPaneDrawings) window.clearPaneDrawings(target.id);
-            changeSymbol(target, ticker);
-            row.classList.add('selected');
         });
     });
 }
@@ -2046,11 +2010,43 @@ function createPane(container, idx, symbol, interval, skipInitialLoad) {
         // Q-marker tooltip
         if (qTooltip) {
             const qVol = pane._qVolumeMap && pane._qVolumeMap.get(param.time);
-            if (qVol && param.point) {
+            const gapPct = pane._gapMap ? pane._gapMap.get(param.time) : undefined;
+            let ttHtml = '';
+            if (qVol) {
                 const v = qVol >= 1e7 ? (qVol/1e7).toFixed(2)+' Cr'
                         : qVol >= 1e5 ? (qVol/1e5).toFixed(2)+' L'
                         : qVol.toLocaleString();
-                qTooltip.innerHTML = `Highest Quarterly Volume<br><b>${v}</b>`;
+                ttHtml += `Highest Quarterly Volume<br><b>${v}</b>`;
+            }
+            if (gapPct !== undefined) {
+                if (ttHtml) ttHtml += '<br>';
+                ttHtml += `<span style="color:#f23645;font-weight:600">Gap Down ${gapPct.toFixed(2)}%</span>`;
+            }
+            if (param.point && pane._srLevelData && pane._srLevelData.length) {
+                for (const level of pane._srLevelData) {
+                    const y = pane.series.priceToCoordinate(level.price);
+                    if (y === null || Math.abs(param.point.y - y) > 6) continue;
+                    const col = level.type === 'S' ? '#089981' : '#f23645';
+                    if (ttHtml) ttHtml += '<br>';
+                    const zLo = (level.priceLo != null ? level.priceLo : level.price);
+                    const zHi = (level.priceHi != null ? level.priceHi : level.price);
+                    ttHtml += `<span style="color:${col};font-weight:600">${level.type === 'S' ? 'Support' : 'Resistance'} ${zLo.toFixed(2)}-${zHi.toFixed(2)} · strength ${level.score}/100</span>`
+                        + `<br>Pivots: ${level.pivots != null ? level.pivots : 1} · Touches: ${level.touches} · Vol: ${level.volRatio.toFixed(1)}x avg`
+                        + `<br>Age: ${level.age} bars · Last test: ${level.sinceTouch} bars ago`
+                        + (level.confl.length ? `<br>Confluence: ${level.confl.join(', ')}` : '');
+                    break;
+                }
+            }
+            // InstAccum marker explanations (P / A / B / S)
+            if (pane._instAccumMap) {
+                const lines = pane._instAccumMap.get(param.time);
+                if (lines && lines.length) {
+                    if (ttHtml) ttHtml += '<br>';
+                    ttHtml += lines.join('<br>');
+                }
+            }
+            if (ttHtml && param.point) {
+                qTooltip.innerHTML = ttHtml;
                 const cw = chartContainer.clientWidth;
                 let left = param.point.x + 12;
                 if (left + 180 > cw) left = param.point.x - 180;
@@ -2148,7 +2144,7 @@ function setupSymbolInput(pane) {
     let debounceTimer = null;
     
     input.addEventListener('focus', () => {
-        if (input.value.trim().length >= 4) showDropdown(dropdown, input.value);
+        if (input.value.trim().length >= 3) showDropdown(dropdown, input.value);
     });
     
     input.addEventListener('input', () => {
@@ -2179,7 +2175,7 @@ function setupSymbolInput(pane) {
 let _searchDebounce = null;
 async function showDropdown(dropdown, query) {
     const q = query.trim().toUpperCase();
-    if (q.length < 4) {
+    if (q.length < 3) {
         dropdown.classList.remove('visible');
         return;
     }
@@ -2342,8 +2338,13 @@ async function applyAllIndicators(pane) {
         if (m) allMarkers = allMarkers.concat(m);
     }
     if (activeIndicators.has('supreseps')) {
-        const m = applySupResEPS(pane, candles, volumes);
+        applySupResEPS(pane, candles, volumes);
+    }
+    if (activeIndicators.has('instaccum')) {
+        const m = applyInstAccum(pane, candles, volumes);
         if (m) allMarkers = allMarkers.concat(m);
+        const dm = await fetchInstAccumDeals(pane, candles);
+        if (dm) allMarkers = allMarkers.concat(dm);
     }
     if (activeIndicators.has('rsi'))  applyRSI(pane, candles);
     if (activeIndicators.has('macd')) applyMACD(pane, candles);
@@ -2524,9 +2525,6 @@ function savePaneConfigs() {
 // ─── SmartVPSG Indicator ──────────────────────────────────────────────────────
 const smartVPSGSettings = (() => {
     const def = {
-        minVolume: 1000000,
-        priceMoveThresh: 3,
-        volLookback: 9,
         avgLookback: 21,
         showVolProfile: false,
         vpBuckets: 30,
@@ -2547,7 +2545,7 @@ function saveSmartVPSGSettings() {
 function applySmartVPSG(pane, candles, volumes) {
     if (!candles || candles.length < 2) return;
     const markers = [];
-    const { minVolume, priceMoveThresh, volLookback, avgLookback } = smartVPSGSettings;
+    const { avgLookback } = smartVPSGSettings;
 
     // Compute 52-week high/low, avg volume, relative volume
     const closes = candles.map(c => c.close);
@@ -2573,44 +2571,28 @@ function applySmartVPSG(pane, candles, volumes) {
     // Format volume in Lakhs/Crores
     const fmtVol = (v) => v >= 1e7 ? (v / 1e7).toFixed(2) + 'Cr' : v >= 1e5 ? (v / 1e5).toFixed(2) + 'L' : v.toLocaleString();
 
+    const gapMap = new Map();
     for (let i = 1; i < candles.length; i++) {
         const c = candles[i];
         const prev = candles[i - 1];
-        const vol = vols[i];
 
-        // Gap-up: low > prev high
-        const isGapUp = c.low > prev.high;
-
-        // Volume spike: vol > highest of last 9 bars AND >= minVolume
-        let highestVol9 = 0;
-        for (let j = Math.max(0, i - volLookback); j < i; j++) {
-            if (vols[j] > highestVol9) highestVol9 = vols[j];
-        }
-        const isVolSpike = vol > highestVol9 && vol >= minVolume;
-
-        // Price move > 3% up with volume spike
-        const priceMoveUp = c.close >= prev.close * (1 + priceMoveThresh / 100);
-
-        if (isGapUp) {
-            markers.push({
-                time: c.time,
-                position: 'aboveBar',
-                color: '#f1f0f5',
-                shape: 'text',
-                text: 'G',
-                size: 0,
-            });
-        }
-        if (priceMoveUp && isVolSpike) {
+        // Gap-down: today's high more than 4% below previous low.
+        const isGapDown = c.high < prev.low;
+        const gapPct = prev.low !== 0 ? (c.high / prev.low - 1) * 100 : 0;
+        if (isGapDown && gapPct <= -4) {
             markers.push({
                 time: c.time,
                 position: 'belowBar',
-                color: '#00ffff',
-                shape: 'arrowUp',
-                size: 1,
+                color: '#f23645',
+                shape: 'text',
+                text: 'G',
+                size: 2,
             });
+            gapMap.set(c.time, gapPct);
         }
     }
+
+    pane._gapMap = gapMap;
 
     // Return markers (caller will merge and set)
     markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
@@ -2725,6 +2707,7 @@ function renderVolumeProfile(pane, candles, vols) {
 }
 
 function removeSmartVPSG(pane) {
+    pane._gapMap = null;
     const panel = pane.el.querySelector('.smartvpsg-panel');
     if (panel) panel.style.display = 'none';
     if (pane._vpUnsubscribe) { pane._vpUnsubscribe(); pane._vpUnsubscribe = null; }
@@ -2739,6 +2722,8 @@ const supResEPSSettings = {
     ma50: 50,
     ma200: 200,
     pivotLen: 15,
+    atrMult: 0.6,
+    maxPerSide: 4,
 };
 
 function computeSMA(closes, period) {
@@ -2750,6 +2735,28 @@ function computeSMA(closes, period) {
         result.push(sum / period);
     }
     return result;
+}
+
+// Wilder ATR — used to size S/R clustering tolerance relative to volatility.
+function computeATR(highs, lows, closes, period) {
+    const tr = [];
+    for (let i = 0; i < highs.length; i++) {
+        if (i === 0) { tr.push(highs[i] - lows[i]); continue; }
+        const pc = closes[i - 1];
+        tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - pc), Math.abs(lows[i] - pc)));
+    }
+    const atr = [];
+    let prev = null;
+    for (let i = 0; i < tr.length; i++) {
+        if (i < period - 1) { atr.push(null); continue; }
+        if (i === period - 1) {
+            let sum = 0; for (let j = 0; j <= i; j++) sum += tr[j];
+            prev = sum / period; atr.push(prev); continue;
+        }
+        prev = (prev * (period - 1) + tr[i]) / period;
+        atr.push(prev);
+    }
+    return atr;
 }
 
 function applySupResEPS(pane, candles, volumes) {
@@ -2781,80 +2788,151 @@ function applySupResEPS(pane, candles, volumes) {
     pane._maSeries.ma50.setData(toData(sma50));
     pane._maSeries.ma200.setData(toData(sma200));
 
-    // Pivot-based Support & Resistance detection
-    const markers = [];
-    const srLevels = []; // { type: 'S'|'R', price, startIdx }
+    // ─── ATR-clustered, volume-weighted, multi-timeframe S/R zone engine ──────
+    const vols = volumes.map(v => v.value);
+    const avgVolAll = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
+    const lastIdx = candles.length - 1;
+    const lastClose = closes[lastIdx];
+    const atrArr = computeATR(highs, lows, closes, 14);
+    const atr = (atrArr[lastIdx] && atrArr[lastIdx] > 0) ? atrArr[lastIdx] : lastClose * 0.01;
+    const { atrMult, maxPerSide } = supResEPSSettings;
 
-    for (let i = pivotLen; i < candles.length - pivotLen; i++) {
-        // Pivot High
-        let isPH = true;
-        for (let j = 1; j <= pivotLen; j++) {
-            if (highs[i] <= highs[i - j] || highs[i] <= highs[i + j]) { isPH = false; break; }
-        }
-        if (isPH) {
-            markers.push({
-                time: candles[i].time,
-                position: 'aboveBar',
-                color: '#f23645',
-                shape: 'text',
-                text: '▼',
-                size: 0,
-            });
-            srLevels.push({ type: 'R', price: highs[i], idx: i });
-        }
-
-        // Pivot Low
-        let isPL = true;
-        for (let j = 1; j <= pivotLen; j++) {
-            if (lows[i] >= lows[i - j] || lows[i] >= lows[i + j]) { isPL = false; break; }
-        }
-        if (isPL) {
-            markers.push({
-                time: candles[i].time,
-                position: 'belowBar',
-                color: '#089981',
-                shape: 'text',
-                text: '▲',
-                size: 0,
-            });
-            srLevels.push({ type: 'S', price: lows[i], idx: i });
+    // 1) Multi-timeframe fractal pivots (short / base / structural). Larger
+    //    swings carry more structural weight. Recent unconfirmed extremes are
+    //    added lightly so the right edge isn't blind.
+    const pivots = [];
+    const scales = [
+        { len: Math.max(3, Math.round(pivotLen / 3)), w: 0.6 },
+        { len: pivotLen,                              w: 1.0 },
+        { len: pivotLen * 2,                          w: 1.7 },
+    ];
+    for (const { len, w } of scales) {
+        if (candles.length <= len * 2 + 1) continue;
+        for (let i = len; i < candles.length - len; i++) {
+            let isPH = true, isPL = true;
+            for (let j = 1; j <= len; j++) {
+                if (highs[i] <= highs[i - j] || highs[i] <= highs[i + j]) isPH = false;
+                if (lows[i] >= lows[i - j] || lows[i] >= lows[i + j]) isPL = false;
+                if (!isPH && !isPL) break;
+            }
+            if (isPH) pivots.push({ price: highs[i], idx: i, w });
+            if (isPL) pivots.push({ price: lows[i], idx: i, w });
         }
     }
+    {
+        const look = Math.min(pivotLen, lastIdx);
+        let hi = -Infinity, hiIdx = lastIdx, lo = Infinity, loIdx = lastIdx;
+        for (let i = lastIdx; i > lastIdx - look && i >= 0; i--) {
+            if (highs[i] > hi) { hi = highs[i]; hiIdx = i; }
+            if (lows[i] < lo) { lo = lows[i]; loIdx = i; }
+        }
+        if (isFinite(hi)) pivots.push({ price: hi, idx: hiIdx, w: 0.5 });
+        if (isFinite(lo)) pivots.push({ price: lo, idx: loIdx, w: 0.5 });
+    }
 
-    // Draw S/R price lines (last 4 of each)
+    // 2) Cluster pivots into zones when their prices sit within ATR×mult.
+    //    A hard span cap stops chains of small gaps from merging distinct levels.
+    const clusterTol = atr * atrMult;
+    const maxSpan = clusterTol * 2.5;
+    pivots.sort((a, b) => a.price - b.price);
+    const clusters = [];
+    let cluster = [];
+    for (let k = 0; k < pivots.length; k++) {
+        const gap = cluster.length ? (pivots[k].price - pivots[k - 1].price) : 0;
+        const span = cluster.length ? (pivots[k].price - cluster[0].price) : 0;
+        if (cluster.length && (gap > clusterTol || span > maxSpan)) {
+            clusters.push(cluster); cluster = [];
+        }
+        cluster.push(pivots[k]);
+    }
+    if (cluster.length) clusters.push(cluster);
+
+    // 3) Build + score each zone: structure (weighted pivot count), repeated
+    //    touches, volume traded at the band, MA/round-number confluence, recency.
+    const ma50v = sma50[lastIdx];
+    const ma200v = sma200[lastIdx];
+    const roundConfluence = (lo, hi) => {
+        const mid = (lo + hi) / 2;
+        const mag = Math.pow(10, Math.floor(Math.log10(Math.max(mid, 1))));
+        for (const step of [mag, mag / 2]) {
+            const n = Math.round(mid / step) * step;
+            if (n >= lo && n <= hi) return n;
+        }
+        return null;
+    };
+
+    const zones = clusters.map(members => {
+        let wSum = 0, pwAcc = 0, idxMin = lastIdx, lo = Infinity, hi = -Infinity;
+        for (const m of members) {
+            wSum += m.w; pwAcc += m.price * m.w;
+            if (m.price < lo) lo = m.price;
+            if (m.price > hi) hi = m.price;
+            if (m.idx < idxMin) idxMin = m.idx;
+        }
+        const center = wSum > 0 ? pwAcc / wSum : (lo + hi) / 2;
+        const pad = Math.max((hi - lo) / 2, atr * 0.25);
+        const bandLo = center - pad, bandHi = center + pad;
+
+        let touches = 0, lastTouchIdx = idxMin, zoneVolSum = 0, zoneBars = 0, prevIn = false;
+        for (let i = idxMin; i <= lastIdx; i++) {
+            const inBand = lows[i] <= bandHi && highs[i] >= bandLo;
+            if (inBand) {
+                zoneVolSum += vols[i]; zoneBars++;
+                if (!prevIn) { touches++; lastTouchIdx = i; }
+            }
+            prevIn = inBand;
+        }
+        const volRatio = (zoneBars > 0 && avgVolAll > 0) ? (zoneVolSum / zoneBars) / avgVolAll : 0;
+        const age = lastIdx - idxMin;
+        const sinceTouch = lastIdx - lastTouchIdx;
+
+        const confl = [];
+        if (ma50v && ma50v >= bandLo && ma50v <= bandHi) confl.push('MA50');
+        if (ma200v && ma200v >= bandLo && ma200v <= bandHi) confl.push('MA200');
+        const rn = roundConfluence(bandLo, bandHi);
+        if (rn !== null) confl.push('round ' + rn.toFixed(rn >= 100 ? 0 : 2));
+        if (members.length >= 3) confl.push(members.length + ' pivots');
+
+        let score = 0;
+        score += Math.min(wSum, 4) / 4 * 40;          // structural weight / count
+        score += Math.min(touches, 6) / 6 * 30;       // repeatedly tested
+        score += Math.min(volRatio, 3) / 3 * 15;      // volume traded at zone
+        score += confl.length ? 10 : 0;               // confluence
+        score += sinceTouch <= 20 ? 5 : 0;            // recently relevant
+        score = Math.round(Math.min(score, 100));
+
+        const type = center < lastClose ? 'S' : 'R';  // polarity by position
+        return { type, price: center, priceLo: bandLo, priceHi: bandHi,
+                 pivots: members.length, touches, volRatio, age, sinceTouch, confl, score };
+    });
+
+    // 4) Rank by strength, keep the top N per side. Thin dashed lines at the
+    //    zone center; opacity (and a 2px nudge for the strongest) encode score.
     if (!pane._srLines) pane._srLines = [];
     pane._srLines.forEach(l => pane.series.removePriceLine(l));
     pane._srLines = [];
 
-    const recentR = srLevels.filter(s => s.type === 'R').slice(-4);
-    const recentS = srLevels.filter(s => s.type === 'S').slice(-4);
-    recentR.forEach(r => {
+    const supports = zones.filter(z => z.type === 'S').sort((a, b) => b.score - a.score).slice(0, 2);
+    const resists = zones.filter(z => z.type === 'R').sort((a, b) => b.score - a.score).slice(0, 3);
+    const selected = supports.concat(resists);
+    pane._srLevelData = selected;
+
+    selected.forEach(z => {
+        const rgb = z.type === 'S' ? '8,153,129' : '242,54,69';
+        const opacity = (0.35 + 0.55 * (z.score / 100)).toFixed(2);
         const pl = pane.series.createPriceLine({
-            price: r.price,
-            color: 'rgba(242,54,69,0.5)',
-            lineWidth: 1,
+            price: z.price,
+            color: `rgba(${rgb},${opacity})`,
+            lineWidth: z.score >= 70 ? 2 : 1, // thin lines; only strongest get 2px
             lineStyle: 2, // dashed
             axisLabelVisible: false,
         });
         pane._srLines.push(pl);
     });
-    recentS.forEach(s => {
-        const pl = pane.series.createPriceLine({
-            price: s.price,
-            color: 'rgba(8,153,129,0.5)',
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: false,
-        });
-        pane._srLines.push(pl);
-    });
-
-    // Return markers (caller merges and sets)
-    markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
-    return markers;
 }
 
 function removeSupResEPS(pane) {
+    pane._srLevelData = null;
     if (pane._maSeries) {
         Object.values(pane._maSeries).forEach(s => { try { pane.chart.removeSeries(s); } catch(e) {} });
         pane._maSeries = null;
@@ -2863,6 +2941,156 @@ function removeSupResEPS(pane) {
         pane._srLines.forEach(l => { try { pane.series.removePriceLine(l); } catch(e) {} });
         pane._srLines = [];
     }
+}
+
+// ─── Institutional Accumulation Indicator ─────────────────────────────────────
+// Combines pure-OHLCV institutional-buying inference (works today) with real
+// bulk/block deal footprints fetched from /api/bulkblock (accrued daily).
+//   • Pocket pivot   → up-close bar whose volume exceeds the largest down-day
+//                      volume of the prior N bars. Marker: green 'P' belowBar.
+//   • Money-flow div → OBV higher than mfLookback bars ago while price is
+//                      flat/down (hidden accumulation). Marker: teal 'A'.
+//   • Bulk/Block buy → blue 'B' aboveBar; sell → red 'S' aboveBar (daily only).
+const instAccumSettings = { ppLookback: 10, mfLookback: 20, showDeals: true };
+
+function _computeOBV(closes, vols) {
+    const obv = new Array(closes.length).fill(0);
+    for (let i = 1; i < closes.length; i++) {
+        if (closes[i] > closes[i - 1]) obv[i] = obv[i - 1] + vols[i];
+        else if (closes[i] < closes[i - 1]) obv[i] = obv[i - 1] - vols[i];
+        else obv[i] = obv[i - 1];
+    }
+    return obv;
+}
+
+function applyInstAccum(pane, candles, volumes) {
+    if (!candles || candles.length < 12) return [];
+    const { ppLookback, mfLookback } = instAccumSettings;
+    const closes = candles.map(c => c.close);
+    const opens = candles.map(c => c.open);
+    const vols = volumes.map(v => v.value);
+    const obv = _computeOBV(closes, vols);
+    const markers = [];
+    const tipMap = new Map();   // time -> array of explanation lines (for hover)
+    const _push = (t, line) => { if (!tipMap.has(t)) tipMap.set(t, []); tipMap.get(t).push(line); };
+    let ppCount = 0, lastPP = null, lastDiv = null;
+
+    for (let i = Math.max(ppLookback, mfLookback); i < candles.length; i++) {
+        // Pocket pivot
+        if (closes[i] > opens[i]) {
+            let maxDownVol = 0;
+            for (let j = i - ppLookback; j < i; j++) {
+                if (j > 0 && closes[j] < closes[j - 1]) maxDownVol = Math.max(maxDownVol, vols[j]);
+            }
+            if (maxDownVol > 0 && vols[i] > maxDownVol) {
+                markers.push({ time: candles[i].time, position: 'belowBar', color: '#089981', shape: 'arrowUp', text: 'P', size: 1 });
+                const ratio = (vols[i] / maxDownVol).toFixed(2);
+                _push(candles[i].time, `<span style="color:#089981;font-weight:600">P — Pocket Pivot</span><br>Up-day volume beat every down-day in the last ${ppLookback} bars (${ratio}× the biggest). Hallmark of stealth institutional buying.`);
+                ppCount++; lastPP = candles[i].time;
+            }
+        }
+        // Money-flow (OBV) divergence: accumulation while price stalls
+        if (obv[i] > obv[i - mfLookback] && closes[i] <= closes[i - mfLookback]) {
+            markers.push({ time: candles[i].time, position: 'belowBar', color: '#26a69a', shape: 'text', text: 'A', size: 0 });
+            const pxChg = ((closes[i] / closes[i - mfLookback] - 1) * 100).toFixed(2);
+            _push(candles[i].time, `<span style="color:#26a69a;font-weight:600">A — Accumulation Divergence</span><br>OBV rose over the last ${mfLookback} bars while price was flat/down (${pxChg}%). Hidden buying not visible in price.`);
+            lastDiv = candles[i].time;
+        }
+    }
+
+    pane._instAccumMap = tipMap;
+
+    const last = candles.length - 1;
+    const obvSlope = obv[last] - obv[Math.max(0, last - mfLookback)];
+
+    let panel = pane.el.querySelector('.instaccum-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'instaccum-panel';
+        pane.el.querySelector('.chart-container').appendChild(panel);
+    }
+    panel.style.display = 'block';
+    const tipPP   = `Number of pocket-pivot bars (“P” markers) in the visible history. A pocket pivot is an up-day whose volume beats every down-day of the prior ${ppLookback} bars — a footprint of stealth institutional buying.`;
+    const tipLast = 'Date of the most recent pocket-pivot bar.';
+    const tipOBV  = `Direction of On-Balance Volume (running buying-vs-selling volume tally) over the last ${mfLookback} bars. ▲ = net accumulation, ▼ = net distribution.`;
+    const tipDiv  = 'Most recent date where OBV rose while price was flat or down — i.e. quiet accumulation under the surface.';
+    const tipDeal = 'Exchange-reported bulk & block deals (≥0.5% of equity / >₹5 cr). “X on chart” = deals whose date is in the visible candles; “Y total” = all cached deals for this stock. Hover the B/S markers for client name & quantity.';
+    panel.innerHTML = `
+        <div title="${tipPP}"><span>Pocket Pivots</span><span class="${ppCount > 0 ? 'pos' : ''}">${ppCount}</span></div>
+        <div title="${tipLast}"><span>Last Pivot</span><span>${lastPP || '\u2014'}</span></div>
+        <div title="${tipOBV}"><span>OBV slope ${mfLookback}D</span><span class="${obvSlope >= 0 ? 'pos' : 'neg'}">${obvSlope >= 0 ? '\u25b2' : '\u25bc'}</span></div>
+        <div title="${tipDiv}"><span>Last Divergence</span><span>${lastDiv || '\u2014'}</span></div>
+        <div title="${tipDeal}"><span>Bulk/Block Deals</span><span class="instaccum-deal-count">\u2026</span></div>
+    `;
+    return markers;
+}
+
+async function fetchInstAccumDeals(pane, candles) {
+    const countSpan = pane.el.querySelector('.instaccum-panel .instaccum-deal-count');
+    if (!instAccumSettings.showDeals) { if (countSpan) countSpan.textContent = 'off'; return []; }
+    if (pane.interval !== '1d') { if (countSpan) countSpan.textContent = 'daily only'; return []; }
+    const dateSet = new Set(candles.map(c => (typeof c.time === 'string' ? c.time : null)).filter(Boolean));
+    let deals = [];
+    try {
+        if (pane._instDealsSym === pane.symbol && pane._instDealsCache) {
+            deals = pane._instDealsCache;
+        } else {
+            const resp = await fetch(`${API_BASE}/api/bulkblock?symbol=${encodeURIComponent(pane.symbol)}`, { signal: _fetchSignal(8000) });
+            const data = await resp.json();
+            deals = data.deals || [];
+            pane._instDealsCache = deals;
+            pane._instDealsSym = pane.symbol;
+        }
+    } catch (e) { deals = []; }
+
+    const markers = [];
+    const seen = new Set();
+    let shown = 0;
+    // Group all deals by date for the hover tooltip (multiple clients on the same
+    // day are common — 22 buyers on LENSKART 2026-06-11). Marker is one per
+    // date+side; tooltip lists every client.
+    const byDate = new Map();
+    for (const d of deals) {
+        if (!dateSet.has(d.date)) continue;
+        if (!byDate.has(d.date)) byDate.set(d.date, []);
+        byDate.get(d.date).push(d);
+    }
+    if (!pane._instAccumMap) pane._instAccumMap = new Map();
+    const _fmtQty = (q) => { const n = Number(String(q).replace(/,/g,'')); if (!isFinite(n) || !n) return q; return n >= 1e7 ? (n/1e7).toFixed(2)+' Cr' : n >= 1e5 ? (n/1e5).toFixed(2)+' L' : n.toLocaleString(); };
+    for (const d of deals) {
+        if (!dateSet.has(d.date)) continue;
+        const isBuy = String(d.side || '').toUpperCase() === 'BUY';
+        const key = d.date + (isBuy ? 'B' : 'S');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        shown++;
+        markers.push({ time: d.date, position: 'aboveBar', color: isBuy ? '#2962ff' : '#f23645', shape: 'text', text: isBuy ? 'B' : 'S', size: 1 });
+    }
+    // Build tooltip lines per date (covers both B and S on the same day)
+    for (const [date, list] of byDate.entries()) {
+        const buys = list.filter(x => String(x.side||'').toUpperCase() === 'BUY');
+        const sells = list.filter(x => String(x.side||'').toUpperCase() === 'SELL');
+        const sect = (label, color, arr) => {
+            if (!arr.length) return '';
+            const head = `<span style="color:${color};font-weight:600">${label} (${arr.length})</span> — institutional ${label === 'BUY' ? 'purchase' : 'sale'} reported by the exchange (bulk/block deal).`;
+            const lines = arr.slice(0, 4).map(x => `• ${(x.client || '').slice(0,40) || '(client n/a)'} · ${_fmtQty(x.qty)} @ ₹${x.price}`);
+            const more = arr.length > 4 ? `<br>• … +${arr.length - 4} more` : '';
+            return head + '<br>' + lines.join('<br>') + more;
+        };
+        const html = [sect('BUY', '#2962ff', buys), sect('SELL', '#f23645', sells)].filter(Boolean).join('<br>');
+        if (html) {
+            if (!pane._instAccumMap.has(date)) pane._instAccumMap.set(date, []);
+            pane._instAccumMap.get(date).push(html);
+        }
+    }
+    if (countSpan) countSpan.textContent = `${shown} on chart / ${deals.length} total`;
+    return markers;
+}
+
+function removeInstAccum(pane) {
+    pane._instAccumMap = null;
+    const panel = pane.el.querySelector('.instaccum-panel');
+    if (panel) panel.style.display = 'none';
 }
 
 // ─── RSI Indicator ────────────────────────────────────────────────────────────
@@ -3133,7 +3361,18 @@ function removeRelativeStrength(pane) {
 }
 
 // ─── Indicator Flyout Menu ────────────────────────────────────────────────────
-const activeIndicators = new Set();
+const activeIndicators = (() => {
+    try {
+        return new Set(JSON.parse(localStorage.getItem('activeIndicators') || '[]'));
+    } catch (e) {
+        return new Set();
+    }
+})();
+function saveActiveIndicators() {
+    try {
+        localStorage.setItem('activeIndicators', JSON.stringify([...activeIndicators]));
+    } catch (e) {}
+}
 const indiFlyout = document.getElementById('indiFlyout');
 const indiMenuBtn = document.getElementById('indiMenuBtn');
 
@@ -3149,7 +3388,7 @@ indiMenuBtn.addEventListener('click', (e) => {
 // Close all flyouts when clicking outside
 document.addEventListener('click', (e) => {
     const allFlyouts = document.querySelectorAll('.sidebar-flyout, .indi-flyout');
-    const allBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn'), document.getElementById('alertMenuBtn'), document.getElementById('watchlistMenuBtn'), document.getElementById('indexMenuBtn'), document.getElementById('syncMenuBtn')];
+    const allBtns = [indiMenuBtn, document.getElementById('barMenuBtn'), document.getElementById('timeMenuBtn'), document.getElementById('chartMenuBtn'), document.getElementById('lineToolsBtn'), document.getElementById('shapeToolsBtn'), document.getElementById('alertMenuBtn'), document.getElementById('watchlistMenuBtn')];
     const clickedInsideFlyout = [...allFlyouts].some(f => f.contains(e.target));
     const clickedBtn = allBtns.some(b => b === e.target || b?.contains(e.target));
     if (!clickedInsideFlyout && !clickedBtn) {
@@ -3168,6 +3407,7 @@ document.querySelectorAll('.indi-flyout-row').forEach(row => {
             panes.forEach(pane => {
                 if (indi === 'smartvpsg') removeSmartVPSG(pane);
                 if (indi === 'supreseps') removeSupResEPS(pane);
+                if (indi === 'instaccum') removeInstAccum(pane);
                 if (indi === 'rsi') removeRSI(pane);
                 if (indi === 'macd') removeMACD(pane);
                 if (indi === 'rs') removeRelativeStrength(pane);
@@ -3176,6 +3416,7 @@ document.querySelectorAll('.indi-flyout-row').forEach(row => {
             activeIndicators.add(indi);
             row.classList.add('active');
         }
+        saveActiveIndicators();
         // Update button highlight
         indiMenuBtn.classList.toggle('has-active', activeIndicators.size > 0);
         // Re-apply indicators using cached candles — no /api/historical refetch.
@@ -3190,21 +3431,28 @@ document.querySelectorAll('.indi-flyout-row').forEach(row => {
     });
 });
 
+document.querySelectorAll('.indi-flyout-row').forEach(row => {
+    if (activeIndicators.has(row.dataset.indi)) row.classList.add('active');
+});
+indiMenuBtn.classList.toggle('has-active', activeIndicators.size > 0);
+
 // ─── Indicator Settings Modal ─────────────────────────────────────────────────
 const indiModal = document.getElementById('indiModalOverlay');
 
 function openIndiSettings(indi) {
-    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalRSI', 'indiModalMACD', 'indiModalRS'];
+    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalInstAccum', 'indiModalRSI', 'indiModalMACD', 'indiModalRS'];
     allPanels.forEach(id => document.getElementById(id).style.display = 'none');
     const title = document.getElementById('indiModalTitle');
     if (indi === 'supreseps') {
         document.getElementById('indiModalSupResEPS').style.display = '';
-        title.textContent = 'SupResEPS Settings';
+        title.textContent = 'SupRes Settings';
         document.getElementById('indi_ma10').value = supResEPSSettings.ma10;
         document.getElementById('indi_ma20').value = supResEPSSettings.ma20;
         document.getElementById('indi_ma50').value = supResEPSSettings.ma50;
         document.getElementById('indi_ma200').value = supResEPSSettings.ma200;
         document.getElementById('indi_pivotLen').value = supResEPSSettings.pivotLen;
+        document.getElementById('indi_zoneAtr').value = supResEPSSettings.atrMult;
+        document.getElementById('indi_maxPerSide').value = supResEPSSettings.maxPerSide;
     } else if (indi === 'rsi') {
         document.getElementById('indiModalRSI').style.display = '';
         title.textContent = 'RSI Settings';
@@ -3222,12 +3470,15 @@ function openIndiSettings(indi) {
         title.textContent = 'Relative Strength Settings';
         document.getElementById('indi_rsBenchmark').value = rsSettings.benchmark;
         document.getElementById('indi_rsMaPeriod').value = rsSettings.maPeriod;
+    } else if (indi === 'instaccum') {
+        document.getElementById('indiModalInstAccum').style.display = '';
+        title.textContent = 'Institutional Accumulation Settings';
+        document.getElementById('indi_ppLookback').value = instAccumSettings.ppLookback;
+        document.getElementById('indi_mfLookback').value = instAccumSettings.mfLookback;
+        document.getElementById('indi_showDeals').checked = !!instAccumSettings.showDeals;
     } else {
         document.getElementById('indiModalSmartVPSG').style.display = '';
         title.textContent = 'SmartVPSG Settings';
-        document.getElementById('indi_minVolume').value = smartVPSGSettings.minVolume;
-        document.getElementById('indi_priceMove').value = smartVPSGSettings.priceMoveThresh;
-        document.getElementById('indi_volLookback').value = smartVPSGSettings.volLookback;
         document.getElementById('indi_avgLookback').value = smartVPSGSettings.avgLookback;
         document.getElementById('indi_showVolProfile').checked = !!smartVPSGSettings.showVolProfile;
         document.getElementById('indi_vpBuckets').value = smartVPSGSettings.vpBuckets || 30;
@@ -3251,6 +3502,8 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
         supResEPSSettings.ma50 = parseInt(document.getElementById('indi_ma50').value) || 50;
         supResEPSSettings.ma200 = parseInt(document.getElementById('indi_ma200').value) || 200;
         supResEPSSettings.pivotLen = parseInt(document.getElementById('indi_pivotLen').value) || 15;
+        supResEPSSettings.atrMult = parseFloat(document.getElementById('indi_zoneAtr').value) || 0.6;
+        supResEPSSettings.maxPerSide = parseInt(document.getElementById('indi_maxPerSide').value) || 4;
     } else if (indi === 'rsi') {
         rsiSettings.period = parseInt(document.getElementById('indi_rsiPeriod').value) || 14;
         rsiSettings.overbought = parseInt(document.getElementById('indi_rsiOB').value) || 70;
@@ -3263,10 +3516,12 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
         rsSettings.benchmark = document.getElementById('indi_rsBenchmark').value;
         rsSettings.maPeriod = parseInt(document.getElementById('indi_rsMaPeriod').value) || 50;
         _rsBenchmarkCache = {}; // clear cache on benchmark change
+    } else if (indi === 'instaccum') {
+        instAccumSettings.ppLookback = parseInt(document.getElementById('indi_ppLookback').value) || 10;
+        instAccumSettings.mfLookback = parseInt(document.getElementById('indi_mfLookback').value) || 20;
+        instAccumSettings.showDeals = !!document.getElementById('indi_showDeals').checked;
+        panes.forEach(p => { p._instDealsCache = null; p._instDealsSym = null; });
     } else {
-        smartVPSGSettings.minVolume = parseInt(document.getElementById('indi_minVolume').value) || 1000000;
-        smartVPSGSettings.priceMoveThresh = parseFloat(document.getElementById('indi_priceMove').value) || 3;
-        smartVPSGSettings.volLookback = parseInt(document.getElementById('indi_volLookback').value) || 9;
         smartVPSGSettings.avgLookback = parseInt(document.getElementById('indi_avgLookback').value) || 21;
         smartVPSGSettings.showVolProfile = !!document.getElementById('indi_showVolProfile').checked;
         smartVPSGSettings.vpBuckets = parseInt(document.getElementById('indi_vpBuckets').value) || 30;
@@ -3784,7 +4039,7 @@ wlSearchInput.addEventListener('input', () => {
         // Local filter first
         let matches = symbolCache.filter(s => s.startsWith(q)).slice(0, 15);
         // If not enough, try API
-        if (matches.length < 5 && q.length >= 4) {
+        if (matches.length < 5 && q.length >= 3) {
             try {
                 const resp = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(q)}`);
                 const data = await resp.json();

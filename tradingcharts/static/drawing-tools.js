@@ -697,13 +697,25 @@ function redrawAll(pane, cursorPoint) {
     const canvas = pane.drawingCanvas;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const paneDrawings = drawings[pane.id] || [];
+    const hasInProgress = !!(drawingState && drawingState.paneId === pane.id && cursorPoint);
+    if (!paneDrawings.length && !hasInProgress) {
+        // Hot path: this runs on every crosshair move / pan frame. With
+        // nothing to render, clear once after the last drawing disappears
+        // and skip all canvas work thereafter.
+        if (canvas._hadDrawings) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas._hadDrawings = false;
+        }
+        return;
+    }
+    canvas._hadDrawings = true;
     const dpr = window.devicePixelRatio;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.scale(dpr, dpr);
 
     // Draw committed drawings
-    const paneDrawings = drawings[pane.id] || [];
     paneDrawings.forEach((d, idx) => {
         const isHovered = (activeTool === 'cursor' && hoveredDrawing && hoveredDrawing.paneId === pane.id && hoveredDrawing.index === idx);
         const isSelected = (activeTool === 'cursor' && selectedDrawing && selectedDrawing.paneId === pane.id && selectedDrawing.index === idx);
@@ -1567,16 +1579,5 @@ function loadDrawings() {
 
 // Expose state for pane access
 window.drawingsState = { drawings, getActiveTool: () => activeTool };
-
-// Clear all drawings on a single pane (used when its symbol is replaced).
-window.clearPaneDrawings = function(paneId) {
-    if (!paneId) return;
-    if (drawings[paneId]) {
-        delete drawings[paneId];
-        saveDrawings();
-    }
-    const pane = (window.panes || []).find(p => p.id === paneId);
-    if (pane) redrawAll(pane);
-};
 
 })();
