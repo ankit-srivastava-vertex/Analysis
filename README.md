@@ -12,11 +12,12 @@ Automated daily market analysis pipeline for Indian equities. Covers bulk/block 
 4. [run_all.py — Main Orchestrator](#run_allpy--main-orchestrator)
 5. [Standalone Analysis Scripts](#standalone-analysis-scripts)
 6. [Portfolio System](#portfolio-system)
-7. [Data Layer](#data-layer)
-8. [Scheduling & Automation](#scheduling--automation)
-9. [Output Files & Directory Structure](#output-files--directory-structure)
-10. [Inter-Module Dependencies](#inter-module-dependencies)
-11. [Logging](#logging)
+7. [Interactive Web Apps](#interactive-web-apps)
+8. [Data Layer](#data-layer)
+9. [Scheduling & Automation](#scheduling--automation)
+10. [Output Files & Directory Structure](#output-files--directory-structure)
+11. [Inter-Module Dependencies](#inter-module-dependencies)
+12. [Logging](#logging)
 
 ---
 
@@ -24,10 +25,16 @@ Automated daily market analysis pipeline for Indian equities. Covers bulk/block 
 
 ```bash
 cd /Users/ankit.srivastava/Documents/Analysis
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
 
-# Additional deps not in requirements.txt (install manually):
+# Create the venv, upgrade the installer, and install EVERY requirements*.txt
+# in the project (root + tradingcharts/ + any future ones) in a single pip
+# resolver pass — avoids version conflicts from sequential installs:
+python3 -m venv venv && venv/bin/python -m pip install -U pip setuptools wheel && \
+  venv/bin/python -m pip install $(find . -path ./venv -prune -o -name 'requirements*.txt' -print | sed 's/^/-r /')
+
+source venv/bin/activate
+
+# Additional deps not in requirements.txt (install manually if missing):
 pip install smartapi-python pyotp fpdf2 PyPDF2 httpx numpy
 
 # Configure credentials
@@ -108,6 +115,7 @@ Analysis/
 ├── india_macro.py                # India macro dashboard (standalone)
 ├── forensic_accounting.py        # Single-stock forensic PDF report (standalone)
 ├── breakout_review.py            # Walk-forward validation of breakout picks (standalone)
+├── breakout_deep_analysis.py     # Rule-mining on review data → elite-subset filters (standalone)
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
@@ -129,8 +137,20 @@ Analysis/
 │   ├── holdings_meta.csv         # User SL/Target levels per position
 │   └── mf_holdings.csv           # MF holdings context
 │
+├── tradingcharts/                # Browser charting dashboard (Flask, port 5050)
+│   ├── app.py                    # REST API + live ticks (Angel WS) + state
+│   ├── run.py / run.sh / run.bat # Cross-platform launchers
+│   ├── static/                   # Single-page frontend (index.html, drawing-tools.js)
+│   ├── state/state.json          # Server-side persisted UI state
+│   └── multiscreen/              # Sidecar: 4 isolated workspaces (port 5051)
+├── screener/                     # Screener.in-backed valuation/financials app (Flask, port 5052)
+│   ├── app.py                    # Scrapes Screener.in → financial time-series API
+│   ├── run.py                    # Launcher
+│   └── static/                   # Frontend (reuses tradingcharts assets)
+│
 ├── index_constituents.json       # Static sector → ticker mapping
 ├── fii_equity_cache.csv          # Cached FII daily flows (incremental)
+├── fii_oi_cache.csv              # Cached FII derivatives OI (incremental)
 ├── .angel_scrip_master.json      # Cached Angel scrip master (~25 MB, weekly TTL)
 │
 ├── requirements.txt              # Python dependencies
@@ -138,12 +158,15 @@ Analysis/
 ├── TRADING_STRATEGY.md           # Strategy documentation
 ├── README.md                     # ← this file
 │
-├── data/                         # Data storage (india_macro CSVs)
-│   └── india_macro/              # 28 indicator CSVs (append-only)
+├── data/                         # Data storage
+│   ├── india_macro/              # 28 indicator CSVs (append-only)
+│   ├── backtest/                 # Cached OHLCV parquets + backtest result JSONs
+│   └── bulkblock/                # Cached bulk/block deal data
 ├── logs/                         # Per-run pipeline logs (auto-pruned 30d)
 ├── Output/                       # Breakout scanner outputs, review archives
 │   └── WeekN/                    # Weekly breakout snapshots
 ├── .cache/                       # Misc fetch caches (NSE API, Screener.in)
+├── .vscode/settings.json         # Editor: python.terminal.useEnvFile + envFile
 ├── venv/                         # Local virtualenv (gitignored)
 │
 ├── .github/workflows/scenarios.yml   # Optional cloud schedule (GH Actions)
@@ -184,6 +207,10 @@ jugaad-data, yfinance, xlrd>=2.0.1, pdfplumber, python-dotenv
 
 Additional (install manually): `smartapi-python`, `pyotp`, `fpdf2`, `PyPDF2`, `httpx`, `numpy`
 
+The web apps have their own deps in `tradingcharts/requirements.txt`
+(`flask`, `flask-cors`, `waitress`, `pandas`). The Quick Start one-liner installs
+every `requirements*.txt` in the project in a single resolver pass.
+
 ### `.env` Example
 
 ```ini
@@ -214,6 +241,23 @@ DATA_GOV_IN_API_KEY=...
 Generate a Gmail App Password at <https://myaccount.google.com/apppasswords>
 (requires 2-Step Verification). If `EMAIL_*` is not set, `run_all.py`
 still completes and writes all files — it just skips the email step.
+
+### VS Code — Terminal `.env` Injection
+
+`.vscode/settings.json` enables the Python extension to load `.env` variables
+into integrated terminals automatically:
+
+```json
+{
+  "python.terminal.useEnvFile": true,
+  "python.envFile": "${workspaceFolder}/.env"
+}
+```
+
+With this, running scripts directly in the terminal (e.g. `venv/bin/python
+run_all.py`) sees `ANGEL_*` / `EMAIL_*` / `SCREENER_*` without manual `export`.
+Injection applies only to terminals opened **after** the setting is enabled —
+reopen existing terminals to pick it up.
 
 ---
 
@@ -654,6 +698,33 @@ python3 breakout_review.py --weeks 1 2 --full
 
 ---
 
+### breakout_deep_analysis.py — Breakout Rule Mining
+
+**Purpose:** Evidence-based pattern mining on the accumulated walk-forward
+review data. Finds selection **rules** (feature thresholds + combinations) that
+maximise the probability of a real, tradeable breakout — the highest-conviction
+"elite" subset of scanner candidates. Analysis-only; does **not** modify the
+scanner.
+
+**Input:** `Output/review_*.xlsx` (sheet `All Results`, produced by
+`breakout_review.py`).
+
+**Outcome targets per candidate:**
+- `true_bo` — status == `TRUE_BREAKOUT`
+- `tradeable` — max gain ≥ 15%
+- `big_win` — max gain ≥ 25%
+- `dud` — max gain < 5% and ended negative
+
+Gain-magnitude stats run on "mature" candidates only (≥ 15 sessions since scan).
+
+**Usage:**
+```bash
+python3 breakout_deep_analysis.py                # latest review file
+python3 breakout_deep_analysis.py <review.xlsx>  # specific file
+```
+
+---
+
 ## Portfolio System
 
 Located in `portfolio/`. A parallel analysis pipeline focused on owned positions rather than the broader market.
@@ -838,6 +909,63 @@ Unified parser for broker holdings exports.
 #### _prices.py
 
 Shared helper that fetches & caches daily Close prices for all holdings. Used by `risk_metrics` and `correlation_clusters` to avoid duplicate data pulls within a single orchestrator run.
+
+---
+
+## Interactive Web Apps
+
+Three self-contained browser apps sit on top of the shared data layer. They are
+**not** part of `run_all.py` — launch each independently. All run locally and
+reuse the parent project's `.env` (Angel One) and `data_provider.py`.
+
+| App | Port | Launch | Purpose |
+|-----|------|--------|---------|
+| **tradingcharts** | 5050 | `python3 tradingcharts/run.py` | Full charting dashboard |
+| **multiscreen** (sidecar) | 5051 | `python3 tradingcharts/multiscreen/run.py` | 4 isolated workspace replicas of tradingcharts |
+| **screener** | 5052 | `python3 screener/run.py` | Screener.in-backed valuation & financial charts |
+
+### tradingcharts/ — Charting Dashboard (port 5050)
+
+Flask + vanilla-JS single-page dashboard (lightweight-charts). Angel One
+SmartAPI primary, jugaad-data / yfinance fallback — all via `../data_provider.py`.
+
+- **Backend** (`app.py`): REST OHLCV (`/api/historical`), symbol search, live
+  quote polling, batched live-tick endpoint (`/api/ticks`, fed by an Angel
+  WebSocket thread into an in-memory cache), and server-side UI-state
+  persistence (`/api/state` → atomic `state/state.json`). Self-healing on
+  port 5050 (kills stale instances on boot). Served by `waitress`.
+- **Chart types:** Candles, Bars, Heikin Ashi. Themes Dark/Light. Layouts
+  1/2/4/6/8 panes. Timeframes 5m–1mo, view ranges 1M–10Y.
+- **Indicators:** SmartVPSG (gap/volume markers, 52w stats, R.Vol, optional
+  Volume Profile), SupResEPS (MAs 10/20/50/200 + pivots), RSI, MACD, Relative
+  Strength vs 9 benchmark indices, and **InstiAccum** (institutional-accumulation
+  composite score: 6m momentum, distance-from-52wH, volume-surge, vol-adjusted
+  return, plus bulk/block deal-days).
+- **Drawings:** 14 TradingView-style tools with stable IDs (alert-referenceable).
+- **Alerts:** Price / Volume / Drawing-Cross, Once/Hourly/Daily, browser
+  notification + audio beep.
+- **Watchlists:** up to 45 lists × 450 stocks, TV-style CSV upload, per-row live
+  quote.
+
+See [tradingcharts/README.md](tradingcharts/README.md) for full detail.
+
+### multiscreen/ — 4 Isolated Workspaces (port 5051)
+
+Sidecar server that hosts four independent dashboards
+(`/w/default`, `/w/ws2`, `/w/ws3`, `/w/ws4`) **without touching** the main app.
+All `/api/*` calls except `/api/state` are reverse-proxied to port 5050 (one
+Angel WS, one cache, shared). Each workspace persists its own
+`multiscreen/state/<wsid>.json`; a `shim.js` namespaces every `localStorage`
+key with `tc:<wsid>:` so the tabs never collide. Killing the sidecar leaves the
+main server untouched. See [tradingcharts/multiscreen/README.md](tradingcharts/multiscreen/README.md).
+
+### screener/ — Valuation & Financials App (port 5052)
+
+Flask app that scrapes **Screener.in** (company financials) and yfinance, and
+exposes a financial time-series API (Sales, Net Profit, EPS, PE/PB, cash-flow,
+balance-sheet items, etc.) rendered as charts. Fully `__file__`-relative;
+reuses the tradingcharts frontend assets. Uses `SCREENER_USER` / `SCREENER_PASS`
+from `.env` for authenticated screens.
 
 ---
 
@@ -1052,6 +1180,7 @@ All data flows through public/free sources. No paid market-data feeds.
 | Source | Used by | Auth |
 |---|---|---|
 | **Angel One SmartAPI** | `data_provider.py` (primary OHLCV) | `.env`: `ANGEL_*` |
+| **Angel One WebSocket** | `tradingcharts/app.py` (live ticks) | `.env`: `ANGEL_*` |
 | **jugaad-data** (NSE scrape) | `data_provider.py` (fallback) | None |
 | **yfinance** | `data_provider.py` (final fallback), indices | None |
 | **NSE archives CSV** | `multi_pct_down.py` (universe seed, F&O list) | None |
@@ -1062,7 +1191,7 @@ All data flows through public/free sources. No paid market-data feeds.
 | **NSDL FPI monthly** | `fii_flows.py` | None |
 | **NSE BhavCopy (F&O)** | `fno_max_oi.py` (EOD mode) | None |
 | **Tickertape Screener API** | `fii_stake_tracker.py`, `pledge_promoter.py` | None |
-| **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py` | `.env`: `SCREENER_*` |
+| **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py`, `screener/app.py` | `.env`: `SCREENER_*` |
 | **chittorgarh.com** | `ipo_anchor_tracker.py` (anchor tables) | None |
 | **ETMoney** | `mf_overlap.py` (MF scheme lists) | None |
 | **RBI / AMFI / CEA / PPAC / NSDL / CDSL** | `india_macro.py` (28 indicators) | None |
