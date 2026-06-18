@@ -204,7 +204,7 @@ def main():
         from waitress import serve
         print(f"[multiscreen] serving on http://127.0.0.1:{PORT}  upstream={UPSTREAM}")
         print(f"[multiscreen] workspaces: {', '.join(WORKSPACES)}")
-        serve(app, host="127.0.0.1", port=PORT, threads=8)
+        serve(app, host="127.0.0.1", port=PORT, threads=24)
     except ImportError:
         app.run(host="127.0.0.1", port=PORT, threaded=True)
 
