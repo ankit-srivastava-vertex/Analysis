@@ -6811,8 +6811,39 @@ def _latin(text):
 class ForensicReport(FPDF):
     """Generate the forensic accounting PDF report."""
 
-    # Font paths (Arial as Calibri substitute — metrically similar)
-    _FONT_DIR = "/System/Library/Fonts/Supplemental"
+    # Candidate metric-compatible sans font sets, by platform (first present wins)
+    _FONT_SETS = [
+        # macOS — Arial
+        {"": "/System/Library/Fonts/Supplemental/Arial.ttf",
+         "B": "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+         "I": "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+         "BI": "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf"},
+        # Linux — Liberation Sans (metric-compatible with Arial)
+        {"": "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+         "B": "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+         "I": "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+         "BI": "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf"},
+        # Linux — DejaVu Sans (near-universal on Debian/Ubuntu)
+        {"": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+         "B": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "I": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+         "BI": "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"},
+        # Windows — Arial
+        {"": r"C:\Windows\Fonts\arial.ttf",
+         "B": r"C:\Windows\Fonts\arialbd.ttf",
+         "I": r"C:\Windows\Fonts\ariali.ttf",
+         "BI": r"C:\Windows\Fonts\arialbi.ttf"},
+    ]
+
+    @classmethod
+    def _resolve_fonts(cls):
+        for fam in cls._FONT_SETS:
+            if all(os.path.isfile(p) for p in fam.values()):
+                return fam
+        raise FileNotFoundError(
+            "No usable TTF font set found. On Linux install one of:\n"
+            "  sudo apt install fonts-liberation   (or)   sudo apt install fonts-dejavu-core"
+        )
 
     def __init__(self, company, data, analyzer):
         super().__init__()
@@ -6827,11 +6858,12 @@ class ForensicReport(FPDF):
         self._section_num = 0  # auto-increment section numbering
         self._subsection_num = 0  # resets per section
 
-        # Register Calibri font family (using Arial TTF as metric-compatible substitute)
-        self.add_font("Calibri", "", os.path.join(self._FONT_DIR, "Arial.ttf"))
-        self.add_font("Calibri", "B", os.path.join(self._FONT_DIR, "Arial Bold.ttf"))
-        self.add_font("Calibri", "I", os.path.join(self._FONT_DIR, "Arial Italic.ttf"))
-        self.add_font("Calibri", "BI", os.path.join(self._FONT_DIR, "Arial Bold Italic.ttf"))
+        # Register Calibri family using whichever metric-compatible TTF set exists
+        _fonts = self._resolve_fonts()
+        self.add_font("Calibri", "", _fonts[""])
+        self.add_font("Calibri", "B", _fonts["B"])
+        self.add_font("Calibri", "I", _fonts["I"])
+        self.add_font("Calibri", "BI", _fonts["BI"])
 
     def header(self):
         if self.page_no() > 1:
