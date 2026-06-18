@@ -1,11 +1,30 @@
+# ── Core data / scraping ──────────────────────────────
 requests
+httpx
 beautifulsoup4
 pandas
+numpy
 openpyxl
+xlrd>=2.0.1
+
+# ── Market data sources ───────────────────────────────
 nsepython
-plotly
 jugaad-data
 yfinance
-xlrd>=2.0.1
+
+# ── Charting ──────────────────────────────────────────
+plotly
+
+# ── PDF / document parsing & generation ───────────────
 pdfplumber
+fpdf2
+PyPDF2
+
+# ── Angel One SmartAPI (broker historical/live data) ──
+smartapi-python
+pyotp
+logzero
+websocket-client
+
+# ── Config ────────────────────────────────────────────
 python-dotenv
