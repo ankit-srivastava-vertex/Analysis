@@ -9,16 +9,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-VENV_DIR = os.path.join(ROOT, ".venv")
 
 
 def _get_python() -> str:
-    if os.name == "nt":
-        venv_py = os.path.join(VENV_DIR, "Scripts", "python.exe")
-    else:
-        venv_py = os.path.join(VENV_DIR, "bin", "python3")
-    if os.path.isfile(venv_py):
-        return venv_py
+    sub = "Scripts" if os.name == "nt" else "bin"
+    exe = "python.exe" if os.name == "nt" else "python3"
+    for name in (".venv", "venv"):
+        cand = os.path.join(ROOT, name, sub, exe)
+        if os.path.isfile(cand):
+            return cand
     return sys.executable
 
 
