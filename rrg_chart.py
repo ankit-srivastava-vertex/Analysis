@@ -7,7 +7,7 @@ the Nifty 50 benchmark.  Sectors rotate clockwise through four
 quadrants: Leading → Weakening → Lagging → Improving.
 
 Features:
-- 8 timeframes (3-day, 7-day, 2-week, 12-day, 3-week, weekly, monthly, quarterly)
+- 6 timeframes (3-day, 7-day, 12-day, weekly, monthly, quarterly)
 - JdK RS-Ratio and RS-Momentum computation
 - Constituent drill-down: click any custom sector dot to see per-stock
   mini-RRG with independent timeframe selector and stock checkboxes
@@ -75,9 +75,7 @@ ALL_SECTORS.update(SECTOR_ETFS)
 TIMEFRAMES = {
     "3 Day":     (None,     3,  8),
     "7 Day":     (None,     7, 12),
-    "2 Week":    (None,    10, 15),
     "12 Day":    (None,    12, 18),
-    "3 Week":    (None,    15, 20),
     "Weekly":    ("W-FRI", 10, 12),
     "Monthly":   ("ME",     4,  6),
     "Quarterly": ("QE",     2,  4),
@@ -613,9 +611,7 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,san
    <tr style="background:#e3f2fd"><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Timeframe</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">SMA</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">Tail</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Data Used</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Meaning</th></tr>
    <tr><td style="padding:4px 8px;border:1px solid #ddd">3 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">3</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">8</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 8 daily points</td></tr>
    <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">7 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">7</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 12 daily points</td></tr>
-   <tr><td style="padding:4px 8px;border:1px solid #ddd">2 Week</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">10</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">15</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 15 daily points</td></tr>
-   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">12 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">18</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 18 daily points</td></tr>
-   <tr><td style="padding:4px 8px;border:1px solid #ddd">3 Week</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">15</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">20</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 20 daily points</td></tr>
+   <tr><td style="padding:4px 8px;border:1px solid #ddd">12 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">18</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 18 daily points</td></tr>
    <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Weekly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">10</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled W-FRI</td><td style="padding:4px 8px;border:1px solid #ddd">Last 12 weeks (~3 months)</td></tr>
    <tr><td style="padding:4px 8px;border:1px solid #ddd">Monthly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">6</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled month-end</td><td style="padding:4px 8px;border:1px solid #ddd">Last 6 months</td></tr>
    <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Quarterly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">2</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled quarter-end</td><td style="padding:4px 8px;border:1px solid #ddd">Last 4 quarters (~1 year)</td></tr>

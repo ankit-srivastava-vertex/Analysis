@@ -54,7 +54,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         ORCHESTRATORS                                    │
-│  run_all.py (7 market scenarios)   portfolio/portfolio_run_all.py (9)   │
+│  run_all.py (8 market scenarios)   portfolio/portfolio_run_all.py (9)   │
 └────────────┬───────────────────────────────────────┬────────────────────┘
              │                                       │
      ┌───────▼───────┐                     ┌────────▼────────┐
@@ -64,8 +64,9 @@ python3 portfolio/portfolio_run_all.py --no-email
      │  fii_flows     │                     │ sl_target_tracker│
      │  fii_sector    │                     │ risk_metrics    │
      │  sector_mom    │                     │ corr_clusters   │
-     │  rrg_chart     │                     │ pledge_promoter │
-     │  ipo_anchor    │                     │ mf_overlap      │
+     │  nse_ready_sec │                     │ pledge_promoter │
+     │  rrg_chart     │                     │ mf_overlap      │
+     │  ipo_anchor    │                     │ events_calendar │
      └───────┬───────┘                     │ events_calendar │
              │                              │ premarket_dash  │
              │                              └────────┬────────┘
@@ -85,7 +86,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 
 | Subsystem | Entry point | Cadence |
 |---|---|---|
-| **Daily market sweep** (7 scenarios) | `run_all.py` | Mon–Fri 18:00 IST (launchd) |
+| **Daily market sweep** (8 scenarios) | `run_all.py` | Mon–Fri 18:00 IST (launchd) |
 | **Breakout scanner** | `breakout_scanner_angel.py` | On demand |
 | **Single-stock deep PDF** | `forensic_accounting.py` | On demand |
 | **Portfolio analysis** (9 scenarios) | `portfolio/portfolio_run_all.py` | On demand |
@@ -96,7 +97,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 
 ```
 Analysis/
-├── run_all.py                    # Master orchestrator (7 scenarios)
+├── run_all.py                    # Master orchestrator (8 scenarios)
 ├── scripts/
 │   └── run_market_analysis.sh    # launchd wrapper: cd / venv / .env / log
 │
@@ -106,8 +107,9 @@ Analysis/
 ├── fii_flows.py                  # FII daily equity cash flows (scenario 3)
 ├── fii_sector_flows.py           # FII fortnightly sector flows (scenario 4)
 ├── sector_momentum.py            # Mansfield RS per sector (scenario 5)
-├── rrg_chart.py                  # Relative Rotation Graph (scenario 6)
-├── ipo_anchor_tracker.py         # IPO anchor investor tracking (scenario 7)
+├── nse_ready_sectors.py          # Mansfield RS on official NSE sector indices, self-contained provider (scenario 6)
+├── rrg_chart.py                  # Relative Rotation Graph (scenario 7)
+├── ipo_anchor_tracker.py         # IPO anchor investor tracking (scenario 8)
 │
 ├── breakout_scanner_angel.py     # Pre-breakout scanner (standalone, includes multi_pct_down)
 ├── multi_pct_down.py             # Pct-down screener (runs via breakout_scanner_angel)
@@ -268,7 +270,7 @@ The command-centre script that runs all market analysis scenarios in sequence.
 ### Usage
 
 ```bash
-python3 run_all.py                           # run all 7 scenarios + send email
+python3 run_all.py                           # run all 8 scenarios + send email
 python3 run_all.py --no-email                # run all, skip email
 python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 ```
@@ -282,7 +284,7 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 
 ### Available Scenario Names (for `--skip`)
 
-`bulk_block`, `sector_index`, `fii_flows`, `fii_sector_flows`, `sector_momentum`, `rrg`, `ipo_anchor`
+`bulk_block`, `sector_index`, `fii_flows`, `fii_sector_flows`, `sector_momentum`, `nse_sector_rs`, `rrg`, `ipo_anchor`
 
 ### Execution Order
 
@@ -292,9 +294,10 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 | 2 | `sector_index` | `custom_sector_index.py` | Custom equal-weighted sector indices (chart only) |
 | 3 | `fii_flows` | `fii_flows.py` | Daily FII equity cash flows (chart only) |
 | 4 | `fii_sector_flows` | `fii_sector_flows.py` | Fortnightly FII sector-wise flows (chart only) |
-| 5 | `sector_momentum` | `sector_momentum.py` | Mansfield RS per sector (chart + "RS Ranking" sheet) |
-| 6 | `rrg` | `rrg_chart.py` | Relative Rotation Graph (chart only) |
-| 7 | `ipo_anchor` | `ipo_anchor_tracker.py` | IPO anchor investor matching ("IPO Anchor List" sheet) |
+| 5 | `sector_momentum` | `sector_momentum.py` | Mansfield RS on custom baskets (chart + "RS Ranking" sheet) |
+| 6 | `nse_sector_rs` | `nse_ready_sectors.py` | Mansfield RS on official NSE sector indices (chart + "NSE Sector RS Ranking" sheet) |
+| 7 | `rrg` | `rrg_chart.py` | Relative Rotation Graph (chart only) |
+| 8 | `ipo_anchor` | `ipo_anchor_tracker.py` | IPO anchor investor matching ("IPO Anchor List" sheet) |
 
 ### Output
 
@@ -306,9 +309,10 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
   - `FII_1Q_Increasing`, `FII_2Q_Increasing`, `FII_3Q_Increasing`, `FII_4Q_Increasing` — FII stake streak data
   - `HNIs` — Superstar/HNI new buys + increased positions (sorted A-Z)
   - `RS Ranking` — Sector relative strength ranking (from sector_momentum)
+  - `NSE Sector RS Ranking` — Official NSE sector-index relative strength ranking (from nse_ready_sectors)
   - `IPO Anchor List` — Recent IPOs with watchlist anchor matches
-- 5 interactive Plotly HTML charts (sector_index, fii_flows, fii_sector_flows, sector_momentum, rrg)
-- `market_charts.html` — Combined tabbed HTML with all 5 charts in iframe panels
+- 6 interactive Plotly HTML charts (sector_index, fii_flows, fii_sector_flows, sector_momentum, nse_sector_rs, rrg)
+- `market_charts.html` — Combined tabbed HTML with all 6 charts in iframe panels
 - Email with Excel + charts attached
 
 ### Notes

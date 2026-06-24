@@ -11,7 +11,7 @@ one email with the workbook + interactive HTML charts attached.
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 7 scenarios in order:
+2. Run 8 scenarios in order:
 
    a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
                                                           filtered to a hardcoded
@@ -28,9 +28,13 @@ WORKFLOW
                                                           (FII Sector Net Flows + Detail).
    e. sector_momentum   → sector_momentum.run()         — Mansfield RS per sector
                                                           (RS Ranking + RS History).
-   f. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
+   f. nse_sector_rs     → nse_ready_sectors.run()       — Mansfield RS on the official
+                                                          NSE sector indices (30 indices)
+                                                          vs Nifty 500 + MidSmall 400
+                                                          (NSE Sector RS Ranking + History).
+   g. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
                                                           timeframes (RRG 3 Day … Quarterly).
-   g. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs (NSE + NSE SME)
+   h. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs (NSE + NSE SME)
                                                           with listing-day +/- and watchlist
                                                           anchor matches (sheets prefixed
                                                           "IPO Anchor"). Also writes a
@@ -50,8 +54,8 @@ WORKFLOW
    removed after their data is captured, so only the unified workbook
    remains on disk.
 
-4. Collect all HTML chart files (5 charts: sector_index, fii_flows,
-   fii_sector_flows, sector_momentum, rrg).
+4. Collect all HTML chart files (6 charts: sector_index, fii_flows,
+   fii_sector_flows, sector_momentum, nse_sector_rs, rrg).
 
 5. Send consolidated email with the unified Excel + HTML charts
    attached (unless --no-email).
@@ -67,11 +71,12 @@ external APIs directly.
 
 OUTPUT
 ------
-- market_analysis_report.xlsx    — Unified workbook, typically ~18 sheets:
+- market_analysis_report.xlsx    — Unified workbook, typically ~19 sheets:
                                     4 BB (bulk/block) + 2 sector_index +
                                     2 fii_flows + 2 fii_sector_flows +
-                                    2 sector_momentum + 8 RRG timeframes.
-- *_chart.html                   — 5 interactive Plotly charts.
+                                    2 sector_momentum + 1 nse_sector_rs +
+                                    8 RRG timeframes.
+- *_chart.html                   — 6 interactive Plotly charts.
 
 USAGE
 -----
@@ -81,7 +86,7 @@ USAGE
 
 Available scenario names for --skip:
     bulk_block, sector_index, fii_flows, fii_sector_flows,
-    sector_momentum, rrg, ipo_anchor
+    sector_momentum, nse_sector_rs, rrg, ipo_anchor
 
 DEPENDENCIES
 ------------
@@ -103,7 +108,7 @@ TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 # Scenario names for --skip (order = sheet order in unified Excel)
 ALL_SCENARIOS = ["bulk_block", "sector_index",
                  "fii_flows", "fii_sector_flows",
-                 "sector_momentum", "rrg", "ipo_anchor"]
+                 "sector_momentum", "nse_sector_rs", "rrg", "ipo_anchor"]
 
 
 # ─── Scenario runners ──────────────────────────────────────
@@ -259,6 +264,32 @@ def run_sector_momentum():
     return sheets, html_path
 
 
+def run_nse_sector_rs():
+    """Run NSE Sector RS Analyzer (official indices). Returns sheets dict
+    + chart path. Uses distinct sheet names ('NSE Sector RS ...') to avoid
+    colliding with sector_momentum's 'RS Ranking'/'RS History'.
+    """
+    from nse_ready_sectors import run as nse_run
+    prefix = os.path.join(SCRIPT_DIR, "nse_sector_rs")
+    result = nse_run(output_prefix=prefix)
+    if result is None:
+        return {}, None
+
+    all_rs, all_indices, ranking_df, fig, excel_path, html_path = result
+
+    sheets = {}
+    sheets["NSE Sector RS Ranking"] = ranking_df
+
+    rs_df = pd.DataFrame(all_rs)
+    rs_df.index.name = "Date"
+    sheets["NSE Sector RS History"] = rs_df
+
+    if os.path.exists(excel_path):
+        os.remove(excel_path)
+
+    return sheets, html_path
+
+
 def run_rrg():
     """Run RRG Chart. Returns sheets dict + chart path."""
     from rrg_chart import run as rrg_run
@@ -326,6 +357,7 @@ EXCLUDED_SHEETS = {
     "FII Sector Net Flows",
     "FII Sector Detail",
     "RS History",
+    "NSE Sector RS History",
     "RRG 3 Day",
     "RRG 7 Day",
     "RRG 2 Week",
@@ -381,6 +413,7 @@ def build_combined_chart(chart_files):
 
     label_map = {
         "sector_momentum_chart.html": "Sector Momentum",
+        "nse_sector_rs_chart.html": "NSE Sector RS",
         "custom_sector_index_chart.html": "Custom Sector Index",
         "rrg_chart.html": "RRG",
         "fii_flows_chart.html": "FII Flows",
@@ -478,7 +511,7 @@ def main():
     # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
     if "bulk_block" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/7: Bulk & Block Deals (NSE + BSE)")
+        print("  SCENARIO 1/8: Bulk & Block Deals (NSE + BSE)")
         print("=" * 70)
         try:
             sheets, chart = run_bulk_block()
@@ -494,7 +527,7 @@ def main():
     # ── 2. Custom Sector Index ─────────────────────────────────
     if "sector_index" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 2/7: Custom Sector Index")
+        print("  SCENARIO 2/8: Custom Sector Index")
         print("=" * 70)
         try:
             sheets, chart = run_sector_index()
@@ -510,7 +543,7 @@ def main():
     # ── 3. FII Equity Flows ────────────────────────────────────
     if "fii_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 3/7: FII Equity Cash Market Flows")
+        print("  SCENARIO 3/8: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_flows()
@@ -526,7 +559,7 @@ def main():
     # ── 4. FII Sector-wise Flows ─────────────────────────────────
     if "fii_sector_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 4/7: FII Sector-wise Flows")
+        print("  SCENARIO 4/8: FII Sector-wise Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_sector_flows()
@@ -542,7 +575,7 @@ def main():
     # ── 5. Sector Momentum ─────────────────────────────────────
     if "sector_momentum" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 5/7: Sector Momentum & Relative Strength")
+        print("  SCENARIO 5/8: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
             sheets, chart = run_sector_momentum()
@@ -555,10 +588,26 @@ def main():
             print("  ✗ Sector Momentum FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 6. RRG Chart ────────────────────────────────────────────
+    # ── 6. NSE Sector RS (Official Indices) ────────────────────
+    if "nse_sector_rs" not in skip:
+        print("\n" + "=" * 70)
+        print("  SCENARIO 6/8: NSE Sector Relative Strength (Official Indices)")
+        print("=" * 70)
+        try:
+            sheets, chart = run_nse_sector_rs()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ NSE Sector RS complete")
+        except Exception as e:
+            errors.append("nse_sector_rs: %s" % e)
+            print("  ✗ NSE Sector RS FAILED: %s" % e)
+            traceback.print_exc()
+
+    # ── 7. RRG Chart ────────────────────────────────────────────
     if "rrg" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 6/7: Relative Rotation Graph")
+        print("  SCENARIO 7/8: Relative Rotation Graph")
         print("=" * 70)
         try:
             sheets, chart = run_rrg()
@@ -571,10 +620,10 @@ def main():
             print("  ✗ RRG Chart FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 7. IPO Anchor Tracker ──────────────────────────────────
+    # ── 8. IPO Anchor Tracker ──────────────────────────────────
     if "ipo_anchor" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 7/7: IPO Anchor Tracker")
+        print("  SCENARIO 8/8: IPO Anchor Tracker")
         print("=" * 70)
         try:
             sheets, chart = run_ipo_anchor()
