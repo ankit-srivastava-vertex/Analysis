@@ -71,9 +71,17 @@ SCRIP_MASTER_TTL_DAYS = 7
 #   getCandleData: 3 req/sec, 180 req/min.
 # RATE_LIMIT_PER_SEC stays exported for back-compat (angel_download_many uses it
 # as max_workers default and for ETA print).
-RATE_LIMIT_PER_SEC = 3
+# NOTE: dropped from 3 -> 2 req/sec. Angel's historical endpoint returns
+# AB1021 ("Too many requests") well below the nominal 3/sec under concurrent
+# multi-pane / multi-workspace load, so we run a touch under the cap.
+RATE_LIMIT_PER_SEC = 2
 _RATE_LIMIT_PER_MIN = 180
 _RATE_LIMIT_MAX_INFLIGHT = 4
+# Angel error codes that mean "you are being rate-limited". AB1004 is the
+# documented one; AB1021 ("Too many requests") is what getCandleData actually
+# returns, and AB1011 is the access-rate variant. All three must trip the
+# adaptive throttle/cooldown, else we keep hammering and get empty candles.
+_RATE_LIMIT_ERR_CODES = ("AB1004", "AB1021", "AB1011")
 
 # Single lock guarding session bootstrap (scrip master load + SmartConnect login).
 # Concurrent callers (e.g. 4 chart panes hitting /api/historical at the same time
@@ -84,6 +92,8 @@ _init_lock = threading.RLock()
 _smart_api = None   # SmartConnect instance (None until logged in)
 _api_key_cache = ""  # cached for get_angel_session() return value
 _refresh_token_cache = None  # stored from generateSession for renewAccessToken
+_login_failed_until = 0.0  # epoch until which we skip re-login after a failure
+_LOGIN_COOLDOWN_SEC = float(os.environ.get("ANGEL_LOGIN_COOLDOWN", "20"))
 _master_df: Optional[pd.DataFrame] = None
 _symbol_index: Optional[dict] = None  # (exch, symbol_upper) -> token
 
@@ -93,17 +103,50 @@ _symbol_index: Optional[dict] = None  # (exch, symbol_upper) -> token
 # guarantees the handler returns. On timeout we drop _smart_api so the next
 # attempt builds a fresh SmartConnect (and a fresh connection pool).
 import concurrent.futures as _cf
-_call_executor = _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="angel-call")
+_CALL_EXECUTOR_MAX_WORKERS = int(os.environ.get("ANGEL_CALL_WORKERS", "8"))
+_call_executor_lock = threading.Lock()
+_call_executor = _cf.ThreadPoolExecutor(
+    max_workers=_CALL_EXECUTOR_MAX_WORKERS, thread_name_prefix="angel-call")
+_call_executor_recreated_at = 0.0
+_CALL_EXECUTOR_RECREATE_COOLDOWN = 30.0  # seconds between forced recreations
 ANGEL_CALL_TIMEOUT_SEC = float(os.environ.get("ANGEL_CALL_TIMEOUT", "10"))
+
+
+def _recreate_call_executor():
+    """Swap in a fresh executor when the current one is wedged by stuck
+    (abandoned) worker threads. Without this, a handful of dead-socket calls
+    can permanently occupy every worker and starve the whole process — the
+    classic long-running-server hang. The old executor is shut down without
+    waiting so its leaked threads die on their own once their socket errors
+    out (the SDK enforces a 7s read timeout). A cooldown prevents thrash."""
+    global _call_executor, _call_executor_recreated_at
+    with _call_executor_lock:
+        if time.time() - _call_executor_recreated_at < _CALL_EXECUTOR_RECREATE_COOLDOWN:
+            return
+        old = _call_executor
+        _call_executor = _cf.ThreadPoolExecutor(
+            max_workers=_CALL_EXECUTOR_MAX_WORKERS, thread_name_prefix="angel-call")
+        _call_executor_recreated_at = time.time()
+    try:
+        old.shutdown(wait=False)
+    except Exception:
+        pass
+    print("angel_client: recreated call executor (recovered from stuck workers)")
+
 
 def _call_with_timeout(fn, *args, timeout=None, **kwargs):
     """Run fn(*args, **kwargs) with a hard wall-clock timeout.
-    Returns (result, timed_out). The runaway thread is left to finish in the
-    background (executor caps concurrency at 4)."""
-    fut = _call_executor.submit(fn, *args, **kwargs)
+    Returns (result, timed_out). On timeout the worker is abandoned; if that
+    leaves the pool wedged we recreate it so a few stale sockets can't
+    permanently starve the server."""
+    with _call_executor_lock:
+        ex = _call_executor
+    fut = ex.submit(fn, *args, **kwargs)
     try:
         return fut.result(timeout=timeout or ANGEL_CALL_TIMEOUT_SEC), False
     except _cf.TimeoutError:
+        fut.cancel()
+        _recreate_call_executor()
         return None, True
 
 def _reset_session():
@@ -217,13 +260,19 @@ def refresh_token(force: bool = False) -> bool:
 
 
 def _refresh_token_locked(force: bool = False) -> bool:
-    global _smart_api, _api_key_cache, _refresh_token_cache
+    global _smart_api, _api_key_cache, _refresh_token_cache, _login_failed_until
     # Fast path: another thread already logged in while we waited on the lock.
     if _smart_api is not None and not force:
         return True
     # Fast path: renew with refresh token (no TOTP)
     if _try_refresh_access_token():
         return True
+    # Cooldown: if a full login just failed, don't let every queued caller
+    # re-attempt a (slow, up to 12s) login. Fail fast until the window expires
+    # so requests return empty quickly instead of stacking login attempts and
+    # serializing the whole server behind a login storm.
+    if time.time() < _login_failed_until:
+        return False
     # Slow path: full TOTP re-login
     _load_env()
     creds = _get_credentials()
@@ -250,10 +299,12 @@ def _refresh_token_locked(force: bool = False) -> bool:
         obj, api_key, rt = _sdk_login(creds)
     except Exception as e:
         print("Angel login failed: %s" % e)
+        _login_failed_until = time.time() + _LOGIN_COOLDOWN_SEC
         return False
     _smart_api = obj
     _api_key_cache = api_key
     _refresh_token_cache = rt
+    _login_failed_until = 0.0
     return True
 
 
@@ -624,8 +675,9 @@ def angel_download(ticker: str,
                 err_code = str(resp.get("errorcode", "")).upper()
                 err_msg = str(resp.get("message", ""))
                 # Rate limit — adaptive backoff: shrink internal budget,
-                # then exponential sleep with jitter.
-                if err_code == "AB1004":
+                # then exponential sleep with jitter. Angel uses several codes
+                # (AB1004 documented; AB1021/AB1011 seen on getCandleData).
+                if err_code in _RATE_LIMIT_ERR_CODES:
                     _rate_limiter.report_rate_limited()
                     if attempt < retries:
                         time.sleep((1.5 ** attempt)
