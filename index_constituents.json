@@ -1,4 +1,49 @@
 {
+    "IT": {
+        "description": "Information Technology",
+        "constituents": [
+            "UNIECOM",
+            "TAC",
+            "CEINSYS",
+            "MAPMYINDIA",
+            "AURIONPRO",
+            "HAPPSTMNDS",
+            "NEWGEN",
+            "TANLA",
+            "RATEGAIN",
+            "ALLETEC",
+            "CNINFOTECH",
+            "IKS",
+            "NETWEB",
+            "BBOX",
+            "CYIENT",
+            "E2E",
+            "EMUDHRA",
+            "ZAGGLE",
+            "PROTEAN",
+            "BLSE",
+            "DSSL",
+            "EXCELSOFT",
+            "VEEFIN",
+            "EXATO"
+        ]
+    },
+    "BFSI": {
+        "description": "Financial Services",
+        "constituents": [
+            "AYE",
+            "FINBUD",
+            "LAXMIINDIA",
+            "NORTHARC",
+            "CGCL",
+            "SBFC",
+            "FEDFINA",
+            "SGFIN",
+            "MUFIN",
+            "ARMANFIN",
+            "PAISALO"
+        ]
+    },
     "Wires&Cables": {
         "description": "Wires & Cables",
         "constituents": [
@@ -67,6 +112,7 @@
             "PRAJIND",
             "KLBRENG-B",
             "PATILAUTOM",
+            "CMRGREEN",
             "PATELSAI"
         ]
     },
@@ -154,6 +200,7 @@
             "AVALON",
             "EPACK",
             "PGEL",
+            "MRTX",
             "VOEPL"
         ]
     },
@@ -261,6 +308,7 @@
             "POLYMED",
             "METROPOLIS",
             "THYROCARE",
+            "QLINE",
             "NEPHROPLUS"
         ]
     },

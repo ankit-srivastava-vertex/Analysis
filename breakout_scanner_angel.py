@@ -46,13 +46,15 @@ SCORING (v4.3)
     - Base range ≤ 40%
     - RS rising over 50 sessions
 
-OUTPUT (4-sheet Excel)
+OUTPUT (7-sheet Excel)
 ----------------------
   breakout_watchlist.xlsx:
     Sheet 1: "MPD Data"           — Raw multi_pct_down screener output (all universes merged)
     Sheet 2: "Screener Data"      — Raw screener.in stock list
     Sheet 3: "MPD Breakouts"      — Breakout candidates from MPD universe
     Sheet 4: "Screener Breakouts" — Breakout candidates from screener universe
+    Sheet 5: "Common Breakout"    — Intersection of Sheets 3 & 4 (broke out in BOTH universes)
+    Sheet 6: "Combined Breakouts" — Union of Sheets 3 & 4 (every breakout; commons listed once)
 
   Logs:   Output/logs/logs_breakout_scanner_angel_v35_<timestamp>.txt
 
@@ -1240,6 +1242,8 @@ def main():
     mpd_rows = []     # breakout results from MPD universe
     scr_raw_df = None # raw screener data
     scr_rows = []     # breakout results from screener universe
+    ohlcv_mpd = {}    # candles fetched for MPD universe (reused by scorecard)
+    ohlcv_scr = {}    # candles fetched for Screener universe (reused by scorecard)
 
     # ── Universe 1: Multi Pct-Down ──
     if not args.skip_mpd:
@@ -1286,7 +1290,7 @@ def main():
             import traceback
             traceback.print_exc()
 
-    # ── Build unified 4-sheet Excel ──
+    # ── Build unified 7-sheet Excel ──
     print("\n" + "=" * 70)
     print("  BUILDING COMBINED OUTPUT")
     print("=" * 70)
@@ -1338,74 +1342,64 @@ def main():
             pd.DataFrame({"Note": ["No Screener breakout candidates"]}).to_excel(
                 w, sheet_name="Screener Breakouts", index=False)
 
-        # Build ticker sets for overlap analysis
-        mpd_tickers_set = set()
-        if mpd_sheets:
-            for df in mpd_sheets.values():
-                if df is not None and not df.empty and "Yahoo" in df.columns:
-                    mpd_tickers_set |= set(
-                        df["Yahoo"].dropna().astype(str).str.strip())
-        scr_tickers_set = set()
-        if scr_raw_df is not None and not scr_raw_df.empty and "Ticker" in scr_raw_df.columns:
-            scr_tickers_set = set(
-                scr_raw_df["Ticker"].dropna().astype(str).str.strip())
-
-        common_tickers = mpd_tickers_set & scr_tickers_set
-        only_mpd = mpd_tickers_set - scr_tickers_set
-        only_scr = scr_tickers_set - mpd_tickers_set
-
-        # Sheet 5: Common stocks (in both MPD and Screener)
-        if common_tickers and mpd_sheets:
-            common_rows = []
-            for df in mpd_sheets.values():
-                if df is not None and not df.empty and "Yahoo" in df.columns:
-                    common_rows.append(
-                        df[df["Yahoo"].isin(common_tickers)])
-            common_df = pd.concat(common_rows, ignore_index=True
-                                  ).drop_duplicates(subset=["Yahoo"])
-            if not common_df.empty:
-                common_df.to_excel(w, sheet_name="Common MPD+Screener",
-                                   index=False)
-            else:
-                pd.DataFrame({"Note": ["No common stocks"]}).to_excel(
-                    w, sheet_name="Common MPD+Screener", index=False)
+        # Sheet 5: Common Breakout (intersection of the MPD Breakouts and
+        # Screener Breakouts sheets — symbols that broke out in BOTH universes)
+        mpd_bo_df = pd.DataFrame(mpd_rows) if mpd_rows else pd.DataFrame()
+        scr_bo_df = pd.DataFrame(scr_rows) if scr_rows else pd.DataFrame()
+        combined_bo_syms = set()
+        if (not mpd_bo_df.empty and not scr_bo_df.empty
+                and "symbol" in mpd_bo_df.columns
+                and "symbol" in scr_bo_df.columns):
+            mpd_bo_syms = set(mpd_bo_df["symbol"].astype(str).str.strip())
+            scr_bo_syms = set(scr_bo_df["symbol"].astype(str).str.strip())
+            combined_bo_syms = mpd_bo_syms & scr_bo_syms
+        if combined_bo_syms:
+            common_bo_df = mpd_bo_df[
+                mpd_bo_df["symbol"].astype(str).str.strip().isin(combined_bo_syms)
+            ].drop_duplicates(subset=["symbol"]).sort_values(
+                ["high_conviction", "score"], ascending=[False, False])
+            common_bo_df.to_excel(
+                w, sheet_name="Common Breakout", index=False)
         else:
-            pd.DataFrame({"Note": ["No common stocks"]}).to_excel(
-                w, sheet_name="Common MPD+Screener", index=False)
+            pd.DataFrame(
+                {"Note": ["No symbols broke out in both universes"]}).to_excel(
+                w, sheet_name="Common Breakout", index=False)
 
-        # Sheet 6: Not-common stocks (unique to each universe)
-        not_common_rows = []
-        if only_mpd and mpd_sheets:
-            for df in mpd_sheets.values():
-                if df is not None and not df.empty and "Yahoo" in df.columns:
-                    subset = df[df["Yahoo"].isin(only_mpd)].copy()
-                    if not subset.empty:
-                        subset.insert(0, "Source", "MPD Only")
-                        not_common_rows.append(subset)
-        if only_scr and scr_raw_df is not None and not scr_raw_df.empty:
-            scr_only = scr_raw_df[
-                scr_raw_df["Ticker"].isin(only_scr)].copy()
-            if not scr_only.empty:
-                scr_only.insert(0, "Source", "Screener Only")
-                not_common_rows.append(scr_only)
-        if not_common_rows:
-            not_common_df = pd.concat(not_common_rows, ignore_index=True
-                                      ).drop_duplicates()
-            not_common_df.to_excel(w, sheet_name="Unique to Each",
-                                   index=False)
+        # Sheet 6: Combined Breakouts (UNION of the MPD Breakouts and Screener
+        # Breakouts sheets — every breakout from either universe, with common
+        # names listed exactly once so no stock is missed). For a stock that
+        # broke out in both, the higher-scoring row is kept.
+        all_bo_df = (
+            pd.concat([d for d in (mpd_bo_df, scr_bo_df) if not d.empty],
+                      ignore_index=True)
+            if (not mpd_bo_df.empty or not scr_bo_df.empty)
+            else pd.DataFrame())
+        n_combined_all = 0
+        if not all_bo_df.empty and "symbol" in all_bo_df.columns:
+            all_bo_df["symbol"] = all_bo_df["symbol"].astype(str).str.strip()
+            sort_cols = [c for c in ("high_conviction", "score")
+                         if c in all_bo_df.columns]
+            if sort_cols:
+                all_bo_df = all_bo_df.sort_values(
+                    sort_cols, ascending=[False] * len(sort_cols))
+            combined_all_df = all_bo_df.drop_duplicates(subset=["symbol"])
+            combined_all_df.to_excel(
+                w, sheet_name="Combined Breakouts", index=False)
+            n_combined_all = len(combined_all_df)
         else:
-            pd.DataFrame({"Note": ["All stocks are common"]}).to_excel(
-                w, sheet_name="Unique to Each", index=False)
+            pd.DataFrame(
+                {"Note": ["No breakout candidates in either universe"]}).to_excel(
+                w, sheet_name="Combined Breakouts", index=False)
 
-    n_common = len(common_tickers) if 'common_tickers' in dir() else 0
+    n_combined = len(combined_bo_syms) if 'combined_bo_syms' in dir() else 0
+    n_combined_all = n_combined_all if 'n_combined_all' in dir() else 0
     print(f"  Excel written: {excel_out}")
     print(f"    Sheet 1: MPD Data ({len(mpd_sheets)} source sheets merged)")
     print(f"    Sheet 2: Screener Data")
     print(f"    Sheet 3: MPD Breakouts ({len(mpd_rows)} candidates)")
     print(f"    Sheet 4: Screener Breakouts ({len(scr_rows)} candidates)")
-    print(f"    Sheet 5: Common MPD+Screener ({n_common} stocks)")
-    print(f"    Sheet 6: Unique to Each (MPD-only={len(only_mpd) if 'only_mpd' in dir() else 0},"
-          f" Screener-only={len(only_scr) if 'only_scr' in dir() else 0})")
+    print(f"    Sheet 5: Common Breakout ({n_combined} stocks in both)")
+    print(f"    Sheet 6: Combined Breakouts ({n_combined_all} stocks, union)")
 
     # ── TradingView TXT files ──
     tv_dir = os.path.dirname(excel_out)
@@ -1415,23 +1409,8 @@ def main():
     bo_syms = sorted({r["symbol"] for r in mpd_rows + scr_rows})
     _write_tv_file(os.path.join(tv_dir, f"tv_breakouts_combined{tag}.txt"), bo_syms)
 
-    # 2. Common MPD+Screener universe
-    _write_tv_file(os.path.join(tv_dir, f"tv_common{tag}.txt"),
-                   sorted(common_tickers))
-
-    # 3. Unique MPD
-    _write_tv_file(os.path.join(tv_dir, f"tv_unique_mpd{tag}.txt"),
-                   sorted(only_mpd))
-
-    # 4. Unique Screener
-    _write_tv_file(os.path.join(tv_dir, f"tv_unique_screener{tag}.txt"),
-                   sorted(only_scr))
-
     print(f"  TradingView files written:")
     print(f"    tv_breakouts_combined{tag}.txt  ({len(bo_syms)} symbols)")
-    print(f"    tv_common{tag}.txt              ({len(common_tickers)} symbols)")
-    print(f"    tv_unique_mpd{tag}.txt           ({len(only_mpd)} symbols)")
-    print(f"    tv_unique_screener{tag}.txt      ({len(only_scr)} symbols)")
 
     # Print combined top 10
     all_rows = mpd_rows + scr_rows
@@ -1446,6 +1425,24 @@ def main():
         print(top.to_string(index=False))
     else:
         print("\n  No breakout candidates found in either universe.")
+
+    # ── Scorecard (Valuation × Momentum × Stage) — attached post-process ──
+    # Reuses the already-downloaded candles + benchmark (no extra Angel calls)
+    # and appends a "Scorecard" sheet + HTML to the breakout workbook.
+    try:
+        import breakout_scanner_scorecard as scorecard
+        scorecard.run(
+            excel_out,
+            mpd_rows=mpd_rows,
+            scr_rows=scr_rows,
+            ohlcv={**ohlcv_mpd, **ohlcv_scr},
+            bench=bench,
+            out_tag=args.out_tag,
+        )
+    except Exception as e:
+        print(f"  Scorecard step FAILED: {e}")
+        import traceback
+        traceback.print_exc()
 
     print("\nDONE.")
 
