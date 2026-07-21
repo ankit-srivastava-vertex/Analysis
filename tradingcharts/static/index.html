@@ -20,6 +20,7 @@
         'globalChartType', 'globalViewRange',
         'chartTheme',
         'smartVPSGOpts',
+        'ehlersOpts',
         'chartSync',
     ];
     // 1) Synchronous hydrate (blocks parser briefly; localhost <1ms typical).
@@ -1079,6 +1080,11 @@ body {
         <span class="indi-name">Rel. Strength</span>
         <span class="indi-hint">right-click: settings</span>
     </div>
+    <div class="indi-flyout-row" data-indi="ehlers">
+        <span class="indi-check"></span>
+        <span class="indi-name">Ehlers Cycle</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
 </div>
 
 <!-- Indicator Settings Modal -->
@@ -1094,17 +1100,18 @@ body {
             <label>Volume Profile Buckets<input type="number" id="indi_vpBuckets" value="30" min="10" max="100"></label>
         </div>
         <div class="indi-modal-body" id="indiModalSupResEPS" style="display:none">
-            <label>MA 10 Length<input type="number" id="indi_ma10" value="10" min="2" max="100"></label>
-            <label>MA 20 Length<input type="number" id="indi_ma20" value="20" min="2" max="200"></label>
-            <label>MA 50 Length<input type="number" id="indi_ma50" value="50" min="5" max="300"></label>
-            <label>MA 200 Length<input type="number" id="indi_ma200" value="200" min="50" max="500"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_ma10On" checked style="width:auto;margin:0"> MA Length</span><input type="number" id="indi_ma10" value="10" min="2" max="100"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_ma20On" checked style="width:auto;margin:0"> MA Length</span><input type="number" id="indi_ma20" value="20" min="2" max="200"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_ma50On" checked style="width:auto;margin:0"> MA Length</span><input type="number" id="indi_ma50" value="50" min="5" max="300"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_ma200On" checked style="width:auto;margin:0"> MA Length</span><input type="number" id="indi_ma200" value="200" min="50" max="500"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_showZones" checked style="width:auto;margin:0"> Show S/R Zones</span></label>
             <label>Pivot Lookback<input type="number" id="indi_pivotLen" value="15" min="3" max="50"></label>
             <label>Zone Width (ATR×)<input type="number" id="indi_zoneAtr" value="0.6" step="0.1" min="0.1" max="3"></label>
             <label>Levels / Side<input type="number" id="indi_maxPerSide" value="4" min="1" max="8"></label>
         </div>
         <div class="indi-modal-body" id="indiModalInstAccum" style="display:none">
-            <label>Pocket Pivot Lookback<input type="number" id="indi_ppLookback" value="10" min="3" max="50"></label>
-            <label>Money-Flow Divergence Lookback<input type="number" id="indi_mfLookback" value="20" min="5" max="100"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_ppOn" checked style="width:auto;margin:0"> Pocket Pivot Lookback</span><input type="number" id="indi_ppLookback" value="10" min="3" max="50"></label>
+            <label><span style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="indi_mfOn" checked style="width:auto;margin:0"> Money-Flow Divergence Lookback</span><input type="number" id="indi_mfLookback" value="20" min="5" max="100"></label>
             <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_showDeals" checked style="width:auto;margin:0"> Show Bulk/Block Deals</label>
         </div>
         <div class="indi-modal-body" id="indiModalRSI" style="display:none">
@@ -1132,6 +1139,10 @@ body {
                 </select>
             </label>
             <label>MA Period<input type="number" id="indi_rsMaPeriod" value="50" min="5" max="200"></label>
+        </div>
+        <div class="indi-modal-body" id="indiModalEhlers" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_ehShowPeriod" checked style="width:auto;margin:0"> Show Dominant Cycle Period (bottom pane)</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_ehShowSine" checked style="width:auto;margin:0"> Show SineWave (bottom pane)</label>
         </div>
         <div class="indi-modal-footer">
             <button class="indi-modal-apply" id="indiModalApply">Apply</button>
@@ -2045,6 +2056,29 @@ function createPane(container, idx, symbol, interval, skipInitialLoad) {
                     ttHtml += lines.join('<br>');
                 }
             }
+            // Ehlers Cycle line hover info (only when crosshair is near a line)
+            if (param.point && (pane._ehlersSeries || pane._ehlersPeriodSeries || pane._ehlersSineSeries)) {
+                const ehLines = [];
+                if (pane._ehlersSeries) {
+                    ehLines.push({ s: pane._ehlersSeries.mama, name: 'MAMA', color: '#26a69a', dp: 2 });
+                    ehLines.push({ s: pane._ehlersSeries.fama, name: 'FAMA', color: '#ef5350', dp: 2 });
+                }
+                if (pane._ehlersPeriodSeries) ehLines.push({ s: pane._ehlersPeriodSeries, name: 'Dominant Cycle Period', color: '#ffa726', dp: 1, unit: ' bars' });
+                if (pane._ehlersSineSeries) {
+                    ehLines.push({ s: pane._ehlersSineSeries.line, name: 'SineWave', color: '#42a5f5', dp: 3 });
+                    ehLines.push({ s: pane._ehlersSineSeries.lead, name: 'LeadSine', color: '#ec407a', dp: 3 });
+                }
+                for (const L of ehLines) {
+                    const d = param.seriesData.get(L.s);
+                    if (d === undefined || d === null) continue;
+                    const v = (typeof d === 'object' && d.value !== undefined) ? d.value : d;
+                    if (v === undefined || v === null || !isFinite(v)) continue;
+                    const y = L.s.priceToCoordinate(v);
+                    if (y === null || Math.abs(param.point.y - y) > 6) continue;
+                    if (ttHtml) ttHtml += '<br>';
+                    ttHtml += `<span style="color:${L.color};font-weight:600">${L.name}: ${v.toFixed(L.dp)}${L.unit || ''}</span>`;
+                }
+            }
             if (ttHtml && param.point) {
                 qTooltip.innerHTML = ttHtml;
                 const cw = chartContainer.clientWidth;
@@ -2322,6 +2356,10 @@ async function applyAllIndicators(pane) {
 
     // Adjust scale margins based on active sub-pane indicators
     const subPaneIndicators = ['rsi', 'macd', 'rs'].filter(i => activeIndicators.has(i));
+    if (activeIndicators.has('ehlers')) {
+        if (ehlersSettings.showPeriod) subPaneIndicators.push('ehlers_period');
+        if (ehlersSettings.showSine) subPaneIndicators.push('ehlers_sine');
+    }
     const subCount = subPaneIndicators.length;
     const subPaneHeight = 0.10;
     const bottomReserve = 0.08 + subCount * subPaneHeight;
@@ -2349,6 +2387,7 @@ async function applyAllIndicators(pane) {
     if (activeIndicators.has('rsi'))  applyRSI(pane, candles);
     if (activeIndicators.has('macd')) applyMACD(pane, candles);
     if (activeIndicators.has('rs'))   await applyRelativeStrength(pane, candles);
+    if (activeIndicators.has('ehlers')) { const em = applyEhlers(pane, candles); if (em) allMarkers = allMarkers.concat(em); }
 
     if (subCount > 0) {
         let slotIdx = 0;
@@ -2361,6 +2400,10 @@ async function applyAllIndicators(pane) {
                 pane._macdSeries.macd.priceScale().applyOptions({ scaleMargins: margins });
             } else if (indi === 'rs' && pane._rsSeries) {
                 pane._rsSeries.line.priceScale().applyOptions({ scaleMargins: margins });
+            } else if (indi === 'ehlers_period' && pane._ehlersPeriodSeries) {
+                pane._ehlersPeriodSeries.priceScale().applyOptions({ scaleMargins: margins });
+            } else if (indi === 'ehlers_sine' && pane._ehlersSineSeries) {
+                pane._ehlersSineSeries.line.priceScale().applyOptions({ scaleMargins: margins });
             }
             slotIdx++;
         });
@@ -2721,6 +2764,11 @@ const supResEPSSettings = {
     ma20: 20,
     ma50: 50,
     ma200: 200,
+    ma10On: true,
+    ma20On: true,
+    ma50On: true,
+    ma200On: true,
+    showZones: true,
     pivotLen: 15,
     atrMult: 0.6,
     maxPerSide: 4,
@@ -2783,10 +2831,21 @@ function applySupResEPS(pane, candles, volumes) {
     }
 
     const toData = (arr) => arr.map((v, i) => v !== null ? { time: candles[i].time, value: v } : null).filter(Boolean);
-    pane._maSeries.ma10.setData(toData(sma10));
-    pane._maSeries.ma20.setData(toData(sma20));
-    pane._maSeries.ma50.setData(toData(sma50));
-    pane._maSeries.ma200.setData(toData(sma200));
+    pane._maSeries.ma10.setData(supResEPSSettings.ma10On ? toData(sma10) : []);
+    pane._maSeries.ma20.setData(supResEPSSettings.ma20On ? toData(sma20) : []);
+    pane._maSeries.ma50.setData(supResEPSSettings.ma50On ? toData(sma50) : []);
+    pane._maSeries.ma200.setData(supResEPSSettings.ma200On ? toData(sma200) : []);
+
+    // S/R zones are an optional layer; when disabled, clear any existing lines
+    // and skip the whole zone engine (the MAs above are unaffected).
+    if (!supResEPSSettings.showZones) {
+        if (pane._srLines) {
+            pane._srLines.forEach(l => pane.series.removePriceLine(l));
+            pane._srLines = [];
+        }
+        pane._srLevelData = null;
+        return;
+    }
 
     // ─── ATR-clustered, volume-weighted, multi-timeframe S/R zone engine ──────
     const vols = volumes.map(v => v.value);
@@ -2951,7 +3010,7 @@ function removeSupResEPS(pane) {
 //   • Money-flow div → OBV higher than mfLookback bars ago while price is
 //                      flat/down (hidden accumulation). Marker: teal 'A'.
 //   • Bulk/Block buy → blue 'B' aboveBar; sell → red 'S' aboveBar (daily only).
-const instAccumSettings = { ppLookback: 10, mfLookback: 20, showDeals: true };
+const instAccumSettings = { ppLookback: 10, mfLookback: 20, ppOn: true, mfOn: true, showDeals: true };
 
 function _computeOBV(closes, vols) {
     const obv = new Array(closes.length).fill(0);
@@ -2977,7 +3036,7 @@ function applyInstAccum(pane, candles, volumes) {
 
     for (let i = Math.max(ppLookback, mfLookback); i < candles.length; i++) {
         // Pocket pivot
-        if (closes[i] > opens[i]) {
+        if (instAccumSettings.ppOn && closes[i] > opens[i]) {
             let maxDownVol = 0;
             for (let j = i - ppLookback; j < i; j++) {
                 if (j > 0 && closes[j] < closes[j - 1]) maxDownVol = Math.max(maxDownVol, vols[j]);
@@ -2990,7 +3049,7 @@ function applyInstAccum(pane, candles, volumes) {
             }
         }
         // Money-flow (OBV) divergence: accumulation while price stalls
-        if (obv[i] > obv[i - mfLookback] && closes[i] <= closes[i - mfLookback]) {
+        if (instAccumSettings.mfOn && obv[i] > obv[i - mfLookback] && closes[i] <= closes[i - mfLookback]) {
             markers.push({ time: candles[i].time, position: 'belowBar', color: '#26a69a', shape: 'text', text: 'A', size: 0 });
             const pxChg = ((closes[i] / closes[i - mfLookback] - 1) * 100).toFixed(2);
             _push(candles[i].time, `<span style="color:#26a69a;font-weight:600">A — Accumulation Divergence</span><br>OBV rose over the last ${mfLookback} bars while price was flat/down (${pxChg}%). Hidden buying not visible in price.`);
@@ -3254,6 +3313,203 @@ function removeMACD(pane) {
     }
 }
 
+// ─── Ehlers Adaptive Cycle (MAMA/FAMA + Dominant Cycle + SineWave) ────────────
+// Faithful port of John Ehlers' Hilbert-Transform homodyne discriminator
+// ("Rocket Science for Traders" / "Cybernetic Analysis"). One pass yields the
+// dominant-cycle period, the MESA Adaptive MA (MAMA) + Following MA (FAMA),
+// and the DC-phase SineWave / LeadSine. Fully adaptive — no tunable params.
+const EHLERS_FASTLIMIT = 0.5;   // Ehlers default
+const EHLERS_SLOWLIMIT = 0.05;  // Ehlers default
+const EHLERS_WARMUP = 6;        // FIR fill before MAMA/FAMA are meaningful
+const EHLERS_CYCLE_WARMUP = 25; // homodyne discriminator settle for period/sine
+const ehlersSettings = (() => {
+    const def = { showPeriod: true, showSine: true };
+    try {
+        const saved = JSON.parse(localStorage.getItem('ehlersOpts') || '{}');
+        const out = { ...def };
+        for (const k of Object.keys(def)) if (k in saved) out[k] = saved[k];
+        return out;
+    } catch(e) { return def; }
+})();
+function saveEhlersSettings() {
+    try { localStorage.setItem('ehlersOpts', JSON.stringify(ehlersSettings)); } catch(e) {}
+}
+
+function computeEhlers(candles) {
+    const n = candles.length;
+    const price = new Array(n).fill(0);
+    const smooth = new Array(n).fill(0), detrender = new Array(n).fill(0);
+    const Q1 = new Array(n).fill(0), I1 = new Array(n).fill(0);
+    const jI = new Array(n).fill(0), jQ = new Array(n).fill(0);
+    const I2 = new Array(n).fill(0), Q2 = new Array(n).fill(0);
+    const Re = new Array(n).fill(0), Im = new Array(n).fill(0);
+    const period = new Array(n).fill(0), smoothPeriod = new Array(n).fill(0);
+    const phase = new Array(n).fill(0);
+    const mama = new Array(n).fill(0), fama = new Array(n).fill(0);
+    const mamaOut = new Array(n).fill(null), famaOut = new Array(n).fill(null);
+    const periodOut = new Array(n).fill(null);
+    const sine = new Array(n).fill(null), leadSine = new Array(n).fill(null);
+
+    const g = (a, i) => (i >= 0 ? a[i] : 0);
+    const atanDeg = (x) => Math.atan(x) * 180 / Math.PI;
+    const sinDeg = (d) => Math.sin(d * Math.PI / 180);
+    const cosDeg = (d) => Math.cos(d * Math.PI / 180);
+
+    for (let i = 0; i < n; i++) {
+        price[i] = (candles[i].high + candles[i].low) / 2;   // Ehlers median price
+        if (i < 6) { smooth[i] = price[i]; mama[i] = price[i]; fama[i] = price[i]; continue; }
+
+        smooth[i] = (4 * price[i] + 3 * price[i - 1] + 2 * price[i - 2] + price[i - 3]) / 10;
+        const adj = 0.075 * g(period, i - 1) + 0.54;
+        detrender[i] = (0.0962 * smooth[i] + 0.5769 * g(smooth, i - 2) - 0.5769 * g(smooth, i - 4) - 0.0962 * g(smooth, i - 6)) * adj;
+
+        // Quadrature (Q1) and In-Phase (I1)
+        Q1[i] = (0.0962 * detrender[i] + 0.5769 * g(detrender, i - 2) - 0.5769 * g(detrender, i - 4) - 0.0962 * g(detrender, i - 6)) * adj;
+        I1[i] = g(detrender, i - 3);
+
+        // Advance the phase of I1 and Q1 by 90 degrees
+        jI[i] = (0.0962 * I1[i] + 0.5769 * g(I1, i - 2) - 0.5769 * g(I1, i - 4) - 0.0962 * g(I1, i - 6)) * adj;
+        jQ[i] = (0.0962 * Q1[i] + 0.5769 * g(Q1, i - 2) - 0.5769 * g(Q1, i - 4) - 0.0962 * g(Q1, i - 6)) * adj;
+
+        // Phasor addition for 3-bar averaging, then smooth
+        let i2 = I1[i] - jQ[i];
+        let q2 = Q1[i] + jI[i];
+        i2 = 0.2 * i2 + 0.8 * g(I2, i - 1);
+        q2 = 0.2 * q2 + 0.8 * g(Q2, i - 1);
+        I2[i] = i2; Q2[i] = q2;
+
+        // Homodyne discriminator
+        let re = i2 * g(I2, i - 1) + q2 * g(Q2, i - 1);
+        let im = i2 * g(Q2, i - 1) - q2 * g(I2, i - 1);
+        re = 0.2 * re + 0.8 * g(Re, i - 1);
+        im = 0.2 * im + 0.8 * g(Im, i - 1);
+        Re[i] = re; Im[i] = im;
+
+        const prevPer = g(period, i - 1);
+        let per = prevPer;
+        if (im !== 0 && re !== 0) per = 360 / atanDeg(im / re);
+        if (prevPer > 0) {
+            if (per > 1.5 * prevPer) per = 1.5 * prevPer;
+            if (per < 0.67 * prevPer) per = 0.67 * prevPer;
+        }
+        if (per < 6) per = 6;
+        if (per > 50) per = 50;
+        per = 0.2 * per + 0.8 * prevPer;
+        period[i] = per;
+        smoothPeriod[i] = 0.33 * per + 0.67 * g(smoothPeriod, i - 1);
+
+        // MAMA / FAMA via phase rate-of-change
+        let ph = g(phase, i - 1);
+        if (I1[i] !== 0) ph = atanDeg(Q1[i] / I1[i]);
+        phase[i] = ph;
+        let deltaPhase = g(phase, i - 1) - ph;
+        if (deltaPhase < 1) deltaPhase = 1;
+        let alpha = EHLERS_FASTLIMIT / deltaPhase;
+        if (alpha < EHLERS_SLOWLIMIT) alpha = EHLERS_SLOWLIMIT;
+        if (alpha > EHLERS_FASTLIMIT) alpha = EHLERS_FASTLIMIT;
+        mama[i] = alpha * price[i] + (1 - alpha) * g(mama, i - 1);
+        fama[i] = 0.5 * alpha * mama[i] + (1 - 0.5 * alpha) * g(fama, i - 1);
+
+        // Dominant-cycle phase → SineWave / LeadSine
+        const dcPeriod = Math.floor(smoothPeriod[i] + 0.5);
+        if (dcPeriod >= 1) {
+            let realPart = 0, imagPart = 0;
+            for (let c = 0; c < dcPeriod && i - c >= 0; c++) {
+                realPart += sinDeg(360 * c / dcPeriod) * smooth[i - c];
+                imagPart += cosDeg(360 * c / dcPeriod) * smooth[i - c];
+            }
+            let dcPhase;
+            if (Math.abs(imagPart) > 0.001) dcPhase = atanDeg(realPart / imagPart);
+            else dcPhase = 90 * Math.sign(realPart);
+            dcPhase += 90;
+            if (smoothPeriod[i] !== 0) dcPhase += 360 / smoothPeriod[i];
+            if (imagPart < 0) dcPhase += 180;
+            if (dcPhase > 315) dcPhase -= 360;
+            if (i >= EHLERS_CYCLE_WARMUP) {
+                sine[i] = sinDeg(dcPhase);
+                leadSine[i] = sinDeg(dcPhase + 45);
+                periodOut[i] = smoothPeriod[i];
+            }
+        }
+
+        if (i >= EHLERS_WARMUP) { mamaOut[i] = mama[i]; famaOut[i] = fama[i]; }
+    }
+    return { mama: mamaOut, fama: famaOut, period: periodOut, sine, leadSine };
+}
+
+function applyEhlers(pane, candles) {
+    const e = computeEhlers(candles);
+    const toData = (arr) => arr.map((v, i) => (v !== null && v !== undefined)
+        ? { time: candles[i].time, value: v } : null).filter(Boolean);
+
+    // MAMA / FAMA overlay on the price scale (default 'right')
+    if (!pane._ehlersSeries) {
+        pane._ehlersSeries = {
+            mama: pane.chart.addLineSeries({ color: '#26a69a', lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+            fama: pane.chart.addLineSeries({ color: '#ef5350', lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+        };
+    }
+    pane._ehlersSeries.mama.setData(toData(e.mama));
+    pane._ehlersSeries.fama.setData(toData(e.fama));
+
+    // Dominant-cycle period sub-pane (toggle via settings)
+    if (ehlersSettings.showPeriod) {
+        if (!pane._ehlersPeriodSeries) {
+            pane._ehlersPeriodSeries = pane.chart.addLineSeries({ color: '#ffa726', lineWidth: 1.5, priceScaleId: 'ehlersper', lastValueVisible: true, priceLineVisible: false, crosshairMarkerVisible: false });
+            pane._ehlersPeriodSeries.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0.0 }, autoScale: true });
+        }
+        pane._ehlersPeriodSeries.setData(toData(e.period));
+    } else if (pane._ehlersPeriodSeries) {
+        try { pane.chart.removeSeries(pane._ehlersPeriodSeries); } catch(err) {}
+        pane._ehlersPeriodSeries = null;
+    }
+
+    // SineWave / LeadSine sub-pane (toggle via settings)
+    if (ehlersSettings.showSine) {
+        if (!pane._ehlersSineSeries) {
+            pane._ehlersSineSeries = {
+                line: pane.chart.addLineSeries({ color: '#42a5f5', lineWidth: 1.5, priceScaleId: 'ehlerssine', lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+                lead: pane.chart.addLineSeries({ color: '#ec407a', lineWidth: 1.5, priceScaleId: 'ehlerssine', lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+            };
+            pane._ehlersSineSeries.line.priceScale().applyOptions({ scaleMargins: { top: 0.9, bottom: 0.0 }, autoScale: true });
+        }
+        pane._ehlersSineSeries.line.setData(toData(e.sine));
+        pane._ehlersSineSeries.lead.setData(toData(e.leadSine));
+    } else if (pane._ehlersSineSeries) {
+        try { pane.chart.removeSeries(pane._ehlersSineSeries.line); } catch(err) {}
+        try { pane.chart.removeSeries(pane._ehlersSineSeries.lead); } catch(err) {}
+        pane._ehlersSineSeries = null;
+    }
+
+    // MAMA/FAMA crossover markers (Ehlers' trend/cycle signal)
+    const markers = [];
+    for (let i = 1; i < candles.length; i++) {
+        if (e.mama[i] === null || e.fama[i] === null || e.mama[i - 1] === null || e.fama[i - 1] === null) continue;
+        const prevDiff = e.mama[i - 1] - e.fama[i - 1];
+        const diff = e.mama[i] - e.fama[i];
+        if (prevDiff <= 0 && diff > 0) markers.push({ time: candles[i].time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp' });
+        else if (prevDiff >= 0 && diff < 0) markers.push({ time: candles[i].time, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown' });
+    }
+    return markers;
+}
+
+function removeEhlers(pane) {
+    if (pane._ehlersSeries) {
+        try { pane.chart.removeSeries(pane._ehlersSeries.mama); } catch(e) {}
+        try { pane.chart.removeSeries(pane._ehlersSeries.fama); } catch(e) {}
+        pane._ehlersSeries = null;
+    }
+    if (pane._ehlersPeriodSeries) {
+        try { pane.chart.removeSeries(pane._ehlersPeriodSeries); } catch(e) {}
+        pane._ehlersPeriodSeries = null;
+    }
+    if (pane._ehlersSineSeries) {
+        try { pane.chart.removeSeries(pane._ehlersSineSeries.line); } catch(e) {}
+        try { pane.chart.removeSeries(pane._ehlersSineSeries.lead); } catch(e) {}
+        pane._ehlersSineSeries = null;
+    }
+}
+
 // ─── Relative Strength Indicator ──────────────────────────────────────────────
 const rsSettings = { benchmark: 'NIFTY 500', maPeriod: 50 };
 let _rsBenchmarkCache = {};        // resolved candles { 'NIFTY 500_365': [...] }
@@ -3411,6 +3667,7 @@ document.querySelectorAll('.indi-flyout-row').forEach(row => {
                 if (indi === 'rsi') removeRSI(pane);
                 if (indi === 'macd') removeMACD(pane);
                 if (indi === 'rs') removeRelativeStrength(pane);
+                if (indi === 'ehlers') removeEhlers(pane);
             });
         } else {
             activeIndicators.add(indi);
@@ -3440,7 +3697,7 @@ indiMenuBtn.classList.toggle('has-active', activeIndicators.size > 0);
 const indiModal = document.getElementById('indiModalOverlay');
 
 function openIndiSettings(indi) {
-    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalInstAccum', 'indiModalRSI', 'indiModalMACD', 'indiModalRS'];
+    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalInstAccum', 'indiModalRSI', 'indiModalMACD', 'indiModalRS', 'indiModalEhlers'];
     allPanels.forEach(id => document.getElementById(id).style.display = 'none');
     const title = document.getElementById('indiModalTitle');
     if (indi === 'supreseps') {
@@ -3450,6 +3707,11 @@ function openIndiSettings(indi) {
         document.getElementById('indi_ma20').value = supResEPSSettings.ma20;
         document.getElementById('indi_ma50').value = supResEPSSettings.ma50;
         document.getElementById('indi_ma200').value = supResEPSSettings.ma200;
+        document.getElementById('indi_ma10On').checked = !!supResEPSSettings.ma10On;
+        document.getElementById('indi_ma20On').checked = !!supResEPSSettings.ma20On;
+        document.getElementById('indi_ma50On').checked = !!supResEPSSettings.ma50On;
+        document.getElementById('indi_ma200On').checked = !!supResEPSSettings.ma200On;
+        document.getElementById('indi_showZones').checked = !!supResEPSSettings.showZones;
         document.getElementById('indi_pivotLen').value = supResEPSSettings.pivotLen;
         document.getElementById('indi_zoneAtr').value = supResEPSSettings.atrMult;
         document.getElementById('indi_maxPerSide').value = supResEPSSettings.maxPerSide;
@@ -3475,7 +3737,14 @@ function openIndiSettings(indi) {
         title.textContent = 'Institutional Accumulation Settings';
         document.getElementById('indi_ppLookback').value = instAccumSettings.ppLookback;
         document.getElementById('indi_mfLookback').value = instAccumSettings.mfLookback;
+        document.getElementById('indi_ppOn').checked = !!instAccumSettings.ppOn;
+        document.getElementById('indi_mfOn').checked = !!instAccumSettings.mfOn;
         document.getElementById('indi_showDeals').checked = !!instAccumSettings.showDeals;
+    } else if (indi === 'ehlers') {
+        document.getElementById('indiModalEhlers').style.display = '';
+        title.textContent = 'Ehlers Cycle Settings';
+        document.getElementById('indi_ehShowPeriod').checked = !!ehlersSettings.showPeriod;
+        document.getElementById('indi_ehShowSine').checked = !!ehlersSettings.showSine;
     } else {
         document.getElementById('indiModalSmartVPSG').style.display = '';
         title.textContent = 'SmartVPSG Settings';
@@ -3501,6 +3770,11 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
         supResEPSSettings.ma20 = parseInt(document.getElementById('indi_ma20').value) || 20;
         supResEPSSettings.ma50 = parseInt(document.getElementById('indi_ma50').value) || 50;
         supResEPSSettings.ma200 = parseInt(document.getElementById('indi_ma200').value) || 200;
+        supResEPSSettings.ma10On = document.getElementById('indi_ma10On').checked;
+        supResEPSSettings.ma20On = document.getElementById('indi_ma20On').checked;
+        supResEPSSettings.ma50On = document.getElementById('indi_ma50On').checked;
+        supResEPSSettings.ma200On = document.getElementById('indi_ma200On').checked;
+        supResEPSSettings.showZones = document.getElementById('indi_showZones').checked;
         supResEPSSettings.pivotLen = parseInt(document.getElementById('indi_pivotLen').value) || 15;
         supResEPSSettings.atrMult = parseFloat(document.getElementById('indi_zoneAtr').value) || 0.6;
         supResEPSSettings.maxPerSide = parseInt(document.getElementById('indi_maxPerSide').value) || 4;
@@ -3519,8 +3793,14 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
     } else if (indi === 'instaccum') {
         instAccumSettings.ppLookback = parseInt(document.getElementById('indi_ppLookback').value) || 10;
         instAccumSettings.mfLookback = parseInt(document.getElementById('indi_mfLookback').value) || 20;
+        instAccumSettings.ppOn = document.getElementById('indi_ppOn').checked;
+        instAccumSettings.mfOn = document.getElementById('indi_mfOn').checked;
         instAccumSettings.showDeals = !!document.getElementById('indi_showDeals').checked;
         panes.forEach(p => { p._instDealsCache = null; p._instDealsSym = null; });
+    } else if (indi === 'ehlers') {
+        ehlersSettings.showPeriod = document.getElementById('indi_ehShowPeriod').checked;
+        ehlersSettings.showSine = document.getElementById('indi_ehShowSine').checked;
+        saveEhlersSettings();
     } else {
         smartVPSGSettings.avgLookback = parseInt(document.getElementById('indi_avgLookback').value) || 21;
         smartVPSGSettings.showVolProfile = !!document.getElementById('indi_showVolProfile').checked;

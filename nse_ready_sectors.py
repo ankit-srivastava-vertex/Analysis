@@ -103,6 +103,9 @@ START_DATE = datetime.date(2024, 1, 1)
 
 CACHE_DIR = os.path.join(SCRIPT_DIR, "data", "nse_index_history")
 CACHE_FRESH_DAYS = 4  # reuse cache without a network call if this fresh
+# Abort the day-by-day bhavcopy stitch after this many consecutive failed
+# requests (NSE archive down/blocking) instead of grinding all ~400 days.
+_BHAVCOPY_MAX_CONSEC_FAIL = 10
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
@@ -231,7 +234,7 @@ def fetch_niftyindices(session, nifty_name, start_date, end_date):
     }
     try:
         r = session.post(_NIFTYINDICES_HIST, data=json.dumps(payload),
-                         headers=headers, timeout=25)
+                         headers=headers, timeout=15)
         if r.status_code != 200:
             return pd.Series(dtype=float)
         rows = json.loads(r.json().get("d", "[]"))
@@ -261,15 +264,23 @@ def fetch_niftyindices(session, nifty_name, start_date, end_date):
 def fetch_bhavcopy_range(session, official_name, start_date, end_date):
     """Fallback: stitch daily NSE index bhavcopy CSVs to build one index's
     close series over [start_date, end_date].  Returns a date-indexed
-    pd.Series (may be empty).  Skips weekends and missing (holiday) files."""
+    pd.Series (may be empty).  Skips weekends and missing (holiday) files.
+
+    Guards against multi-hour hangs when the NSE archive is unreachable:
+    each request uses a short timeout, and after a sustained run of
+    consecutive failures (archive down/blocking) the stitch aborts early
+    instead of grinding through ~400 trading days."""
     dates, closes = [], []
     day = start_date
     one = datetime.timedelta(days=1)
+    consecutive_failures = 0
+    for_break = False
     while day <= end_date:
         if day.weekday() < 5:  # Mon-Fri only
             url = _BHAVCOPY_URL % day.strftime("%d%m%Y")
+            ok = False
             try:
-                r = session.get(url, timeout=20)
+                r = session.get(url, timeout=8)
                 if r.status_code == 200 and len(r.content) > 200:
                     df = pd.read_csv(io.StringIO(r.text))
                     hit = df[df["Index Name"].astype(str).str.strip()
@@ -279,10 +290,22 @@ def fetch_bhavcopy_range(session, official_name, start_date, end_date):
                                    .replace(",", ""))
                         dates.append(pd.Timestamp(day))
                         closes.append(cl)
+                    ok = True  # file fetched (row may be a holiday gap)
             except Exception:
-                pass
+                ok = False
+            if ok:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= _BHAVCOPY_MAX_CONSEC_FAIL:
+                    # NSE archive is unreachable/blocking — stop early
+                    # rather than iterating hundreds more dead requests.
+                    for_break = True
+                    break
             time.sleep(0.15)
         day += one
+    if for_break and not dates:
+        return pd.Series(dtype=float)
     if not dates:
         return pd.Series(dtype=float)
     s = pd.Series(closes, index=pd.DatetimeIndex(dates))
