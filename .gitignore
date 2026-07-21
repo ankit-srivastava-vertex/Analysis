@@ -21,6 +21,7 @@ pct_down_report.xlsx
 fii_equity_cache.csv
 fii_oi_cache.csv
 .cache/
+Output/.ohlcv_cache_*.pkl
 
 # Excel lock files
 ~$*.xlsx
