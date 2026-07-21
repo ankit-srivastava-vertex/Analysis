@@ -253,6 +253,7 @@ warnings.filterwarnings("ignore")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 HISTORY_CSV = os.path.join(DATA_DIR, "scorecard_history.csv")
+SNAPSHOT_CSV = os.path.join(DATA_DIR, "scorecard_snapshots.csv")
 
 TICKERTAPE_API = "https://api.tickertape.in/screener/query"
 TICKERTAPE_HEADERS = {
@@ -322,11 +323,24 @@ PARAMS = {
     # verdict thresholds
     "buy_val_min":       45.0,    # min ValuationScore for a 2A "Buy"
     "accumulate_val_min": 60.0,   # min ValuationScore for a Stage-1 "Accumulate"
+    # regime overlay (broad-universe 200-DMA breadth, sector vs whole market)
+    "regime_breadth_margin": 8.0,  # sector %>200DMA leads/lags market by ≥ this (pp)
 }
 
 # Sector → valuation method.  Keys are matched as case-insensitive substrings
 # against the Tickertape macro-sector name (``stock.info.sector``).
 SECTOR_VAL_METHOD = {
+    # ── GICS macro-sectors (what Tickertape's info.sector actually returns) ──
+    "financials":                "PB_ROE",   # banks / NBFCs → P/B-vs-ROE
+    "energy":                    "PE_NORM",  # refiners / oil&gas → cyclical
+    "materials":                 "PE_NORM",  # metals / cement / chem → cyclical
+    "consumer discretionary":    "PE",
+    "consumer staples":          "PE",
+    "health care":               "PE",
+    "industrials":               "PE",
+    "communication services":    "PE",
+    "real estate":               "SPECIAL",
+    # ── granular fallbacks (kept for any finer sector strings) ──
     "financial services":        "PB_ROE",
     "bank":                      "PB_ROE",
     "nbfc":                      "PB_ROE",
@@ -355,7 +369,8 @@ SECTOR_VAL_METHOD = {
     "realty":                    "SPECIAL",
     "insurance":                 "SPECIAL",
 }
-FINANCIAL_SECTORS = ("financial services", "bank", "nbfc", "insurance")
+FINANCIAL_SECTORS = ("financials", "financial services", "bank", "nbfc",
+                     "insurance")
 DEFAULT_VAL_METHOD = "PE"
 
 
@@ -928,12 +943,17 @@ def _deep_forensic(symbol):
     return res
 
 
-def compute_quality(row, sector, de_pctile_hi, forensic=None):
+def compute_quality(row, sector, de_pctile_hi, forensic=None, has_fund=True):
     """Return QualityFlag + QualityScore for one stock.
 
     ``forensic`` (optional) carries the deep-forensic scores when the stock
-    was on the Stage-2-cheap shortlist.
+    was on the Stage-2 shortlist. ``has_fund`` is False when the name had no
+    Tickertape fundamental match (e.g. BSE-only numeric codes) — such names
+    get an explicit NA flag rather than a hollow "OK".
     """
+    if not has_fund:
+        return {"QualityFlag": "NA", "QualityScore": float("nan"),
+                "QualityReason": "no fundamentals"}
     pledged = _f(row.get("Pledged%") if hasattr(row, "get") else row["Pledged%"])
     promoter = _f(row.get("Promoter%") if hasattr(row, "get") else row["Promoter%"])
     de = _f(row.get("DE") if hasattr(row, "get") else row["DE"])
@@ -984,27 +1004,31 @@ def compute_quality(row, sector, de_pctile_hi, forensic=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Regime overlay  (sector-strength proxy)
 # ─────────────────────────────────────────────────────────────────────────────
-def compute_regime(records):
-    """Assign RegimeTag per row from sector median MomentumScore.
+def compute_regime(records, sector_breadth=None, market_breadth=float("nan")):
+    """Assign RegimeTag per row from BROAD-universe 200-DMA breadth.
 
-    v1 proxy (self-contained). Phase-3 hook: swap for RRG quadrant +
-    12-week net sector FII flow + macro-liquidity composite.
+    A sector is Tailwind / Headwind when the share of its *entire* listed
+    universe trading above the 200-DMA leads / lags the whole-market breadth
+    by ``regime_breadth_margin`` points. Measuring breadth over the full
+    universe (not the breakout shortlist, which is self-selected to strong
+    relative strength and so always looked "Tailwind") removes the selection
+    bias; measuring it *relative to the market* self-calibrates to the overall
+    environment. Phase-3 hook: swap for RRG quadrant + 12-week net sector FII
+    flow + macro-liquidity composite.
     """
-    by_sector = {}
+    sector_breadth = sector_breadth or {}
+    margin = PARAMS["regime_breadth_margin"]
+    have_market = not _isnan(market_breadth)
     for r in records:
         sec = r.get("Sector") or "Unknown"
-        m = r.get("MomentumScore")
-        if not _isnan(m):
-            by_sector.setdefault(sec, []).append(m)
-    med = {s: float(np.median(v)) for s, v in by_sector.items() if v}
-    for r in records:
-        sec = r.get("Sector") or "Unknown"
-        m = med.get(sec)
-        if m is None:
+        b = sector_breadth.get(sec)
+        if b is None or not have_market:
             r["RegimeTag"] = "Neutral"
-        elif m >= 60:
+            continue
+        rel = b - market_breadth
+        if rel >= margin:
             r["RegimeTag"] = "Tailwind"
-        elif m <= 40:
+        elif rel <= -margin:
             r["RegimeTag"] = "Headwind"
         else:
             r["RegimeTag"] = "Neutral"
@@ -1027,22 +1051,26 @@ def decide_verdict(r):
     qs = _f(r.get("QualityScore"))
     stage_sc = _stage_score(stage, sub, rs_m)
 
-    # composite (hard quality FAIL overrides to 0)
+    # composite — FIXED denominator (a missing axis LOWERS the score instead of
+    # being renormalised away, so names with no fundamentals cannot float up)
     parts = {"mom": (mom, PARAMS["c_mom"]), "val": (val, PARAMS["c_val"]),
              "stage": (stage_sc, PARAMS["c_stage"]),
              "quality": (qs, PARAMS["c_quality"])}
-    num = den = 0.0
+    total_w = (PARAMS["c_mom"] + PARAMS["c_val"]
+               + PARAMS["c_stage"] + PARAMS["c_quality"])
+    num = 0.0
     for v, w in parts.values():
         if not _isnan(v):
             num += v * w
-            den += w
-    composite = round(num / den, 1) if den > 0 else float("nan")
+    composite = round(num / total_w, 1) if total_w > 0 else float("nan")
     if qf == "FAIL":
         composite = 0.0
 
     # verdict tree
     if qf == "FAIL":
         verdict = "Avoid (quality)"
+    elif qf == "NA":
+        verdict = "Watch (no fundamentals)"
     elif stage == 4:
         verdict = "Avoid (Stage 4)"
     elif stage == 3:
@@ -1166,6 +1194,50 @@ def _append_history(records, asof):
         print(f"  [scorecard] history append failed: {e}")
 
 
+def _append_snapshot(records, asof):
+    """Persist a dated snapshot of every scored name so the walk-forward
+    validator (breakout_scorecard_review.py) can later measure whether the
+    CompositeScore / Verdict / each axis actually predicted forward returns.
+    """
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        rows = []
+        for r in records:
+            rows.append({
+                "date": asof,
+                "symbol": r.get("symbol"),
+                "Sector": r.get("Sector"),
+                "Close": r.get("Close"),
+                "entry": r.get("entry"),
+                "ValuationScore": r.get("ValuationScore"),
+                "MomentumScore": r.get("MomentumScore"),
+                "StageScore": _stage_score(r.get("Stage"), r.get("Substage"),
+                                           _f(r.get("RS_M"))),
+                "QualityScore": r.get("QualityScore"),
+                "QualityFlag": r.get("QualityFlag"),
+                "Stage": r.get("Stage"),
+                "Substage": r.get("Substage"),
+                "ScanScore": r.get("ScanScore"),
+                "rr": r.get("rr"),
+                "base_days": r.get("base_days"),
+                "base_range_pct": r.get("base_range_pct"),
+                "distance_pct": r.get("distance_pct"),
+                "CompositeScore": r.get("CompositeScore"),
+                "Verdict": r.get("Verdict"),
+            })
+        new = pd.DataFrame(rows)
+        if os.path.exists(SNAPSHOT_CSV):
+            old = pd.read_csv(SNAPSHOT_CSV)
+            # idempotent per date: drop any prior rows for today before re-adding
+            old = old[old["date"].astype(str) != str(asof)]
+            new = new.reindex(columns=old.columns.tolist())
+            pd.concat([old, new], ignore_index=True).to_csv(SNAPSHOT_CSV, index=False)
+        else:
+            new.to_csv(SNAPSHOT_CSV, index=False)
+    except Exception as e:
+        print(f"  [scorecard] snapshot append failed: {e}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1174,7 +1246,9 @@ OUTPUT_COLS = [
     "PE", "PB", "EVEBITDA", "ValuationScore", "ROE", "ROCE", "DE",
     "Pledged%", "Promoter%", "QualityFlag", "AltmanZ", "PiotroskiF",
     "BeneishM", "CFO_PAT", "RS_M", "ret_12_1", "MomentumScore", "Stage",
-    "Substage", "Breakout_Confirmed", "base_count", "RegimeTag",
+    "Substage", "Breakout_Confirmed", "base_count",
+    "ScanScore", "rr", "base_days", "base_range_pct", "distance_pct",
+    "entry", "stop", "target", "RegimeTag",
     "CompositeScore", "Verdict",
 ]
 
@@ -1214,6 +1288,17 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
     tick = fetch_tickertape_universe(verbose=verbose)
     sector_pools = _build_sector_pools(tick)
     hist = _load_history()
+    # broad-universe 200-DMA breadth per macro-sector + whole market
+    # (regime overlay: full universe, not the strong-RS breakout shortlist)
+    sector_breadth, market_breadth = {}, float("nan")
+    if not tick.empty:
+        _v = tick[(tick["lastPrice"] > 0) & (tick["SMA200"] > 0)].copy()
+        if len(_v):
+            _v["_above"] = (_v["lastPrice"] > _v["SMA200"]).astype(float)
+            market_breadth = float(_v["_above"].mean() * 100.0)
+            for _sec, _g in _v.groupby("Sector"):
+                if len(_g) >= 5:
+                    sector_breadth[_sec] = float(_g["_above"].mean() * 100.0)
     # sector D/E 80th percentile (for the soft WATCH gate)
     de_hi = {}
     if not tick.empty:
@@ -1222,6 +1307,19 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
             de = de[np.isfinite(de)]
             de_hi[sec] = float(np.percentile(de, PARAMS["de_watch_pctile"] * 100)) \
                 if len(de) >= 5 else float("nan")
+
+    # validated scanner-setup factors carried through for transparency
+    # (rr / base_days / base_range_pct / distance_pct are the factors the
+    #  walk-forward deep-analysis found predictive; kept as columns, not
+    #  silently folded into the composite — re-weighting awaits validator data)
+    factor_map = {}
+    for _r in (mpd_rows + scr_rows):
+        _sym = str(_r.get("symbol") or "").strip()
+        if not _sym:
+            continue
+        _cur = factor_map.get(_sym)
+        if _cur is None or _f(_r.get("score")) > _f(_cur.get("score")):
+            factor_map[_sym] = _r
 
     # ── pass 1: per-symbol valuation + momentum + stage ──
     per_mom = {}
@@ -1278,6 +1376,16 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
         rec["PiotroskiF"] = float("nan")
         rec["BeneishM"] = float("nan")
         rec["CFO_PAT"] = float("nan")
+        rec["_has_fund"] = trow is not None
+        _fr = factor_map.get(sym, {})
+        rec["ScanScore"] = _f(_fr.get("score"))
+        rec["rr"] = _f(_fr.get("rr"))
+        rec["base_days"] = _f(_fr.get("base_days"))
+        rec["base_range_pct"] = _f(_fr.get("base_range_pct"))
+        rec["distance_pct"] = _f(_fr.get("distance_pct"))
+        rec["entry"] = _f(_fr.get("entry"))
+        rec["stop"] = _f(_fr.get("stop"))
+        rec["target"] = _f(_fr.get("target"))
         records.append(rec)
 
     # finalize momentum (cross-sectional 12-1 percentile) and attach
@@ -1285,16 +1393,22 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
     for rec in records:
         rec["MomentumScore"] = per_mom[rec["symbol"]]["MomentumScore"]
 
-    # ── deep forensic on the Stage-2-cheap shortlist ──
+    # ── deep forensic on the Stage-2 shortlist (leaders + cheap, not cheap-only) ──
     if deep_forensic:
-        shortlist = [r for r in records
-                     if r.get("Stage") == 2
-                     and not _isnan(_f(r.get("ValuationScore")))
-                     and _f(r["ValuationScore"]) >= PARAMS["forensic_val_cutoff"]]
-        shortlist = shortlist[:PARAMS["forensic_max"]]
+        def _prelim(r):
+            m = _f(r.get("MomentumScore"))
+            v = _f(r.get("ValuationScore"))
+            m = m if not _isnan(m) else 50.0
+            v = v if not _isnan(v) else 40.0
+            return 0.5 * m + 0.5 * v
+        cand = [r for r in records
+                if r.get("Stage") == 2 and r.get("_has_fund")
+                and str(r["symbol"]).upper().endswith(".NS")]
+        cand.sort(key=_prelim, reverse=True)
+        shortlist = cand[:PARAMS["forensic_max"]]
         if verbose and shortlist:
             print(f"  [scorecard] deep forensic on {len(shortlist)} "
-                  "Stage-2-cheap names …")
+                  "Stage-2 names (by prelim rank) …")
         for r in shortlist:
             fr = _deep_forensic(_base_symbol(r["symbol"]))
             r.update(fr)
@@ -1303,11 +1417,12 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
     for r in records:
         fr = {k: r.get(k) for k in ("AltmanZ", "PiotroskiF", "BeneishM", "CFO_PAT")}
         q = compute_quality(r, r.get("Sector", ""),
-                            de_hi.get(r.get("Sector"), float("nan")), forensic=fr)
+                            de_hi.get(r.get("Sector"), float("nan")),
+                            forensic=fr, has_fund=r.get("_has_fund", True))
         r.update(q)
 
     # ── regime overlay ──
-    compute_regime(records)
+    compute_regime(records, sector_breadth, market_breadth)
 
     # ── verdict + composite ──
     for r in records:
@@ -1343,6 +1458,7 @@ def run(excel_path, mpd_rows=None, scr_rows=None, ohlcv=None, bench=None,
         print(f"  [scorecard] failed to write HTML: {e}")
 
     _append_history(records, datetime.date.today().strftime("%Y-%m-%d"))
+    _append_snapshot(records, datetime.date.today().strftime("%Y-%m-%d"))
 
     if verbose:
         n_buy = (df_out["Verdict"].str.startswith("Buy")).sum()
