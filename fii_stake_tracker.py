@@ -82,14 +82,15 @@ OUTPUT COLUMNS (21)
 
 USAGE
 -----
-Individual run:
+Standalone run (not part of run_all.py):
     python3 fii_stake_tracker.py                  # default output
     python3 fii_stake_tracker.py -o my_report     # custom output prefix
 
-Group run (via run_all.py):
-    Scenario name: fii_stake_tracker
-    Called as: fii_stake_tracker.run()
-    Skip with: python3 run_all.py --skip fii_stake_tracker
+CADENCE
+-------
+    FII holdings are disclosed quarterly (SEBI LODR filings within 21 days
+    of the Mar/Jun/Sep/Dec quarter-ends), so run this once per quarter,
+    ~3-4 weeks after a quarter-end. Streak history persists across runs.
 
 ENVIRONMENT
 -----------

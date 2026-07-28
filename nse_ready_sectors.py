@@ -85,8 +85,9 @@ pandas, plotly, requests, sector_momentum
 import os
 import io
 import json
-import time
+import threading
 import datetime
+import concurrent.futures
 
 import pandas as pd
 import requests
@@ -106,6 +107,8 @@ CACHE_FRESH_DAYS = 4  # reuse cache without a network call if this fresh
 # Abort the day-by-day bhavcopy stitch after this many consecutive failed
 # requests (NSE archive down/blocking) instead of grinding all ~400 days.
 _BHAVCOPY_MAX_CONSEC_FAIL = 10
+# Parallel workers for the batched bhavcopy day-file prefetch.
+_BHAVCOPY_WORKERS = 8
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
@@ -260,52 +263,107 @@ def fetch_niftyindices(session, nifty_name, start_date, end_date):
 
 
 # ─── Price provider: bhavcopy (fallback) ─────────────────────────────────────
+#
+# The NSE archive publishes ONE file per trading day
+# (ind_close_all_<DDMMYYYY>.csv) that contains the close for EVERY index that
+# day.  So instead of re-downloading each daily file once per index (30+ times),
+# we fetch each day's file exactly once, parse all indices from it, and cache
+# the parsed result in-process.  Days are prefetched in parallel.  Callers then
+# read their index's series straight from the shared day cache.
+
+# Run-scoped cache: {datetime.date: {index_name: close_float}}.  A value of
+# None means that day's file could not be fetched (archive down / holiday).
+# Bhavcopy day files are immutable history, so caching them for the life of the
+# process is always safe.
+_BHAVCOPY_DAY_CACHE = {}
+_BHAVCOPY_DAY_LOCK = threading.Lock()
+
+
+def _fetch_bhavcopy_day(session, day):
+    """Fetch & parse one daily all-index bhavcopy file into
+    {index_name: close}.  Returns None on failure / missing file."""
+    url = _BHAVCOPY_URL % day.strftime("%d%m%Y")
+    try:
+        r = session.get(url, timeout=8)
+        if r.status_code == 200 and len(r.content) > 200:
+            df = pd.read_csv(io.StringIO(r.text))
+            names = df["Index Name"].astype(str).str.strip()
+            out = {}
+            for nm, cl in zip(names, df["Closing Index Value"]):
+                try:
+                    out[nm] = float(str(cl).replace(",", ""))
+                except (ValueError, TypeError):
+                    continue
+            return out or None
+    except Exception:
+        return None
+    return None
+
+
+def _prefetch_bhavcopy_days(session, start_date, end_date,
+                            workers=_BHAVCOPY_WORKERS):
+    """Populate _BHAVCOPY_DAY_CACHE for every weekday in [start, end] that is
+    not already cached, fetching the daily files in parallel (each file once).
+
+    Preserves the existing dead-archive guard: if a sustained run of requests
+    fails with no data at all, stop early instead of firing hundreds of dead
+    requests.  (This is NOT a latency/slowness breaker — that is a separate,
+    deferred change.)"""
+    # Most-recent-first so incremental (small) ranges resolve the newest days
+    # first and a dead archive is detected quickly.
+    days = []
+    one = datetime.timedelta(days=1)
+    day = end_date
+    while day >= start_date:
+        if day.weekday() < 5:
+            with _BHAVCOPY_DAY_LOCK:
+                have = day in _BHAVCOPY_DAY_CACHE
+            if not have:
+                days.append(day)
+        day -= one
+    if not days:
+        return
+
+    failures = 0
+    successes = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        for i in range(0, len(days), workers):
+            batch = days[i:i + workers]
+            results = list(ex.map(lambda d: _fetch_bhavcopy_day(session, d),
+                                  batch))
+            for d, res in zip(batch, results):
+                with _BHAVCOPY_DAY_LOCK:
+                    _BHAVCOPY_DAY_CACHE[d] = res
+                if res:
+                    successes += 1
+                else:
+                    failures += 1
+            # Dead-archive guard: nothing has come back at all after a
+            # sustained failure run → the archive is down/blocking, bail.
+            if successes == 0 and failures >= _BHAVCOPY_MAX_CONSEC_FAIL:
+                break
+
 
 def fetch_bhavcopy_range(session, official_name, start_date, end_date):
-    """Fallback: stitch daily NSE index bhavcopy CSVs to build one index's
-    close series over [start_date, end_date].  Returns a date-indexed
-    pd.Series (may be empty).  Skips weekends and missing (holiday) files.
-
-    Guards against multi-hour hangs when the NSE archive is unreachable:
-    each request uses a short timeout, and after a sustained run of
-    consecutive failures (archive down/blocking) the stitch aborts early
-    instead of grinding through ~400 trading days."""
+    """Fallback: build one index's close series over [start_date, end_date]
+    from the NSE daily index bhavcopy files.  Fetches each day's file once
+    (shared, parallel prefetch) and reads this index's close from the shared
+    day cache.  Returns a date-indexed pd.Series (may be empty).  Skips
+    weekends and missing (holiday) files."""
+    _prefetch_bhavcopy_days(session, start_date, end_date)
     dates, closes = [], []
-    day = start_date
     one = datetime.timedelta(days=1)
-    consecutive_failures = 0
-    for_break = False
+    day = start_date
     while day <= end_date:
-        if day.weekday() < 5:  # Mon-Fri only
-            url = _BHAVCOPY_URL % day.strftime("%d%m%Y")
-            ok = False
-            try:
-                r = session.get(url, timeout=8)
-                if r.status_code == 200 and len(r.content) > 200:
-                    df = pd.read_csv(io.StringIO(r.text))
-                    hit = df[df["Index Name"].astype(str).str.strip()
-                             == official_name]
-                    if not hit.empty:
-                        cl = float(str(hit.iloc[0]["Closing Index Value"])
-                                   .replace(",", ""))
-                        dates.append(pd.Timestamp(day))
-                        closes.append(cl)
-                    ok = True  # file fetched (row may be a holiday gap)
-            except Exception:
-                ok = False
-            if ok:
-                consecutive_failures = 0
-            else:
-                consecutive_failures += 1
-                if consecutive_failures >= _BHAVCOPY_MAX_CONSEC_FAIL:
-                    # NSE archive is unreachable/blocking — stop early
-                    # rather than iterating hundreds more dead requests.
-                    for_break = True
-                    break
-            time.sleep(0.15)
+        if day.weekday() < 5:
+            with _BHAVCOPY_DAY_LOCK:
+                dm = _BHAVCOPY_DAY_CACHE.get(day)
+            if dm:
+                cl = dm.get(official_name)
+                if cl is not None:
+                    dates.append(pd.Timestamp(day))
+                    closes.append(cl)
         day += one
-    if for_break and not dates:
-        return pd.Series(dtype=float)
     if not dates:
         return pd.Series(dtype=float)
     s = pd.Series(closes, index=pd.DatetimeIndex(dates))
@@ -323,29 +381,47 @@ def get_index_close(nifty_name, official_name, start_date, end_date,
       2. niftyindices.com (primary).
       3. NSE bhavcopy stitch (fallback) if niftyindices yields nothing.
 
+    When a cache exists but is stale, only the missing tail is fetched and
+    appended (incremental) rather than re-downloading the full history.
     On a successful network fetch the series is cached for next time.
     """
+    cached = None
+    fetch_start = start_date
     if use_cache:
         cached = _load_cache(nifty_name)
         if cached is not None and not cached.empty:
             last = cached.index.max().date()
             if (end_date - last).days <= CACHE_FRESH_DAYS:
                 return cached.loc[:pd.Timestamp(end_date)]
+            # Stale but usable: only fetch the missing tail and append it to
+            # the cached history (incremental — avoids re-downloading years of
+            # data just to add a few days).
+            fetch_start = last + datetime.timedelta(days=1)
 
     own_session = session is None
     if own_session:
         session = create_session()
 
-    series = fetch_niftyindices(session, nifty_name, start_date, end_date)
+    series = fetch_niftyindices(session, nifty_name, fetch_start, end_date)
 
     if series.empty and official_name:
         series = fetch_bhavcopy_range(session, official_name,
-                                      start_date, end_date)
+                                      fetch_start, end_date)
+
+    # Merge any freshly fetched tail onto the cached history.
+    if cached is not None and not cached.empty:
+        if not series.empty:
+            merged = pd.concat([cached, series])
+            series = merged[~merged.index.duplicated(keep="last")].sort_index()
+        else:
+            # Network fetch failed — fall back to the (slightly stale) cache
+            # rather than dropping the index entirely.
+            series = cached
 
     if not series.empty:
         _save_cache(nifty_name, series)
 
-    return series
+    return series.loc[:pd.Timestamp(end_date)] if not series.empty else series
 
 
 # ─── Analyzer helpers ────────────────────────────────────────────────────────

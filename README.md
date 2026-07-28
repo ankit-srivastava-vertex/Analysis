@@ -9,6 +9,7 @@ Automated daily market analysis pipeline for Indian equities. Covers bulk/block 
 1. [Quick Start](#quick-start)
 2. [Architecture](#architecture)
 3. [Environment & Configuration](#environment--configuration)
+   - [Replicating .venv / .vscode / .env](#replicating-venv--vscode--env)
 4. [run_all.py — Main Orchestrator](#run_allpy--main-orchestrator)
 5. [Standalone Analysis Scripts](#standalone-analysis-scripts)
 6. [Portfolio System](#portfolio-system)
@@ -26,19 +27,20 @@ Automated daily market analysis pipeline for Indian equities. Covers bulk/block 
 ```bash
 cd /Users/ankit.srivastava/Documents/Analysis
 
-# Create the venv, upgrade the installer, and install EVERY requirements*.txt
-# in the project (root + tradingcharts/ + any future ones) in a single pip
-# resolver pass — avoids version conflicts from sequential installs:
-python3 -m venv venv && venv/bin/python -m pip install -U pip setuptools wheel && \
-  venv/bin/python -m pip install $(find . -path ./venv -prune -o -name 'requirements*.txt' -print | sed 's/^/-r /')
+# Create the venv (Python 3.11), upgrade the installer, and install EVERY
+# requirements*.txt in the project (root + tradingcharts/ + any future ones)
+# in a single pip resolver pass — avoids version conflicts from sequential
+# installs:
+python3.11 -m venv .venv && .venv/bin/python -m pip install -U pip setuptools wheel && \
+  .venv/bin/python -m pip install $(find . -path ./.venv -prune -o -path ./venv -prune -o -name 'requirements*.txt' -print | sed 's/^/-r /')
 
-source venv/bin/activate
+source .venv/bin/activate
 
 # Additional deps not in requirements.txt (install manually if missing):
 pip install smartapi-python pyotp fpdf2 PyPDF2 httpx numpy
 
-# Configure credentials
-cp .env.example .env   # then fill in values (see Configuration below)
+# Configure credentials — no .env.example is shipped; create .env yourself
+# (see "Replicating .venv / .vscode / .env" below for a ready-to-paste template).
 
 # Run everything (market closed, so no email):
 python3 run_all.py --no-email
@@ -46,6 +48,10 @@ python3 run_all.py --no-email
 # Portfolio analysis:
 python3 portfolio/portfolio_run_all.py --no-email
 ```
+
+> **Virtualenv note:** the project's canonical environment is **`.venv`
+> (Python 3.11)**. A legacy `venv/` (Python 3.9) may also be present as a
+> fallback; prefer `.venv`. Both are gitignored.
 
 ---
 
@@ -87,7 +93,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 | Subsystem | Entry point | Cadence |
 |---|---|---|
 | **Daily market sweep** (8 scenarios) | `run_all.py` | Mon–Fri 18:00 IST (launchd) |
-| **Breakout scanner** | `breakout_scanner_angel.py` | On demand |
+| **Breakout scanner** (+ attached scorecard) | `breakout_scanner_angel.py` | On demand |
 | **Single-stock deep PDF** | `forensic_accounting.py` | On demand |
 | **Portfolio analysis** (9 scenarios) | `portfolio/portfolio_run_all.py` | On demand |
 
@@ -101,8 +107,8 @@ Analysis/
 ├── scripts/
 │   └── run_market_analysis.sh    # launchd wrapper: cd / venv / .env / log
 │
-├── BulkBlock.py                  # NSE+BSE bulk/block + FII stake + HNI (scenario 1)
-├── fii_stake_tracker.py          # FII quarterly stake streaks (runs via BulkBlock)
+├── BulkBlock.py                  # NSE+BSE bulk/block deals (scenario 1)
+├── fii_stake_tracker.py          # FII quarterly stake streaks (standalone, run quarterly)
 ├── custom_sector_index.py        # Equal-weighted sector indices (scenario 2)
 ├── fii_flows.py                  # FII daily equity cash flows (scenario 3)
 ├── fii_sector_flows.py           # FII fortnightly sector flows (scenario 4)
@@ -112,12 +118,16 @@ Analysis/
 ├── ipo_anchor_tracker.py         # IPO anchor investor tracking (scenario 8)
 │
 ├── breakout_scanner_angel.py     # Pre-breakout scanner (standalone, includes multi_pct_down)
+├── breakout_scanner_scorecard.py # Scorecard (Valuation×Momentum×Stage) — attached post-process to the scanner
 ├── multi_pct_down.py             # Pct-down screener (runs via breakout_scanner_angel)
 ├── fno_max_oi.py                 # F&O Max OI strike scanner (standalone)
 ├── india_macro.py                # India macro dashboard (standalone)
 ├── forensic_accounting.py        # Single-stock forensic PDF report (standalone)
 ├── breakout_review.py            # Walk-forward validation of breakout picks (standalone)
 ├── breakout_deep_analysis.py     # Rule-mining on review data → elite-subset filters (standalone)
+├── breakout_scorecard_review.py  # Walk-forward validator for scorecard CompositeScore (standalone)
+├── universe_review.py            # Does the scanner add value over the raw universe? (standalone)
+├── universe_mining.py            # Mines the raw universe for an elite tradeable subset (standalone)
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
@@ -169,7 +179,8 @@ Analysis/
 │   └── WeekN/                    # Weekly breakout snapshots
 ├── .cache/                       # Misc fetch caches (NSE API, Screener.in)
 ├── .vscode/settings.json         # Editor: python.terminal.useEnvFile + envFile
-├── venv/                         # Local virtualenv (gitignored)
+├── .venv/                        # Canonical virtualenv — Python 3.11 (gitignored)
+├── venv/                         # Legacy virtualenv — Python 3.9, optional fallback (gitignored)
 │
 ├── .github/workflows/scenarios.yml   # Optional cloud schedule (GH Actions)
 └── .env                          # Secrets (gitignored): ANGEL_*, EMAIL_*
@@ -256,10 +267,95 @@ into integrated terminals automatically:
 }
 ```
 
-With this, running scripts directly in the terminal (e.g. `venv/bin/python
+With this, running scripts directly in the terminal (e.g. `.venv/bin/python
 run_all.py`) sees `ANGEL_*` / `EMAIL_*` / `SCREENER_*` without manual `export`.
 Injection applies only to terminals opened **after** the setting is enabled —
 reopen existing terminals to pick it up.
+
+---
+
+## Replicating .venv / .vscode / .env
+
+None of these three are committed (all gitignored). Recreate them exactly as
+follows on a fresh checkout.
+
+### 1. `.venv/` — Virtual Environment (Python 3.11)
+
+The canonical interpreter is **Python 3.11** (currently 3.11.15). Create the
+venv, upgrade the installer, then install every `requirements*.txt` in the repo
+in **one** pip resolver pass (root + `tradingcharts/`), plus the manual extras:
+
+```bash
+cd /Users/ankit.srivastava/Documents/Analysis
+
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -U pip setuptools wheel
+.venv/bin/python -m pip install \
+  $(find . -path ./.venv -prune -o -path ./venv -prune -o -name 'requirements*.txt' -print | sed 's/^/-r /')
+
+# Extras not pinned in any requirements file:
+.venv/bin/python -m pip install smartapi-python pyotp fpdf2 PyPDF2 httpx numpy
+
+source .venv/bin/activate
+```
+
+Requirements files installed by the one-liner:
+- `requirements.txt` (root — analysis pipeline)
+- `tradingcharts/requirements.txt` (`flask`, `flask-cors`, `waitress`, `pandas`)
+
+> If `python3.11` is not on PATH, install it (`brew install python@3.11`) or use
+> your 3.11 binary's full path. A legacy `venv/` (Python 3.9) may coexist as a
+> fallback, but `.venv` is authoritative.
+
+### 2. `.vscode/settings.json` — Editor `.env` Injection
+
+Create `.vscode/settings.json` with exactly these two keys so the Python
+extension auto-loads `.env` into integrated terminals and the interpreter:
+
+```json
+{
+  "python.terminal.useEnvFile": true,
+  "python.envFile": "${workspaceFolder}/.env"
+}
+```
+
+Then select the interpreter `./.venv/bin/python` via **Python: Select
+Interpreter**. Only terminals opened **after** enabling this pick up the vars —
+reopen existing ones.
+
+### 3. `.env` — Secrets (no `.env.example` is shipped)
+
+Create `.env` in the project root. The **required** keys (present in the working
+setup) are Angel One + Screener.in; `DATA_GOV_IN_API_KEY` is optional (only for
+`india_macro` OGD fetches). Paste and fill:
+
+```ini
+# ── Angel One SmartAPI (required — primary OHLCV) ──
+ANGEL_API_KEY=
+ANGEL_CLIENT_CODE=
+ANGEL_PIN=
+ANGEL_TOTP_SECRET=
+
+# ── Screener.in (required — fii_stake fallback, breakout scanner, screener app) ──
+SCREENER_USER=
+SCREENER_PASS=
+
+# ── data.gov.in OGD (optional — india_macro only) ──
+DATA_GOV_IN_API_KEY=
+```
+
+**Email is optional.** The current `.env` contains **no `EMAIL_*` keys**, so the
+pipeline runs and writes all files but **skips email delivery**. To enable
+email, add the `EMAIL_*` block from the [`.env` Example](#env-example) above
+(Gmail requires a 16-char App Password, not your account password).
+
+Quick verification after creating all three:
+
+```bash
+source .venv/bin/activate
+python -c "import pandas, openpyxl, flask; print('deps OK')"
+python -c "import os,dotenv; dotenv.load_dotenv(); print('env keys:', sorted(k for k in os.environ if k.startswith(('ANGEL_','SCREENER_','EMAIL_','DATA_GOV'))))"
+```
 
 ---
 
@@ -384,6 +480,30 @@ python3 breakout_scanner_angel.py
 python3 breakout_scanner_angel.py --high-conviction --min-score 5
 python3 breakout_scanner_angel.py --symbols-csv my_list.csv --no-strict
 ```
+
+---
+
+### breakout_scanner_scorecard.py — Valuation × Momentum × Stage Scorecard
+
+**Purpose:** Post-processing engine **attached to** `breakout_scanner_angel.py`.
+After the breakout workbook is written, the scanner calls `scorecard.run(...)`,
+passing the breakout rows plus the **already-downloaded** OHLCV candles and the
+Nifty 500 benchmark (no candles are re-fetched — the Angel One quota is
+preserved). Every broken-out name is scored on three orthogonal axes and reduced
+to one label + one `CompositeScore` for at-a-glance triage.
+
+**Three axes + gate:**
+- **Valuation** — how cheap the base is
+- **Momentum** — how strong the move is
+- **Stage** — where in the Weinstein cycle (genuine Stage-2 vs dead-cat bounce)
+- **Quality gate** — pledge / forensic landmines (Tickertape screener + a deep
+  forensic pass on a small Stage-2-cheap shortlist)
+
+**Output:** appends a `Scorecard` sheet to `breakout_watchlist.xlsx` and writes
+`breakout_watchlist_scorecard.html`; persists a dated row per name to
+`data/scorecard_snapshots.csv` (feeds `breakout_scorecard_review.py`).
+
+**Note:** Not run directly — invoked automatically by the scanner.
 
 ---
 
@@ -729,6 +849,82 @@ python3 breakout_deep_analysis.py <review.xlsx>  # specific file
 
 ---
 
+### breakout_scorecard_review.py — Scorecard Walk-Forward Validator
+
+**Purpose:** The feedback loop for the **scorecard** (mirrors what
+`breakout_review.py` does for raw breakout signals). It checks whether a high
+`CompositeScore` actually leads to better forward returns than a low one —
+the evidence required before any composite re-weighting. Changes **no** scoring
+logic; it only measures.
+
+**Method:**
+1. Loads dated snapshots from `data/scorecard_snapshots.csv` (written by the scorecard).
+2. Keeps names old enough to have matured (`>= --min-days`).
+3. Re-fetches post-snapshot OHLCV via Angel One (same downloader as the scanner / review).
+4. Computes forward returns (1w / 4w / 12w), max-gain and max-drawdown from each snapshot's date.
+5. Reports whether `CompositeScore` / `Verdict` / each axis ranked the winners.
+
+**Outcome targets:** `tradeable = max_gain_pct >= --tradeable` (default 15%);
+`dud = max_gain < 5% AND end_ret < 0`.
+
+**Output:** `Output/scorecard_review_YYYYMMDD_HHMMSS.xlsx` + console summary.
+
+**Usage:**
+```bash
+python3 breakout_scorecard_review.py                 # matured >= 7d
+python3 breakout_scorecard_review.py --min-days 30   # only >= 30d matured
+python3 breakout_scorecard_review.py --tradeable 15  # win bar = +15% max gain
+```
+
+---
+
+### universe_review.py — Does the Scanner Add Value?
+
+**Purpose:** Head-to-head validation — does the breakout scanner actually **add
+value** over the raw filtered universe it selects from? For every matured week it
+takes the two RAW universe sheets (`MPD Data`, `Screener Data`) and the two
+breakout sheets from `breakout_watchlist.xlsx`, then measures the realised
+outcome of every stock on the same yardstick (`tradeable = max_gain >= 15%`,
+`big_win >= 25%`, `dud < 5%` & red). For each universe it compares three cohorts:
+**ALL universe** vs **BREAKOUT (scanner-flagged)** vs **REJECTED**.
+
+Imports shared helpers from `breakout_review.py`. Run alongside
+`breakout_review.py` + `breakout_deep_analysis.py` on a review day.
+
+**Output:** `Output/universe_review_YYYYMMDD.xlsx`.
+
+**Usage:**
+```bash
+python3 universe_review.py                 # all matured weeks
+python3 universe_review.py --weeks 1 2 3   # specific weeks
+python3 universe_review.py --min-days 15   # maturity gate (default 15)
+```
+
+---
+
+### universe_mining.py — Elite Raw-Universe Subset Miner
+
+**Purpose:** Follow-up to `universe_review.py`. Mines the RAW universe
+(`MPD Data` / `Screener Data`) for a cheap, **scanner-independent** feature
+subset with a `>= 50%` tradeable rate — i.e. can a strong pool be pulled
+straight from the raw universe, bypassing the breakout-timing penalty?
+Runs univariate threshold sweeps then AND-combinations to surface the highest
+tradeable% subset with adequate coverage. Does **not** touch the scanner.
+
+Imports helpers from `breakout_review.py` **and** `universe_review.py`
+(`_scan_close_from_ohlcv`, `_outcome`, `UNIVERSES`).
+
+**Output:** `Output/universe_mining_YYYYMMDD.xlsx`.
+
+**Usage:**
+```bash
+python3 universe_mining.py                        # all matured weeks
+python3 universe_mining.py --weeks 1 2 3
+python3 universe_mining.py --min-days 15 --min-cover 40
+```
+
+---
+
 ## Portfolio System
 
 Located in `portfolio/`. A parallel analysis pipeline focused on owned positions rather than the broader market.
@@ -1048,11 +1244,17 @@ The pipeline is scheduled via a launchd plist (`com.analysis.runall`) that trigg
 
 Wrapper script responsibilities:
 1. `cd` into project directory
-2. Activate venv
+2. Activate the venv — sources `venv/bin/activate` **if present** (currently the
+   legacy Python 3.9 `venv/`), otherwise falls back to system `python3`. See note below.
 3. Load `.env` (exports all EMAIL_*, ANGEL_* variables)
 4. Run `python3 run_all.py` with output to timestamped log
 5. Skip weekends defensively (re-checks day-of-week)
 6. Prune logs older than 30 days
+
+> **Venv mismatch note:** the wrapper activates `venv/` (3.9), while the
+> canonical interactive environment is `.venv/` (3.11). If you consolidate on
+> `.venv`, update line 39–41 of `scripts/run_market_analysis.sh` to source
+> `.venv/bin/activate` so scheduled runs use the same interpreter and deps.
 
 ### launchd Setup & Operations
 
@@ -1124,10 +1326,12 @@ Analysis/
 │   ├── holdings_meta.csv                  ← user SL/Target levels
 │   └── mf_holdings.csv
 ├── data/
-│   └── india_macro/                       ← 28 indicator CSVs
-│       ├── cement_production.csv
-│       ├── bank_credit_total.csv
-│       └── ... (one per indicator)
+│   ├── india_macro/                       ← 28 indicator CSVs
+│   │   ├── cement_production.csv
+│   │   ├── bank_credit_total.csv
+│   │   └── ... (one per indicator)
+│   ├── scorecard_snapshots.csv            ← dated scorecard rows (feeds scorecard review)
+│   └── scorecard_history.csv              ← scorecard run history
 ├── logs/
 │   └── 2026-05-XX/                        ← daily run logs
 └── .angel_scrip_master.json               ← cached scrip master (25MB)
@@ -1149,7 +1353,13 @@ run_all.py
  └── ipo_anchor_tracker.py
 
 breakout_scanner_angel.py
- └── multi_pct_down.py ──→ data_provider → angel_client
+ ├── multi_pct_down.py ──→ data_provider → angel_client
+ └── breakout_scanner_scorecard.py (attached post-process; reuses scanner candles)
+      └── data/scorecard_snapshots.csv ──→ breakout_scorecard_review.py
+
+Review family (manual, run on a "let's review" day):
+ breakout_review.py ──→ breakout_deep_analysis.py
+                   └──→ universe_review.py ──→ universe_mining.py
 
 portfolio/portfolio_run_all.py
  ├── holdings_loader.py (shared by all below)
@@ -1210,6 +1420,8 @@ All data flows through public/free sources. No paid market-data feeds.
 | `BULK_BLOCK_Deals_<timestamp>.xlsx` | `run_all.py` / `BulkBlock.py` | New each run |
 | `market_charts.html` | `run_all.py` | Overwritten |
 | `Output/breakout_watchlist.xlsx` | `breakout_scanner_angel.py` | Overwritten |
+| `breakout_watchlist_scorecard.html` | `breakout_scanner_scorecard.py` (via scanner) | Overwritten |
+| `data/scorecard_snapshots.csv` | `breakout_scanner_scorecard.py` | Append-only |
 | `fno_max_oi.xlsx` | `fno_max_oi.py` | Overwritten |
 | `india_macro_data.xlsx` | `india_macro.py` | Overwritten |
 | `india_macro_dashboard.html` | `india_macro.py` | Overwritten |
@@ -1218,6 +1430,9 @@ All data flows through public/free sources. No paid market-data feeds.
 | `logs/run_all_<timestamp>.log` | `run_market_analysis.sh` | Auto-pruned > 30 days |
 | `Output/review_<ts>.xlsx` | `breakout_review.py` | New per run |
 | `Output/review_cumulative.csv` | `breakout_review.py` | Append-only |
+| `Output/scorecard_review_<ts>.xlsx` | `breakout_scorecard_review.py` | New per run |
+| `Output/universe_review_<ts>.xlsx` | `universe_review.py` | New per run |
+| `Output/universe_mining_<ts>.xlsx` | `universe_mining.py` | New per run |
 | `ipo_anchor_report.txt` | `ipo_anchor_tracker.py` | TradingView watchlist, overwritten |
 | `tv_breakouts_combined.txt` | `breakout_scanner_angel.py` | TradingView watchlist, overwritten |
 

@@ -41,7 +41,8 @@ Individual run:
     python3 BulkBlock.py           # scrape deals, save Excel, send email
 
 Group run (via run_all.py):
-    Not part of run_all.py — run independently.
+    Scenario 1 (bulk_block) — deal scraping only; no email.
+    Skip with: python3 run_all.py --skip bulk_block
 
 DEPENDENCIES
 ------------
@@ -635,40 +636,6 @@ class BSEScraper:
         else:
             dataframes[block_name] = pd.DataFrame({"Status": [f"ERROR: BSE Block deals API failed or returned no data. {pulled_str}."]})
             print(f"⚠️  No data fetched for {block_name}")
-
-        # ── FII Stake Tracker + HNI Holdings ──
-        try:
-            from fii_stake_tracker import get_sheets as fst_get_sheets
-            fst_sheets = fst_get_sheets()
-            if fst_sheets:
-                # Build FII Summary sheet
-                summary_rows = [
-                    ("Classification rules (applied in order):", ""),
-                    ("  if prev_qtr < 0.05", '-> "New Entry"'),
-                    ("  elif streak >= 4", '-> "4-Quarter Increasing"'),
-                    ("  elif streak == 3", '-> "3-Quarter Increasing"'),
-                    ("  elif streak == 2", '-> "Multi-Quarter Increasing" (2-Quarter)'),
-                    ("  elif streak == 1", '-> "Increased Stake" (1-Quarter)'),
-                    ("", ""),
-                    ("Sheet counts:", ""),
-                ]
-                for sn, sdf in fst_sheets.items():
-                    if sn != "HNIs":
-                        summary_rows.append((sn, len(sdf)))
-                if "HNIs" in fst_sheets:
-                    summary_rows.append(("HNIs", len(fst_sheets["HNIs"])))
-                dataframes["FII_Summary"] = pd.DataFrame(summary_rows, columns=["Category", "Count"])
-
-                # Sort HNIs by HNI ascending
-                if "HNIs" in fst_sheets and not fst_sheets["HNIs"].empty:
-                    hni_df = fst_sheets["HNIs"]
-                    if "HNI" in hni_df.columns:
-                        fst_sheets["HNIs"] = hni_df.sort_values("HNI", ascending=True).reset_index(drop=True)
-
-                dataframes.update(fst_sheets)
-                print(f"\n✓ FII Stake Tracker: {len(fst_sheets)} sheet(s) merged")
-        except Exception as e:
-            print(f"\n⚠️  FII Stake Tracker failed: {e}")
 
         # Save to Excel
         if dataframes:
