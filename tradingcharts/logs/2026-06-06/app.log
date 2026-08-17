@@ -1,0 +1,9 @@
+[E 260606 00:30:27 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 00:30:27 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 01:51:23 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 01:51:23 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[W 260606 02:00:00 smartWebSocketV2:318] Attempting to resubscribe/reconnect (Attempt 1)...
+[E 260606 02:38:32 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 02:38:32 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 02:38:32 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260606 02:38:32 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.

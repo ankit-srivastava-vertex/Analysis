@@ -1,0 +1,1410 @@
+===============================================================
+Daily Market Analysis Run — Mon Jun 29 18:00:04 IST 2026
+===============================================================
+/Users/ankit.srivastava/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+[E 260629 18:01:07 smartConnect:78] Exception while retriving IP Address,using local host IP address: [Errno 8] nodename nor servname provided, or not known
+[I 260629 18:01:07 smartConnect:124] in pool
+======================================================================
+  MASTER REPORT RUNNER — 29-Jun-2026
+======================================================================
+
+======================================================================
+  SCENARIO 1/8: Bulk & Block Deals (NSE + BSE)
+======================================================================
+  ✓ NSE bulk_deals: 157 deals fetched
+  ✓ NSE block_deals: 27 deals fetched
+
+====================================================================================================
+Fetching: BSE Bulk Deals (API)
+URL: https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w
+====================================================================================================
+
+✓ Fetched 71 bulk deals from BSE API
+✓ Columns: ['Deal Date', 'Scrip Code', 'Scrip Name', 'Client Name', 'Buy/Sell', 'Quantity', 'Price']
+
+====================================================================================================
+Fetching: BSE Block Deals (API)
+URL: https://api.bseindia.com/BseIndiaAPI/api/BlockDeal_Beta/w
+====================================================================================================
+
+✓ Fetched 2 block deals from BSE API
+✓ Columns: ['Deal Date', 'Scrip Code', 'Scrip Name', 'Client Name', 'Buy/Sell', 'Quantity', 'Price']
+Fetching stocks where FII increased stake (last quarter) ...
+  Source: Tickertape Screener API
+  Total stocks matching filter: 3454
+  Fetched 3454 stock records.
+  Fetching Screener.in shareholding history for 394 multi-quarter candidates ...
+    50/394  (cache hits: 49)
+    100/394  (cache hits: 98)
+    150/394  (cache hits: 148)
+    200/394  (cache hits: 198)
+    250/394  (cache hits: 248)
+    300/394  (cache hits: 298)
+    350/394  (cache hits: 347)
+    394/394  (cache hits: 391)
+  History snapshots stored: 11510 (3479 tickers, 15 quarter-ends)
+  Streak distribution: 0Q=2462, 1Q=607, 2Q=317, 3Q=30, 4Q=15, 5Q=12, 6Q=2, 7Q=4, 9Q=2, 11Q=3
+
+Fetching HNI / superstar holdings (33 investors)...
+  [1/33] ashish-kacholia                          +19 buys
+  [2/33] bengal-finance-and-investment-pvt-ltd    +9 buys
+  [3/33] vijay-kishanlal-kedia                    +2 buys
+  [4/33] venkata-nagaraju-padala                  +2 buys
+  [5/33] rohan-gupta                              +1 buys
+  [6/33] ajay-kumar-aggarwal                      +8 buys
+  [7/33] nibe-ganesh-ramesh                       +1 buys
+  [8/33] laroia-mona                              +0 buys
+  [9/33] india-equity-fund-1                      +5 buys
+  [10/33] sanshi-fund-i                            +15 buys
+  [11/33] shalu-aggarwal                           +5 buys
+  [12/33] akash-bhanshali                          +2 buys
+  [13/33] singularity-equity-fund-i                +3 buys
+  [14/33] chartered-finance-leasing-limited        +2 buys
+  [15/33] vq-fastercap-fund                        +1 buys
+  [16/33] steadview-capital-mauritius-limited      +1 buys
+  [17/33] valuequest-s-c-a-l-e-fund                +0 buys
+  [18/33] ms-param-capital                         +0 buys
+  [19/33] mukul-mahavir-agrawal                    +18 buys
+  [20/33] bijal-pritesh-vora                       +0 buys
+  [21/33] ritu-bapna                               +8 buys
+  [22/33] reina-ra-jaisinghani                     +0 buys
+  [23/33] kunjal-lalitkumar-patel                  +1 buys
+  [24/33] bengal-finance-and-ninvestment-private-l +1 buys
+  [25/33] ajay-upadhyaya                           +9 buys
+  [26/33] suresh-kumar-agarwal                     +5 buys
+  [27/33] vijay-kedia                              +1 buys
+  [28/33] vanjana-sundar-iyer                      +1 buys
+  [29/33] malabar-india-fund-limited               +6 buys
+  [30/33] nav-capital-vcc-nav-capital-emerging-sta +11 buys
+  [31/33] mansi-share-and-stock-broking-private-li +13 buys
+  [32/33] amansa-holdings-private-limited          +7 buys
+  [33/33] massachusetts-institute-of-techno        +2 buys
+  HNI buys total: 159 (121 new, 38 increased)
+
+✓ FII Stake Tracker: 6 sheet(s) merged
+  (run_all) captured 11 BulkBlock sheet(s); standalone Excel suppressed.
+  ✓ Bulk & Block Deals complete (11 sheets)
+
+======================================================================
+  SCENARIO 2/8: Custom Sector Index
+======================================================================
+============================================================
+Custom Sector Index Builder
+============================================================
+Loaded 21 custom indices from index_constituents.json
+  IT: 24 stocks — Information Technology
+  BFSI: 11 stocks — Financial Services
+  Wires&Cables: 10 stocks — Wires & Cables
+  Forgings: 6 stocks — Forgings & Castings
+  Pumps&Engines: 9 stocks — Pumps & Engines
+  Bearings: 6 stocks — Bearings & Abrasives
+  OtherIndustrial: 16 stocks — Other Industrial & Engineering
+  Rail: 6 stocks — Railways & Rail Equipment
+  Infra: 7 stocks — Infrastructure & Construction
+  MetalPipes: 12 stocks — Metal Pipes & Tubes
+  Ships: 5 stocks — Shipping & Shipbuilding
+  Aerospace&Defense: 16 stocks — Aerospace & Defense
+  Electronics: 12 stocks — Electronics Manufacturing Services
+  Electrical: 15 stocks — Electrical Equipment & Systems
+  Renewable: 14 stocks — Renewable Energy
+  Transformers: 8 stocks — Transformers & Power Equipment
+  Exchange&Brokers: 14 stocks — Exchanges, Brokers & Financial Services
+  WealthManagement: 6 stocks — Wealth Management
+  Healthcare: 21 stocks — Healthcare & Hospitals
+  Pharma: 28 stocks — Pharmaceuticals & Specialty Chemicals
+  Chemical: 13 stocks — Specialty Chemicals & Explosives
+
+Date range: 01-01-2024 to 29-06-2026
+
+  [IT] Fetching 24 stocks...
+   Indexed 31887 (exch, symbol) -> token pairs
+    UNIECOM: 464 days
+    TAC: 549 days
+    CEINSYS: 85 days
+    MAPMYINDIA: 616 days
+    AURIONPRO: 615 days
+    HAPPSTMNDS: 616 days
+    NEWGEN: 616 days
+    TANLA: 616 days
+    RATEGAIN: 616 days
+    ALLETEC: 615 days
+    CNINFOTECH: 350 days
+    IKS: 376 days
+    NETWEB: 615 days
+    BBOX: 616 days
+    CYIENT: 616 days
+    E2E: 615 days
+    EMUDHRA: 616 days
+    ZAGGLE: 616 days
+    PROTEAN: 341 days
+    BLSE: 592 days
+    DSSL: 616 days
+    EXCELSOFT: 144 days
+    VEEFIN: 616 days
+    EXATO: 136 days
+  [IT] Built: 85 days, 24 stocks, current=1051.20 (+5.12%)
+
+  [BFSI] Fetching 11 stocks...
+    AYE: 88 days
+    FINBUD: 153 days
+    LAXMIINDIA: 220 days
+    NORTHARC: 435 days
+    CGCL: 616 days
+    SBFC: 616 days
+    FEDFINA: 616 days
+    SGFIN: 220 days
+    MUFIN: 615 days
+    ARMANFIN: 616 days
+    PAISALO: 616 days
+  [BFSI] Built: 88 days, 11 stocks, current=1210.50 (+21.05%)
+
+  [Wires&Cables] Fetching 10 stocks...
+    RRKABEL: 615 days
+    FINCABLES: 616 days
+    UNIVCABLES: 616 days
+    VMARCIND: 609 days
+    DYCL: 616 days
+    PARACABLES: 615 days
+    SYSTEMATIC: 179 days
+    JDCABLES: 185 days
+    PRIMECAB: 183 days
+    BHADORA: 211 days
+  [Wires&Cables] Built: 181 days, 10 stocks, current=1598.82 (+59.88%)
+
+  [Forgings] Fetching 6 stocks...
+    AIAENG: 616 days
+    HAPPYFORGE: 616 days
+    BALUFORGE: 537 days
+    KALYANIFRG: 616 days
+    KVSCASTING: 159 days
+    MMFORGINGS: 617 days
+  [Forgings] Built: 179 days, 6 stocks, current=1198.36 (+19.84%)
+
+  [Pumps&Engines] Fetching 9 stocks...
+    KIRLOSENG: 616 days
+    ELGIEQUIP: 616 days
+    KSB: 616 days
+    KIRLOSBROS: 616 days
+    KIRLPNU: 616 days
+    SHAKTIPUMP: 615 days
+    OSWALPUMPS: 252 days
+    GREAVESCOT: 616 days
+    ROTO: 616 days
+  [Pumps&Engines] Built: 252 days, 9 stocks, current=1142.94 (+14.29%)
+
+  [Bearings] Fetching 6 stocks...
+    TIMKEN: 616 days
+    CARBORUNIV: 616 days
+    GRINDWELL: 616 days
+    SKFINDIA: 616 days
+    WENDT: 616 days
+    SKP: 595 days
+  [Bearings] Built: 616 days, 6 stocks, current=878.27 (-12.17%)
+
+  [OtherIndustrial] Fetching 16 stocks...
+    HBLENGINE: 616 days
+    INOXINDIA: 615 days
+    ESABINDIA: 616 days
+    KRN: 429 days
+    ADORWELD: 617 days
+    SAHASRA: 428 days
+    PTCIL: 616 days
+    AEROFLEX: 615 days
+    SHANTIGEAR: 616 days
+    ANUP: 616 days
+    JASH: 616 days
+    PRAJIND: 616 days
+    KLBRENG-B: 48 days
+    PATILAUTOM: 251 days
+    CMRGREEN: 13 days
+    PATELSAI: 616 days
+  [OtherIndustrial] Built: 13 days, 16 stocks, current=1084.51 (+8.45%)
+
+  [Rail] Fetching 6 stocks...
+    ORIRAIL: 616 days
+    TEXRAIL: 616 days
+    CNCRD: 614 days
+    AIRFLOA: 190 days
+    JWL: 616 days
+    TITAGARH: 616 days
+  [Rail] Built: 190 days, 6 stocks, current=1014.00 (+1.40%)
+
+  [Infra] Fetching 7 stocks...
+    EFFWA: 485 days
+    VVIPIL: 472 days
+    AHLUCONT: 616 days
+    JKIL: 616 days
+    INTERARCH: 456 days
+    CEMPRO: 616 days
+    ANANTRAJ: 616 days
+  [Infra] Built: 456 days, 7 stocks, current=1063.54 (+6.35%)
+
+  [MetalPipes] Fetching 12 stocks...
+    RATNAMANI: 616 days
+    USHAMART: 616 days
+    MANINDS: 615 days
+    SHIVALIK: 616 days
+    SAMBHV: 244 days
+    JTLIND: 616 days
+    VENUSPIPES: 615 days
+    HITECH: 616 days
+    HARIOMPIPE: 615 days
+    SCODATUBES: 264 days
+    JAYBEE: 450 days
+    SHYAMMETL: 616 days
+  [MetalPipes] Built: 244 days, 12 stocks, current=961.14 (-3.89%)
+
+  [Ships] Fetching 5 stocks...
+    MAZDOCK: 616 days
+    COCHINSHIP: 616 days
+    SCI: 616 days
+    GRSE: 616 days
+    KMEW: 399 days
+  [Ships] Built: 399 days, 5 stocks, current=1644.45 (+64.44%)
+
+  [Aerospace&Defense] Fetching 16 stocks...
+    BDL: 616 days
+    DATAPATTNS: 616 days
+    MTARTECH: 616 days
+    ZENTEC: 616 days
+    APOLLO: 616 days
+    ASTRAMICRO: 616 days
+    MIDHANI: 616 days
+    PARAS: 616 days
+    UNIMECH: 369 days
+    AVANTEL: 473 days
+    KRISHNADEF: 615 days
+    DCXINDIA: 616 days
+    NIBE: 340 days
+    AZAD: 616 days
+    C2C: 387 days
+    TECHERA: 408 days
+  [Aerospace&Defense] Built: 340 days, 16 stocks, current=1596.15 (+59.62%)
+
+  [Electronics] Fetching 12 stocks...
+    KAYNES: 616 days
+    SYRMA: 616 days
+    JYOTICNC: 606 days
+    CYIENTDLM: 616 days
+    CENTUM: 616 days
+    AIMTRON: 510 days
+    MACPOWER: 615 days
+    AVALON: 616 days
+    EPACK: 597 days
+    PGEL: 616 days
+    MRTX: 15 days
+    VOEPL: 616 days
+  [Electronics] Built: 15 days, 12 stocks, current=1163.95 (+16.40%)
+
+  [Electrical] Fetching 15 stocks...
+    HPL: 616 days
+    THERMAX: 616 days
+    SCHNEIDER: 615 days
+    TDPOWERSYS: 616 days
+    TRITURBINE: 616 days
+    QPOWER: 329 days
+    SALZERELEC: 616 days
+    RMC: 59 days
+    PARTH: 216 days
+    TECHNOE: 616 days
+    ADVAIT: 107 days
+    TRANSRAILL: 371 days
+    RISHABH: 616 days
+    KECL: 616 days
+    SAAKSHI: 611 days
+  [Electrical] Built: 59 days, 15 stocks, current=1357.56 (+35.76%)
+
+  [Renewable] Fetching 14 stocks...
+    KPEL: 399 days
+    SOLEX: 615 days
+    SWELECTES: 616 days
+    PREMIERENE: 450 days
+    EMMVEE: 150 days
+    WEBELSOLAR: 616 days
+    ORIANA: 592 days
+    VIKRAN: 201 days
+    VIVIANA: 608 days
+    KPIGREEN: 616 days
+    WAAREERTL: 300 days
+    VIKRAMSOLR: 206 days
+    SAATVIKGL: 184 days
+    RELTD: 474 days
+  [Renewable] Built: 150 days, 14 stocks, current=886.51 (-11.35%)
+
+  [Transformers] Fetching 8 stocks...
+    VOLTAMP: 616 days
+    TARIL: 615 days
+    TRANSRAILL: 371 days
+    SKIPPER: 616 days
+    DANISH: 411 days
+    SHILCTECH: 146 days
+    YASHHV: 376 days
+    INDOTECH: 616 days
+  [Transformers] Built: 146 days, 8 stocks, current=1322.92 (+32.29%)
+
+  [Exchange&Brokers] Fetching 14 stocks...
+    GROWW: 154 days
+    BSE: 616 days
+    MCX: 616 days
+    ANGELONE: 616 days
+    CDSL: 616 days
+    CAMS: 616 days
+    KFINTECH: 616 days
+    PRUDENT: 616 days
+    ICRA: 616 days
+    CARERATING: 616 days
+    SHAREINDIA: 616 days
+    GEOJITFSL: 616 days
+    5PAISA: 616 days
+    ARSSBL: 182 days
+  [Exchange&Brokers] Built: 154 days, 14 stocks, current=1090.45 (+9.05%)
+
+  [WealthManagement] Fetching 6 stocks...
+    MOTILALOFS: 616 days
+    360ONE: 616 days
+    ANANDRATHI: 616 days
+    NUVAMA: 616 days
+    DAMCAPITAL: 371 days
+    MONARCH: 616 days
+  [WealthManagement] Built: 371 days, 6 stocks, current=996.08 (-0.39%)
+
+  [Healthcare] Fetching 21 stocks...
+    ASTERDM: 616 days
+    NH: 616 days
+    MEDANTA: 616 days
+    KIMS: 616 days
+    LALPATHLAB: 616 days
+    INDGN: 528 days
+    RAINBOW: 616 days
+    VIJAYA: 616 days
+    PARKHOSPS: 129 days
+    JLHL: 615 days
+    YATHARTH: 616 days
+    DRAGARWQ: 48 days
+    GAUDIUMIVF: 79 days
+    CHANDAN: 334 days
+    LAXMIDENTL: 355 days
+    OSELDEVICE: 431 days
+    POLYMED: 616 days
+    METROPOLIS: 616 days
+    THYROCARE: 616 days
+    QLINE: 21 days
+    NEPHROPLUS: 129 days
+  [Healthcare] Built: 21 days, 21 stocks, current=1037.66 (+3.77%)
+
+  [Pharma] Fetching 28 stocks...
+    LAURUSLABS: 616 days
+    EMCURE: 487 days
+    GLAND: 616 days
+    SAILIFE: 377 days
+    ACUTAAS: 616 days
+    NEULANDLAB: 616 days
+    NATCOPHARM: 616 days
+    ONESOURCE: 351 days
+    ERIS: 616 days
+    JUBLPHARMA: 616 days
+    CAPLIPOINT: 616 days
+    JSLL: 615 days
+    BLUEJET: 616 days
+    SUDEEPPHRM: 142 days
+    INNOVACAP: 615 days
+    SENORES: 370 days
+    NGLFINE: 616 days
+    GLAND: 616 days
+    AJANTPHARM: 616 days
+    JBCHEPHARM: 615 days
+    ASTRAZEN: 616 days
+    APLLTD: 616 days
+    ALIVUS: 616 days
+    CONCORDBIO: 616 days
+    MARKSANS: 616 days
+    SUPRIYA: 616 days
+    RPGLIFE: 616 days
+    KPL: 48 days
+  [Pharma] Built: 48 days, 27 stocks, current=1226.14 (+22.61%)
+
+  [Chemical] Fetching 13 stocks...
+    NAVINFLUOR: 616 days
+    DEEPAKNTR: 616 days
+    AETHER: 616 days
+    FINEORG: 616 days
+    PRIVISCL: 616 days
+    ACI: 616 days
+    EPIGRAL: 616 days
+    TANFACIND: 616 days
+    NEOGEN: 616 days
+    TATVA: 616 days
+    PREMEXPLN: 616 days
+    BEEZAASAN: 323 days
+    VINATIORGA: 616 days
+  [Chemical] Built: 325 days, 13 stocks, current=1564.12 (+56.41%)
+
+============================================================
+SUMMARY
+============================================================
+            Index                             Description  Constituents  Failed  Start Date    End Date  Trading Days  Current Value  1Y Change %  52W High  52W Low
+               IT                  Information Technology            24       0 19-Feb-2026 29-Jun-2026            85        1051.20         5.12   1093.58   798.58
+             BFSI                      Financial Services            11       0 16-Feb-2026 29-Jun-2026            88        1210.50        21.05   1230.58   845.68
+     Wires&Cables                          Wires & Cables            10       0 01-Oct-2025 29-Jun-2026           181        1598.82        59.88   1619.92   873.51
+         Forgings                     Forgings & Castings             6       0 06-Oct-2025 29-Jun-2026           179        1198.36        19.84   1198.87   952.16
+    Pumps&Engines                         Pumps & Engines             9       0 20-Jun-2025 29-Jun-2026           252        1142.94        14.29   1166.90   754.51
+         Bearings                    Bearings & Abrasives             6       0 02-Jan-2024 29-Jun-2026           616         878.27       -12.17   1347.45   676.18
+  OtherIndustrial          Other Industrial & Engineering            16       0 10-Jun-2026 29-Jun-2026            13        1084.51         8.45   1093.14   983.86
+             Rail               Railways & Rail Equipment             6       0 18-Sep-2025 29-Jun-2026           190        1014.00         1.40   1134.27   760.03
+            Infra           Infrastructure & Construction             7       0 26-Aug-2024 29-Jun-2026           456        1063.54         6.35   1071.67   688.22
+       MetalPipes                     Metal Pipes & Tubes            12       0 02-Jul-2025 29-Jun-2026           244         961.14        -3.89   1089.69   695.02
+            Ships                 Shipping & Shipbuilding             5       0 14-Nov-2024 29-Jun-2026           399        1644.45        64.44   1801.00   864.02
+Aerospace&Defense                     Aerospace & Defense            16       0 07-Feb-2025 29-Jun-2026           340        1596.15        59.62   1709.04   754.35
+      Electronics      Electronics Manufacturing Services            12       0 08-Jun-2026 29-Jun-2026            15        1163.95        16.40   1167.87  1000.00
+       Electrical          Electrical Equipment & Systems            15       0 01-Apr-2026 29-Jun-2026            59        1357.56        35.76   1382.49  1000.00
+        Renewable                        Renewable Energy            14       0 18-Nov-2025 29-Jun-2026           150         886.51       -11.35   1002.78   663.55
+     Transformers          Transformers & Power Equipment             8       0 24-Nov-2025 29-Jun-2026           146        1322.92        32.29   1334.18   771.97
+ Exchange&Brokers Exchanges, Brokers & Financial Services            14       0 12-Nov-2025 29-Jun-2026           154        1090.45         9.05   1117.67   858.51
+ WealthManagement                       Wealth Management             6       0 27-Dec-2024 29-Jun-2026           371         996.08        -0.39   1035.90   692.70
+       Healthcare                  Healthcare & Hospitals            21       0 29-May-2026 29-Jun-2026            21        1037.66         3.77   1046.04   985.51
+           Pharma   Pharmaceuticals & Specialty Chemicals            28       0 20-Apr-2026 29-Jun-2026            48        1226.14        22.61   1226.14   990.09
+         Chemical        Specialty Chemicals & Explosives            13       0 03-Mar-2025 29-Jun-2026           325        1564.12        56.41   1577.86  1000.00
+
+Excel saved: /Users/ankit.srivastava/Documents/Analysis/custom_sector_index.xlsx
+HTML chart saved: /Users/ankit.srivastava/Documents/Analysis/custom_sector_index_chart.html
+
+Done! 21 indices built.
+  ✓ Sector Index complete
+
+======================================================================
+  SCENARIO 3/8: FII Equity Cash Market Flows
+======================================================================
+============================================================
+FII Equity Cash Market Tracker
+============================================================
+
+[1] Loading FPI equity + OI history from NSDL...
+
+[2] Fetching today's provisional data from NSE...
+  Today's NSE data added (provisional)
+
+============================================================
+SUMMARY (596 trading days: 01-Jan-2024 to 29-Jun-2026)
+============================================================
+  Latest Net:       ₹+383.8 Cr
+  Latest Buy:       ₹18,988.0 Cr
+  Latest Sell:      ₹18,604.3 Cr
+  Cumulative Net:   ₹-653,530.7 Cr
+  Avg Daily Net:    ₹-1,096.5 Cr
+Excel saved: /Users/ankit.srivastava/Documents/Analysis/fii_flows.xlsx
+HTML chart saved: /Users/ankit.srivastava/Documents/Analysis/fii_flows_chart.html
+
+Done! 596 trading days of FII equity data.
+  ✓ FII Flows complete
+
+======================================================================
+  SCENARIO 4/8: FII Sector-wise Flows
+======================================================================
+============================================================
+FII Sector-wise Flows — Equity Cash Market
+============================================================
+
+[1] Connecting to NSDL FPI Monitor ...
+
+[2] Discovering fortnightly reports ...
+  Total available: 321
+  Last 1 year   : 24 reports
+  Range: 30-Jun-2025 → 15-Jun-2026
+
+[3] Fetching sector-wise data (one per fortnight) ...
+  Fetching 1/24 (4%) — JUN 30, 2025 ...          Fetching 2/24 (8%) — JULY 15, 2025 ...          Fetching 3/24 (12%) — JULY 31, 2025 ...          Fetching 4/24 (16%) — AUG 15, 2025 ...          Fetching 5/24 (20%) — AUG 31, 2025 ...          Fetching 6/24 (25%) — SEP 15, 2025 ...          Fetching 7/24 (29%) — SEP 30, 2025 ...          Fetching 8/24 (33%) — OCT 15, 2025 ...          Fetching 9/24 (37%) — OCT 31, 2025 ...          Fetching 10/24 (41%) — NOV 15, 2025 ...          Fetching 11/24 (45%) — NOV 30, 2025 ...          Fetching 12/24 (50%) — DEC 15, 2025 ...          Fetching 13/24 (54%) — DEC 31, 2025 ...          Fetching 14/24 (58%) — JAN 15, 2026 ...          Fetching 15/24 (62%) — JAN 31, 2026 ...          Fetching 16/24 (66%) — FEB 15, 2026 ...          Fetching 17/24 (70%) — FEB 28, 2026 ...          Fetching 18/24 (75%) — MAR 15, 2026 ...          Fetching 19/24 (79%) — MAR 31, 2026 ...          Fetching 20/24 (83%) — APR 15, 2026 ...          Fetching 21/24 (87%) — APR 30, 2026 ...          Fetching 22/24 (91%) — MAY 15, 2026 ...          Fetching 23/24 (95%) — MAY 31, 2026 ...          Fetching 24/24 (100%) — JUNE 15, 2026 ...        
+  Data points : 576
+  Sectors     : 24
+  Fortnights  : 24
+
+[4] Building chart ...
+
+[5] Saving output ...
+  Chart : /Users/ankit.srivastava/Documents/Analysis/fii_sector_flows_chart.html
+  Excel : /Users/ankit.srivastava/Documents/Analysis/fii_sector_flows.xlsx
+
+============================================================
+Total Net FII Flow (Equity Cash): ₹-356,786 Cr
+
+Top 5 BUYING sectors:
+  Metals & Mining                               ₹    27,389 Cr
+  Capital Goods                                 ₹    24,032 Cr
+  Others                                        ₹    18,719 Cr
+  Telecommunication                             ₹     8,454 Cr
+  Services                                      ₹     3,218 Cr
+
+Top 5 SELLING sectors:
+  Financial Services                            ₹  -150,448 Cr
+  Information Technology                        ₹   -74,733 Cr
+  Fast Moving Consumer Goods                    ₹   -45,663 Cr
+  Healthcare                                    ₹   -38,292 Cr
+  Consumer Services                             ₹   -25,550 Cr
+
+DONE — 29-Jun-2026
+  ✓ FII Sector Flows complete
+
+======================================================================
+  SCENARIO 5/8: Sector Momentum & Relative Strength
+======================================================================
+============================================================
+Sector Momentum & Relative Strength Analyzer
+============================================================
+Loaded 21 custom indices from index_constituents.json
+  IT: 24 stocks — Information Technology
+  BFSI: 11 stocks — Financial Services
+  Wires&Cables: 10 stocks — Wires & Cables
+  Forgings: 6 stocks — Forgings & Castings
+  Pumps&Engines: 9 stocks — Pumps & Engines
+  Bearings: 6 stocks — Bearings & Abrasives
+  OtherIndustrial: 16 stocks — Other Industrial & Engineering
+  Rail: 6 stocks — Railways & Rail Equipment
+  Infra: 7 stocks — Infrastructure & Construction
+  MetalPipes: 12 stocks — Metal Pipes & Tubes
+  Ships: 5 stocks — Shipping & Shipbuilding
+  Aerospace&Defense: 16 stocks — Aerospace & Defense
+  Electronics: 12 stocks — Electronics Manufacturing Services
+  Electrical: 15 stocks — Electrical Equipment & Systems
+  Renewable: 14 stocks — Renewable Energy
+  Transformers: 8 stocks — Transformers & Power Equipment
+  Exchange&Brokers: 14 stocks — Exchanges, Brokers & Financial Services
+  WealthManagement: 6 stocks — Wealth Management
+  Healthcare: 21 stocks — Healthcare & Hospitals
+  Pharma: 28 stocks — Pharmaceuticals & Specialty Chemicals
+  Chemical: 13 stocks — Specialty Chemicals & Explosives
+
+Date range: 01-01-2024 to 29-06-2026
+
+  Fetching benchmark (Nifty 500 / ^CRSLDX)...
+    Nifty 500: 616 days
+
+  Fetching benchmark (Nifty MidSmall 400 / ^NSEMS400)...
+    Nifty MidSmall 400: 616 days
+
+  [IT] Fetching 24 stocks...
+    UNIECOM: 464 days
+    TAC: 549 days
+    CEINSYS: 85 days
+    MAPMYINDIA: 616 days
+    AURIONPRO: 615 days
+    HAPPSTMNDS: 616 days
+    NEWGEN: 616 days
+    TANLA: 616 days
+    RATEGAIN: 616 days
+    ALLETEC: 615 days
+    CNINFOTECH: 350 days
+    IKS: 376 days
+    NETWEB: 615 days
+    BBOX: 616 days
+    CYIENT: 616 days
+    E2E: 615 days
+    EMUDHRA: 616 days
+    ZAGGLE: 616 days
+    PROTEAN: 341 days
+    BLSE: 592 days
+    DSSL: 616 days
+    EXCELSOFT: 144 days
+    VEEFIN: 616 days
+    EXATO: 136 days
+  [IT] Built: 85 days, 24 stocks, current=1051.20 (+5.12%)
+
+  [BFSI] Fetching 11 stocks...
+    AYE: 88 days
+    FINBUD: 153 days
+    LAXMIINDIA: 220 days
+    NORTHARC: 435 days
+    CGCL: 616 days
+    SBFC: 616 days
+    FEDFINA: 616 days
+    SGFIN: 220 days
+    MUFIN: 615 days
+    ARMANFIN: 616 days
+    PAISALO: 616 days
+  [BFSI] Built: 88 days, 11 stocks, current=1210.50 (+21.05%)
+
+  [Wires&Cables] Fetching 10 stocks...
+    RRKABEL: 615 days
+    FINCABLES: 616 days
+    UNIVCABLES: 616 days
+    VMARCIND: 609 days
+    DYCL: 616 days
+    PARACABLES: 615 days
+    SYSTEMATIC: 179 days
+    JDCABLES: 185 days
+    PRIMECAB: 183 days
+    BHADORA: 211 days
+  [Wires&Cables] Built: 181 days, 10 stocks, current=1598.82 (+59.88%)
+
+  [Forgings] Fetching 6 stocks...
+    AIAENG: 616 days
+    HAPPYFORGE: 616 days
+    BALUFORGE: 537 days
+    KALYANIFRG: 616 days
+    KVSCASTING: 159 days
+    MMFORGINGS: 617 days
+  [Forgings] Built: 179 days, 6 stocks, current=1198.36 (+19.84%)
+
+  [Pumps&Engines] Fetching 9 stocks...
+    KIRLOSENG: 616 days
+    ELGIEQUIP: 616 days
+    KSB: 616 days
+    KIRLOSBROS: 616 days
+    KIRLPNU: 616 days
+    SHAKTIPUMP: 615 days
+    OSWALPUMPS: 252 days
+    GREAVESCOT: 616 days
+    ROTO: 616 days
+  [Pumps&Engines] Built: 252 days, 9 stocks, current=1142.94 (+14.29%)
+
+  [Bearings] Fetching 6 stocks...
+    TIMKEN: 616 days
+    CARBORUNIV: 616 days
+    GRINDWELL: 616 days
+    SKFINDIA: 616 days
+    WENDT: 616 days
+    SKP: 595 days
+  [Bearings] Built: 616 days, 6 stocks, current=878.27 (-12.17%)
+
+  [OtherIndustrial] Fetching 16 stocks...
+    HBLENGINE: 616 days
+    INOXINDIA: 615 days
+    ESABINDIA: 616 days
+    KRN: 429 days
+    ADORWELD: 617 days
+    SAHASRA: 428 days
+    PTCIL: 616 days
+    AEROFLEX: 615 days
+    SHANTIGEAR: 616 days
+    ANUP: 616 days
+    JASH: 616 days
+    PRAJIND: 616 days
+    KLBRENG-B: 48 days
+    PATILAUTOM: 251 days
+    CMRGREEN: 13 days
+    PATELSAI: 616 days
+  [OtherIndustrial] Built: 13 days, 16 stocks, current=1084.51 (+8.45%)
+
+  [Rail] Fetching 6 stocks...
+    ORIRAIL: 616 days
+    TEXRAIL: 616 days
+    CNCRD: 614 days
+    AIRFLOA: 190 days
+    JWL: 616 days
+    TITAGARH: 616 days
+  [Rail] Built: 190 days, 6 stocks, current=1014.00 (+1.40%)
+
+  [Infra] Fetching 7 stocks...
+    EFFWA: 485 days
+    VVIPIL: 472 days
+    AHLUCONT: 616 days
+    JKIL: 616 days
+    INTERARCH: 456 days
+    CEMPRO: 616 days
+    ANANTRAJ: 616 days
+  [Infra] Built: 456 days, 7 stocks, current=1063.54 (+6.35%)
+
+  [MetalPipes] Fetching 12 stocks...
+    RATNAMANI: 616 days
+    USHAMART: 616 days
+    MANINDS: 615 days
+    SHIVALIK: 616 days
+    SAMBHV: 244 days
+    JTLIND: 616 days
+    VENUSPIPES: 615 days
+    HITECH: 616 days
+    HARIOMPIPE: 615 days
+    SCODATUBES: 264 days
+    JAYBEE: 450 days
+    SHYAMMETL: 616 days
+  [MetalPipes] Built: 244 days, 12 stocks, current=961.14 (-3.89%)
+
+  [Ships] Fetching 5 stocks...
+    MAZDOCK: 616 days
+    COCHINSHIP: 616 days
+    SCI: 616 days
+    GRSE: 616 days
+    KMEW: 399 days
+  [Ships] Built: 399 days, 5 stocks, current=1644.45 (+64.44%)
+
+  [Aerospace&Defense] Fetching 16 stocks...
+    BDL: 616 days
+    DATAPATTNS: 616 days
+    MTARTECH: 616 days
+    ZENTEC: 616 days
+    APOLLO: 616 days
+    ASTRAMICRO: 616 days
+    MIDHANI: 616 days
+    PARAS: 616 days
+    UNIMECH: 369 days
+    AVANTEL: 473 days
+    KRISHNADEF: 615 days
+    DCXINDIA: 616 days
+    NIBE: 340 days
+    AZAD: 616 days
+    C2C: 387 days
+    TECHERA: 408 days
+  [Aerospace&Defense] Built: 340 days, 16 stocks, current=1596.15 (+59.62%)
+
+  [Electronics] Fetching 12 stocks...
+    KAYNES: 616 days
+    SYRMA: 616 days
+    JYOTICNC: 606 days
+    CYIENTDLM: 616 days
+    CENTUM: 616 days
+    AIMTRON: 510 days
+    MACPOWER: 615 days
+    AVALON: 616 days
+    EPACK: 597 days
+    PGEL: 616 days
+    MRTX: 15 days
+    VOEPL: 616 days
+  [Electronics] Built: 15 days, 12 stocks, current=1163.95 (+16.40%)
+
+  [Electrical] Fetching 15 stocks...
+    HPL: 616 days
+    THERMAX: 616 days
+    SCHNEIDER: 615 days
+    TDPOWERSYS: 616 days
+    TRITURBINE: 616 days
+    QPOWER: 329 days
+    SALZERELEC: 616 days
+    RMC: 59 days
+    PARTH: 216 days
+    TECHNOE: 616 days
+    ADVAIT: 107 days
+    TRANSRAILL: 371 days
+    RISHABH: 616 days
+    KECL: 616 days
+    SAAKSHI: 611 days
+  [Electrical] Built: 59 days, 15 stocks, current=1357.56 (+35.76%)
+
+  [Renewable] Fetching 14 stocks...
+    KPEL: 399 days
+    SOLEX: 615 days
+    SWELECTES: 616 days
+    PREMIERENE: 450 days
+    EMMVEE: 150 days
+    WEBELSOLAR: 616 days
+    ORIANA: 592 days
+    VIKRAN: 201 days
+    VIVIANA: 608 days
+    KPIGREEN: 616 days
+    WAAREERTL: 300 days
+    VIKRAMSOLR: 206 days
+    SAATVIKGL: 184 days
+    RELTD: 474 days
+  [Renewable] Built: 150 days, 14 stocks, current=886.51 (-11.35%)
+
+  [Transformers] Fetching 8 stocks...
+    VOLTAMP: 616 days
+    TARIL: 615 days
+    TRANSRAILL: 371 days
+    SKIPPER: 616 days
+    DANISH: 411 days
+    SHILCTECH: 146 days
+    YASHHV: 376 days
+    INDOTECH: 616 days
+  [Transformers] Built: 146 days, 8 stocks, current=1322.92 (+32.29%)
+
+  [Exchange&Brokers] Fetching 14 stocks...
+    GROWW: 154 days
+    BSE: 616 days
+    MCX: 616 days
+    ANGELONE: 616 days
+    CDSL: 616 days
+    CAMS: 616 days
+    KFINTECH: 616 days
+    PRUDENT: 616 days
+    ICRA: 616 days
+    CARERATING: 616 days
+    SHAREINDIA: 616 days
+    GEOJITFSL: 616 days
+    5PAISA: 616 days
+    ARSSBL: 182 days
+  [Exchange&Brokers] Built: 154 days, 14 stocks, current=1090.45 (+9.05%)
+
+  [WealthManagement] Fetching 6 stocks...
+    MOTILALOFS: 616 days
+    360ONE: 616 days
+    ANANDRATHI: 616 days
+    NUVAMA: 616 days
+    DAMCAPITAL: 371 days
+    MONARCH: 616 days
+  [WealthManagement] Built: 371 days, 6 stocks, current=996.08 (-0.39%)
+
+  [Healthcare] Fetching 21 stocks...
+    ASTERDM: 616 days
+    NH: 616 days
+    MEDANTA: 616 days
+    KIMS: 616 days
+    LALPATHLAB: 616 days
+    INDGN: 528 days
+    RAINBOW: 616 days
+    VIJAYA: 616 days
+    PARKHOSPS: 129 days
+    JLHL: 615 days
+    YATHARTH: 616 days
+    DRAGARWQ: 48 days
+    GAUDIUMIVF: 79 days
+    CHANDAN: 334 days
+    LAXMIDENTL: 355 days
+    OSELDEVICE: 431 days
+    POLYMED: 616 days
+    METROPOLIS: 616 days
+    THYROCARE: 616 days
+    QLINE: 21 days
+    NEPHROPLUS: 129 days
+  [Healthcare] Built: 21 days, 21 stocks, current=1037.66 (+3.77%)
+
+  [Pharma] Fetching 28 stocks...
+    LAURUSLABS: 616 days
+    EMCURE: 487 days
+    GLAND: 616 days
+    SAILIFE: 377 days
+    ACUTAAS: 616 days
+    NEULANDLAB: 616 days
+    NATCOPHARM: 616 days
+    ONESOURCE: 351 days
+    ERIS: 616 days
+    JUBLPHARMA: 616 days
+    CAPLIPOINT: 616 days
+    JSLL: 615 days
+    BLUEJET: 616 days
+    SUDEEPPHRM: 142 days
+    INNOVACAP: 615 days
+    SENORES: 370 days
+    NGLFINE: 616 days
+    GLAND: 616 days
+    AJANTPHARM: 616 days
+    JBCHEPHARM: 615 days
+    ASTRAZEN: 616 days
+    APLLTD: 616 days
+    ALIVUS: 616 days
+    CONCORDBIO: 616 days
+    MARKSANS: 616 days
+    SUPRIYA: 616 days
+    RPGLIFE: 616 days
+    KPL: 48 days
+  [Pharma] Built: 48 days, 27 stocks, current=1226.14 (+22.61%)
+
+  [Chemical] Fetching 13 stocks...
+    NAVINFLUOR: 616 days
+    DEEPAKNTR: 616 days
+    AETHER: 616 days
+    FINEORG: 616 days
+    PRIVISCL: 616 days
+    ACI: 616 days
+    EPIGRAL: 616 days
+    TANFACIND: 616 days
+    NEOGEN: 616 days
+    TATVA: 616 days
+    PREMEXPLN: 616 days
+    BEEZAASAN: 323 days
+    VINATIORGA: 616 days
+  [Chemical] Built: 325 days, 13 stocks, current=1564.12 (+56.41%)
+
+============================================================
+SECTOR RS RANKING (vs Nifty 500)
+============================================================
+  ★ Wires&Cables    RS=+59.4  ↑ 18.5   [Outperforming]
+  ★ Ships           RS=+57.0  ↑ 7.4    [Outperforming]
+  ★ Aerospace&Defense RS=+50.2  ↑ 9.9    [Outperforming]
+  ★ Transformers    RS=+36.2  ↑ 11.5   [Outperforming]
+  ★ Chemical        RS=+35.3  ↑ 10.1   [Outperforming]
+  ★ Electrical      RS=+23.6  ↑ 5.8    [Outperforming]
+  ★ BFSI            RS=+23.5  ↑ 3.1    [Outperforming]
+  ★ Pharma          RS=+21.9  ↑ 7.2    [Outperforming]
+  ★ Forgings        RS=+20.7  ↑ 5.8    [Outperforming]
+  ★ Pumps&Engines   RS=+14.5  ↑ 16.9   [Outperforming]
+  ★ Exchange&Brokers RS=+13.0  ↑ 1.0    [Outperforming]
+  ★ Electronics     RS=+12.2  ↑ 12.2   [Outperforming]
+  ★ Infra           RS=+9.0   ↑ 10.8   [Outperforming]
+  ★ IT              RS=+6.5   ↓ 2.3    [Outperforming]
+  ★ OtherIndustrial RS=+4.8   ↑ 4.8    [Outperforming]
+  ★ Rail            RS=+3.7   ↓ 1.2    [Outperforming]
+  ★ Healthcare      RS=+2.2   ↑ 2.7    [Outperforming]
+    MetalPipes      RS=-1.6   ↑ 3.6    [Underperforming]
+    WealthManagement RS=-2.8   ↑ 4.2    [Underperforming]
+    Renewable       RS=-8.2   ↓ 1.7    [Underperforming]
+    Bearings        RS=-25.8  ↑ 3.1    [Underperforming]
+
+Excel saved: /Users/ankit.srivastava/Documents/Analysis/sector_momentum.xlsx
+HTML chart saved: /Users/ankit.srivastava/Documents/Analysis/sector_momentum_chart.html
+
+Done! 21 sectors analysed.
+  ✓ Sector Momentum complete
+
+======================================================================
+  SCENARIO 6/8: NSE Sector Relative Strength (Official Indices)
+======================================================================
+============================================================
+NSE Ready-Made Sector Relative Strength Analyzer (Official Indices)
+============================================================
+
+Date range: 01-01-2024 to 29-06-2026
+
+Fetching 30 sector indices ...
+
+============================================================
+NSE SECTOR RS RANKING (vs Nifty 500)
+============================================================
+  ★ Capital Markets              RS=+96.8  ↓ 1.7    [Outperforming]
+  ★ Hospitals                    RS=+50.1  ↑ 7.3    [Outperforming]
+  ★ Metal                        RS=+32.7  ↓ 13.8   [Outperforming]
+  ★ Capital Goods                RS=+30.2  ↑ 1.3    [Outperforming]
+  ★ Healthcare                   RS=+27.9  ↑ 3.7    [Outperforming]
+  ★ Telecommunications           RS=+27.2  ↑ 0.0    [Outperforming]
+  ★ Pharma                       RS=+26.7  ↑ 2.0    [Outperforming]
+  ★ PSU Bank                     RS=+25.8  ↑ 5.1    [Outperforming]
+  ★ Auto                         RS=+20.3  ↓ 0.6    [Outperforming]
+  ★ NBFC                         RS=+17.2  ↑ 7.9    [Outperforming]
+  ★ Transportation & Logistics   RS=+16.1  ↑ 1.1    [Outperforming]
+  ★ Retail                       RS=+13.1  ↑ 4.5    [Outperforming]
+  ★ Commercial & Transport Svcs  RS=+12.8  ↑ 5.2    [Outperforming]
+  ★ Power                        RS=+11.7  ↓ 5.4    [Outperforming]
+  ★ Consumer Services            RS=+5.8   ↑ 4.3    [Outperforming]
+  ★ Financial Services           RS=+4.9   ↑ 3.8    [Outperforming]
+  ★ Bank                         RS=+1.3   ↑ 4.8    [Outperforming]
+  ★ Energy                       RS=+0.2   ↓ 3.9    [Outperforming]
+    Insurance                    RS=-1.9   ↓ 1.9    [Underperforming]
+    Consumer Durables            RS=-2.0   ↑ 1.8    [Underperforming]
+    Oil & Gas                    RS=-2.6   ↓ 3.8    [Underperforming]
+    Construction                 RS=-3.4   ↑ 1.6    [Underperforming]
+    Chemicals                    RS=-3.5   ↓ 1.5    [Underperforming]
+    Private Bank                 RS=-4.5   ↑ 4.5    [Underperforming]
+    Realty                       RS=-11.9  ↑ 3.4    [Underperforming]
+    Housing Finance              RS=-14.1  ↑ 0.2    [Underperforming]
+    Cement                       RS=-17.1  ↓ 2.1    [Underperforming]
+    FMCG                         RS=-27.4  ↓ 0.5    [Underperforming]
+    IT                           RS=-35.9  ↓ 8.5    [Underperforming]
+    Media                        RS=-48.1  ↑ 0.9    [Underperforming]
+
+Excel saved: /Users/ankit.srivastava/Documents/Analysis/nse_sector_rs.xlsx
+HTML chart saved: /Users/ankit.srivastava/Documents/Analysis/nse_sector_rs_chart.html
+
+Done! 30 NSE sector indices analysed.
+  ✓ NSE Sector RS complete
+
+======================================================================
+  SCENARIO 7/8: Relative Rotation Graph
+======================================================================
+============================================================
+Relative Rotation Graph — Indian Sectors (v2 — Constituent Drill-Down)
+============================================================
+
+[1] Fetching 1Y daily price data ...
+  Downloading 1Y daily data for 18 tickers ...
+  Angel bulk fetch: 18 tickers (max_workers=2, ~9s minimum)
+    18/18 (2.4s, usable=6)
+  Got data for 17 sectors + benchmark (247 trading days)
+
+[1b] Building custom sector indices ...
+  Downloading 257 constituent stocks for 21 custom indices ...
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.1s, usable=39)
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.6s, usable=40)
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.8s, usable=40)
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.3s, usable=39)
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.9s, usable=40)
+  Angel bulk fetch: 40 tickers (max_workers=2, ~20s minimum)
+    40/40 (21.9s, usable=40)
+  Angel bulk fetch: 17 tickers (max_workers=2, ~8s minimum)
+    17/17 (8.8s, usable=17)
+  [C: IT] Built: 246 days, 24 stocks
+  [C: BFSI] Built: 246 days, 11 stocks
+  [C: Wires&Cables] Built: 246 days, 10 stocks
+  [C: Forgings] Built: 246 days, 6 stocks
+  [C: Pumps&Engines] Built: 246 days, 9 stocks
+  [C: Bearings] Built: 246 days, 6 stocks
+  [C: OtherIndustrial] Built: 246 days, 16 stocks
+  [C: Rail] Built: 246 days, 6 stocks
+  [C: Infra] Built: 246 days, 7 stocks
+  [C: MetalPipes] Built: 246 days, 12 stocks
+  [C: Ships] Built: 246 days, 5 stocks
+  [C: Aerospace&Defense] Built: 246 days, 16 stocks
+  [C: Electronics] Built: 246 days, 12 stocks
+  [C: Electrical] Built: 246 days, 15 stocks
+  [C: Renewable] Built: 246 days, 14 stocks
+  [C: Transformers] Built: 246 days, 8 stocks
+  [C: Exchange&Brokers] Built: 246 days, 14 stocks
+  [C: WealthManagement] Built: 246 days, 6 stocks
+  [C: Healthcare] Built: 246 days, 21 stocks
+  [C: Pharma] Built: 246 days, 28 stocks
+  [C: Chemical] Built: 246 days, 13 stocks
+  Merged 21 custom indices into price data
+
+[2] Computing RS — 3 Day (SMA=3) ...
+  3 Day: 38 sectors computed
+
+[2] Computing RS — 7 Day (SMA=7) ...
+  7 Day: 38 sectors computed
+
+[2] Computing RS — 12 Day (SMA=12) ...
+  12 Day: 38 sectors computed
+
+[2] Computing RS — Weekly (SMA=10) ...
+  Weekly: 38 sectors computed
+
+[2] Computing RS — Monthly (SMA=4) ...
+  Monthly: 38 sectors computed
+
+[2] Computing RS — Quarterly (SMA=2) ...
+  Quarterly: 38 sectors computed
+
+[2b] Computing per-stock RS tails for constituent drill-down ...
+  3 Day: 256 stocks across 21 sectors
+  7 Day: 256 stocks across 21 sectors
+  12 Day: 255 stocks across 21 sectors
+  Weekly: 250 stocks across 21 sectors
+  Monthly: 244 stocks across 21 sectors
+  Quarterly: 236 stocks across 21 sectors
+
+[3] Building RRG chart ...
+
+[4] Saving outputs ...
+  HTML chart saved: /Users/ankit.srivastava/Documents/Analysis/rrg_chart.html
+
+============================================================
+DONE — RRG Chart
+============================================================
+
+  3 Day:
+    Auto             Ratio=100.31  Mom= 99.65  [Weakening]
+    Bank             Ratio= 99.79  Mom= 99.80  [Lagging]
+    C: Aerospace&Defense  Ratio= 99.56  Mom=100.66  [Improving]
+    C: BFSI          Ratio=100.59  Mom=100.56  [Leading]
+    C: Bearings      Ratio=100.14  Mom=100.34  [Leading]
+    C: Chemical      Ratio=100.70  Mom=100.85  [Leading]
+    C: Electrical    Ratio=101.01  Mom=101.42  [Leading]
+    C: Electronics   Ratio=100.46  Mom=100.53  [Leading]
+    C: Exchange&Brokers  Ratio= 99.98  Mom=100.32  [Improving]
+    C: Forgings      Ratio=100.81  Mom=100.90  [Leading]
+    C: Healthcare    Ratio=100.16  Mom=100.40  [Leading]
+    C: IT            Ratio= 99.57  Mom=100.31  [Improving]
+    C: Infra         Ratio=100.36  Mom=100.61  [Leading]
+    C: MetalPipes    Ratio=100.70  Mom=101.19  [Leading]
+    C: OtherIndustrial  Ratio=100.00  Mom=100.15  [Leading]
+    C: Pharma        Ratio=101.59  Mom=101.34  [Leading]
+    C: Pumps&Engines  Ratio= 99.74  Mom=100.18  [Improving]
+    C: Rail          Ratio= 99.44  Mom=100.33  [Improving]
+    C: Renewable     Ratio=100.15  Mom=100.36  [Leading]
+    C: Ships         Ratio= 99.37  Mom=100.53  [Improving]
+    C: Transformers  Ratio=100.25  Mom=100.52  [Leading]
+    C: WealthManagement  Ratio=100.73  Mom=100.74  [Leading]
+    C: Wires&Cables  Ratio= 99.43  Mom= 99.40  [Lagging]
+    Commodities      Ratio= 99.93  Mom=100.36  [Improving]
+    Consumption      Ratio= 99.75  Mom= 99.58  [Lagging]
+    Energy           Ratio=100.31  Mom=100.67  [Leading]
+    FMCG             Ratio=100.31  Mom=100.11  [Leading]
+    Healthcare       Ratio=101.09  Mom=100.74  [Leading]
+    IT               Ratio=100.31  Mom=100.40  [Leading]
+    Infra            Ratio=100.31  Mom=100.35  [Leading]
+    MNC              Ratio=100.31  Mom=100.14  [Leading]
+    Media            Ratio=100.31  Mom=100.52  [Leading]
+    Metal            Ratio=100.31  Mom=100.85  [Leading]
+    Oil & Gas        Ratio=100.01  Mom=100.40  [Leading]
+    PSE              Ratio=100.31  Mom=100.85  [Leading]
+    PSU Bank         Ratio=100.31  Mom=100.26  [Leading]
+    Pharma           Ratio=100.31  Mom=100.40  [Leading]
+    Realty           Ratio=100.31  Mom=100.00  [Weakening]
+
+  7 Day:
+    Auto             Ratio=101.17  Mom=101.03  [Leading]
+    Bank             Ratio=100.00  Mom= 99.65  [Weakening]
+    C: Aerospace&Defense  Ratio= 96.89  Mom= 96.58  [Lagging]
+    C: BFSI          Ratio=100.26  Mom=100.58  [Leading]
+    C: Bearings      Ratio= 99.53  Mom= 98.43  [Lagging]
+    C: Chemical      Ratio=100.99  Mom= 99.30  [Weakening]
+    C: Electrical    Ratio=100.26  Mom= 98.62  [Weakening]
+    C: Electronics   Ratio=100.85  Mom= 98.35  [Weakening]
+    C: Exchange&Brokers  Ratio= 99.17  Mom= 98.96  [Lagging]
+    C: Forgings      Ratio=100.72  Mom= 99.67  [Weakening]
+    C: Healthcare    Ratio= 99.92  Mom= 98.93  [Lagging]
+    C: IT            Ratio= 98.26  Mom= 98.84  [Lagging]
+    C: Infra         Ratio=100.17  Mom= 98.12  [Weakening]
+    C: MetalPipes    Ratio= 99.64  Mom= 98.86  [Lagging]
+    C: OtherIndustrial  Ratio=100.03  Mom= 98.15  [Weakening]
+    C: Pharma        Ratio=101.99  Mom=100.82  [Leading]
+    C: Pumps&Engines  Ratio=100.46  Mom= 96.32  [Weakening]
+    C: Rail          Ratio= 97.73  Mom= 98.45  [Lagging]
+    C: Renewable     Ratio= 99.42  Mom= 99.67  [Lagging]
+    C: Ships         Ratio= 97.98  Mom= 96.90  [Lagging]
+    C: Transformers  Ratio= 99.93  Mom= 97.33  [Lagging]
+    C: WealthManagement  Ratio=100.16  Mom= 99.58  [Weakening]
+    C: Wires&Cables  Ratio= 99.69  Mom= 96.41  [Lagging]
+    Commodities      Ratio= 98.97  Mom= 99.55  [Lagging]
+    Consumption      Ratio= 99.94  Mom= 99.72  [Lagging]
+    Energy           Ratio= 99.18  Mom= 99.42  [Lagging]
+    FMCG             Ratio=100.42  Mom=100.54  [Leading]
+    Healthcare       Ratio=101.78  Mom=100.41  [Leading]
+    IT               Ratio=100.07  Mom=101.79  [Leading]
+    Infra            Ratio=100.02  Mom= 99.83  [Weakening]
+    MNC              Ratio=100.18  Mom=100.13  [Leading]
+    Media            Ratio= 99.79  Mom= 99.53  [Lagging]
+    Metal            Ratio= 98.41  Mom= 99.96  [Lagging]
+    Oil & Gas        Ratio= 99.41  Mom= 99.74  [Lagging]
+    PSE              Ratio= 99.05  Mom= 99.32  [Lagging]
+    PSU Bank         Ratio= 99.98  Mom=100.07  [Improving]
+    Pharma           Ratio=100.61  Mom= 99.38  [Weakening]
+    Realty           Ratio=101.08  Mom=100.27  [Leading]
+
+  12 Day:
+    Auto             Ratio=101.07  Mom=101.06  [Leading]
+    Bank             Ratio=100.25  Mom= 99.02  [Weakening]
+    C: Aerospace&Defense  Ratio= 98.02  Mom= 95.18  [Lagging]
+    C: BFSI          Ratio=100.00  Mom= 99.64  [Weakening]
+    C: Bearings      Ratio=100.79  Mom= 98.62  [Weakening]
+    C: Chemical      Ratio=102.45  Mom=100.09  [Leading]
+    C: Electrical    Ratio=101.95  Mom= 99.98  [Weakening]
+    C: Electronics   Ratio=103.17  Mom= 98.71  [Weakening]
+    C: Exchange&Brokers  Ratio= 99.56  Mom= 98.61  [Lagging]
+    C: Forgings      Ratio=101.70  Mom=101.82  [Leading]
+    C: Healthcare    Ratio=100.85  Mom=100.74  [Leading]
+    C: IT            Ratio= 98.05  Mom= 98.63  [Lagging]
+    C: Infra         Ratio=102.31  Mom= 99.63  [Weakening]
+    C: MetalPipes    Ratio=100.56  Mom= 99.59  [Weakening]
+    C: OtherIndustrial  Ratio=101.83  Mom= 99.61  [Weakening]
+    C: Pharma        Ratio=102.84  Mom=102.00  [Leading]
+    C: Pumps&Engines  Ratio=104.22  Mom= 99.13  [Weakening]
+    C: Rail          Ratio= 97.43  Mom= 98.01  [Lagging]
+    C: Renewable     Ratio= 99.32  Mom=100.02  [Improving]
+    C: Ships         Ratio= 99.35  Mom= 97.57  [Lagging]
+    C: Transformers  Ratio=102.59  Mom= 99.57  [Weakening]
+    C: WealthManagement  Ratio=100.89  Mom= 99.13  [Weakening]
+    C: Wires&Cables  Ratio=103.21  Mom= 99.10  [Weakening]
+    Commodities      Ratio= 98.61  Mom=100.27  [Improving]
+    Consumption      Ratio=100.19  Mom= 99.92  [Weakening]
+    Energy           Ratio= 99.28  Mom=100.34  [Improving]
+    FMCG             Ratio=100.30  Mom=100.88  [Leading]
+    Healthcare       Ratio=102.81  Mom=102.91  [Leading]
+    IT               Ratio= 98.52  Mom=102.01  [Improving]
+    Infra            Ratio=100.27  Mom=100.02  [Leading]
+    MNC              Ratio=100.31  Mom=100.25  [Leading]
+    Media            Ratio=100.15  Mom= 99.80  [Weakening]
+    Metal            Ratio= 97.37  Mom=100.23  [Improving]
+    Oil & Gas        Ratio= 99.20  Mom= 99.89  [Lagging]
+    PSE              Ratio= 99.11  Mom=100.28  [Improving]
+    PSU Bank         Ratio=100.01  Mom= 99.33  [Weakening]
+    Pharma           Ratio=101.59  Mom=101.89  [Leading]
+    Realty           Ratio=101.75  Mom= 99.54  [Weakening]
+
+  Weekly:
+    Auto             Ratio=101.37  Mom= 99.83  [Weakening]
+    Bank             Ratio=103.04  Mom=101.97  [Leading]
+    C: Aerospace&Defense  Ratio=104.57  Mom= 93.80  [Weakening]
+    C: BFSI          Ratio=102.37  Mom= 94.37  [Weakening]
+    C: Bearings      Ratio=103.28  Mom= 97.39  [Weakening]
+    C: Chemical      Ratio=106.02  Mom= 99.59  [Weakening]
+    C: Electrical    Ratio=103.05  Mom= 95.36  [Weakening]
+    C: Electronics   Ratio=109.49  Mom=100.91  [Leading]
+    C: Exchange&Brokers  Ratio=100.45  Mom= 96.50  [Weakening]
+    C: Forgings      Ratio=102.76  Mom= 98.52  [Weakening]
+    C: Healthcare    Ratio=102.63  Mom= 96.14  [Weakening]
+    C: IT            Ratio= 99.18  Mom= 94.19  [Lagging]
+    C: Infra         Ratio=108.37  Mom= 98.59  [Weakening]
+    C: MetalPipes    Ratio=101.92  Mom= 96.77  [Weakening]
+    C: OtherIndustrial  Ratio=104.86  Mom= 97.25  [Weakening]
+    C: Pharma        Ratio=106.95  Mom= 98.03  [Weakening]
+    C: Pumps&Engines  Ratio=111.57  Mom=102.56  [Leading]
+    C: Rail          Ratio= 98.10  Mom= 93.04  [Lagging]
+    C: Renewable     Ratio= 98.75  Mom= 94.58  [Lagging]
+    C: Ships         Ratio= 99.14  Mom= 94.61  [Lagging]
+    C: Transformers  Ratio=106.24  Mom= 96.32  [Weakening]
+    C: WealthManagement  Ratio=104.19  Mom= 97.63  [Weakening]
+    C: Wires&Cables  Ratio=109.09  Mom= 93.08  [Weakening]
+    Commodities      Ratio= 96.56  Mom= 95.45  [Lagging]
+    Consumption      Ratio=100.35  Mom= 99.09  [Weakening]
+    Energy           Ratio= 98.05  Mom= 95.30  [Lagging]
+    FMCG             Ratio= 98.58  Mom= 98.06  [Lagging]
+    Healthcare       Ratio=102.99  Mom= 99.35  [Weakening]
+    IT               Ratio= 95.89  Mom= 99.49  [Lagging]
+    Infra            Ratio=100.27  Mom= 98.83  [Weakening]
+    MNC              Ratio=100.58  Mom= 97.86  [Weakening]
+    Media            Ratio=102.31  Mom= 98.77  [Weakening]
+    Metal            Ratio= 95.25  Mom= 92.84  [Lagging]
+    Oil & Gas        Ratio= 97.81  Mom= 98.26  [Lagging]
+    PSE              Ratio= 96.57  Mom= 97.27  [Lagging]
+    PSU Bank         Ratio=102.45  Mom=103.74  [Leading]
+    Pharma           Ratio=101.75  Mom= 97.94  [Weakening]
+    Realty           Ratio=103.57  Mom=100.13  [Leading]
+
+  Monthly:
+    Auto             Ratio=102.66  Mom=101.80  [Leading]
+    Bank             Ratio=104.23  Mom=104.44  [Leading]
+    C: Aerospace&Defense  Ratio=113.60  Mom=100.87  [Leading]
+    C: BFSI          Ratio=109.73  Mom=100.02  [Leading]
+    C: Bearings      Ratio=109.11  Mom=102.69  [Leading]
+    C: Chemical      Ratio=110.01  Mom=101.72  [Leading]
+    C: Electrical    Ratio=109.00  Mom= 95.75  [Weakening]
+    C: Electronics   Ratio=115.53  Mom=105.52  [Leading]
+    C: Exchange&Brokers  Ratio=104.73  Mom= 98.71  [Weakening]
+    C: Forgings      Ratio=105.97  Mom= 99.65  [Weakening]
+    C: Healthcare    Ratio=107.73  Mom= 99.71  [Weakening]
+    C: IT            Ratio=105.15  Mom=100.22  [Leading]
+    C: Infra         Ratio=115.98  Mom=106.87  [Leading]
+    C: MetalPipes    Ratio=107.48  Mom=100.18  [Leading]
+    C: OtherIndustrial  Ratio=110.89  Mom=100.40  [Leading]
+    C: Pharma        Ratio=112.07  Mom=101.52  [Leading]
+    C: Pumps&Engines  Ratio=117.10  Mom=106.01  [Leading]
+    C: Rail          Ratio=105.17  Mom=101.49  [Leading]
+    C: Renewable     Ratio=102.93  Mom= 93.89  [Weakening]
+    C: Ships         Ratio=105.38  Mom= 99.02  [Weakening]
+    C: Transformers  Ratio=112.72  Mom= 98.02  [Weakening]
+    C: WealthManagement  Ratio=109.83  Mom=103.13  [Leading]
+    C: Wires&Cables  Ratio=121.40  Mom=103.00  [Leading]
+    Commodities      Ratio= 97.50  Mom= 94.19  [Lagging]
+    Consumption      Ratio=101.38  Mom= 99.80  [Weakening]
+    Energy           Ratio= 99.55  Mom= 93.44  [Lagging]
+    FMCG             Ratio= 99.12  Mom= 98.37  [Lagging]
+    Healthcare       Ratio=104.43  Mom= 99.12  [Weakening]
+    IT               Ratio= 93.15  Mom= 97.81  [Lagging]
+    Infra            Ratio=100.77  Mom= 98.43  [Weakening]
+    MNC              Ratio=102.32  Mom= 98.43  [Weakening]
+    Media            Ratio=105.07  Mom=101.15  [Leading]
+    Metal            Ratio= 97.87  Mom= 93.01  [Lagging]
+    Oil & Gas        Ratio= 97.06  Mom= 97.34  [Lagging]
+    PSE              Ratio= 96.61  Mom= 94.70  [Lagging]
+    PSU Bank         Ratio=102.09  Mom=103.53  [Leading]
+    Pharma           Ratio=103.20  Mom= 97.73  [Weakening]
+    Realty           Ratio=106.20  Mom=103.26  [Leading]
+
+  Quarterly:
+    Auto             Ratio=102.84  Mom=101.74  [Leading]
+    Bank             Ratio=103.42  Mom=102.00  [Leading]
+    C: Aerospace&Defense  Ratio=118.24  Mom=107.57  [Leading]
+    C: BFSI          Ratio=114.34  Mom=107.95  [Leading]
+    C: Bearings      Ratio=109.56  Mom=104.31  [Leading]
+    C: Chemical      Ratio=111.44  Mom=103.97  [Leading]
+    C: Electrical    Ratio=114.41  Mom=103.64  [Leading]
+    C: Electronics   Ratio=115.14  Mom=106.95  [Leading]
+    C: Exchange&Brokers  Ratio=108.45  Mom=104.27  [Leading]
+    C: Forgings      Ratio=107.99  Mom=103.24  [Leading]
+    C: Healthcare    Ratio=108.98  Mom=103.21  [Leading]
+    C: IT            Ratio=110.22  Mom=109.65  [Leading]
+    C: Infra         Ratio=118.07  Mom=112.56  [Leading]
+    C: MetalPipes    Ratio=112.65  Mom=107.74  [Leading]
+    C: OtherIndustrial  Ratio=113.42  Mom=105.78  [Leading]
+    C: Pharma        Ratio=111.41  Mom=103.06  [Leading]
+    C: Pumps&Engines  Ratio=117.10  Mom=109.10  [Leading]
+    C: Rail          Ratio=110.88  Mom=110.98  [Leading]
+    C: Renewable     Ratio=109.29  Mom=105.91  [Leading]
+    C: Ships         Ratio=111.27  Mom=106.20  [Leading]
+    C: Transformers  Ratio=119.85  Mom=107.93  [Leading]
+    C: WealthManagement  Ratio=111.23  Mom=107.64  [Leading]
+    C: Wires&Cables  Ratio=126.12  Mom=112.99  [Leading]
+    Commodities      Ratio=100.40  Mom= 97.49  [Weakening]
+    Consumption      Ratio=101.96  Mom=101.34  [Leading]
+    Energy           Ratio=102.94  Mom= 97.99  [Weakening]
+    FMCG             Ratio=100.60  Mom=101.32  [Leading]
+    Healthcare       Ratio=102.99  Mom= 98.42  [Weakening]
+    IT               Ratio= 93.45  Mom= 99.38  [Lagging]
+    Infra            Ratio=101.50  Mom= 99.74  [Weakening]
+    MNC              Ratio=104.37  Mom=100.62  [Leading]
+    Media            Ratio=105.47  Mom=102.12  [Leading]
+    Metal            Ratio=102.06  Mom= 97.31  [Weakening]
+    Oil & Gas        Ratio= 98.09  Mom= 98.32  [Lagging]
+    PSE              Ratio= 98.53  Mom= 96.20  [Lagging]
+    PSU Bank         Ratio=101.13  Mom= 98.68  [Weakening]
+    Pharma           Ratio=102.31  Mom= 97.88  [Weakening]
+    Realty           Ratio=108.40  Mom=107.69  [Leading]
+  ✓ RRG Chart complete
+
+======================================================================
+  SCENARIO 8/8: IPO Anchor Tracker
+======================================================================
+
+[1/3] Fetching NSE past-issues (last 14 months)...
+      Found 232 IPOs in window.
+
+[2/3] Computing listing-day returns...
+        10/232    TEAMTECH  Positive
+        20/232   SAIPARENT  Positive
+        30/232       VITAL  Negative
+        40/232     SILGOPP  Positive
+        50/232   CKKRETAIL  Positive
+        60/232        GKSL  Negative
+        70/232  NEPHROPLUS  Flat
+        80/232   SHRIKANHA  Negative
+$SAATVIK.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['SAATVIK.NS']: possibly delisted; no timezone found
+$SAATVIK.NS: possibly delisted; no timezone found
+        90/232    UTLSOLAR  Negative
+       100/232    LENSKART  Positive
+       110/232      MUNISH  Positive
+       120/232     JAINREC  Positive
+       130/232  ATLANTAELE  Positive
+       140/232         GML  Negative
+       150/232  CLASSICEIL  Positive
+       160/232        AMCL  Positive
+       170/232        JSLL  Negative
+       180/232   SELLOWRAP  Positive
+       190/232  SMARTWORKS  Positive
+       200/232       PROFX  Positive
+       210/232   MAYASHEEL  Positive
+       220/232   GANGABATH  Positive
+       230/232     ARUNAYA  Negative
+       232/232       IWARE  Negative
+
+[3/3] Fetching anchor lists from chittorgarh...
+      (loading chittorgarh IPO sitemap, ~one-time)...
+      sitemap indexed 2031 IPO URLs.
+        10/232  TEAMTECH    matches=0
+        20/232  SAIPARENT   matches=0
+        30/232  VITAL       matches=0
+        40/232  SILGOPP     matches=0
+        50/232  CKKRETAIL   matches=0
+        60/232  GKSL        matches=0
+        70/232  NEPHROPLUS  matches=0
+        80/232  SHRIKANHA   matches=0
+        90/232  UTLSOLAR    matches=0
+       100/232  LENSKART    matches=0
+       110/232  MUNISH      matches=0
+       120/232  JAINREC     matches=0
+       130/232  ATLANTAELE  matches=0
+       140/232  GML         matches=0
+       150/232  CLASSICEIL  matches=0
+       160/232  AMCL        matches=0
+       170/232  JSLL        matches=0
+       180/232  SELLOWRAP   matches=0
+       190/232  SMARTWORKS  matches=0
+       200/232  PROFX       matches=0
+       210/232  MAYASHEEL   matches=0
+       220/232  GANGABATH   matches=0
+       230/232  ARUNAYA     matches=0
+       232/232  IWARE       matches=0
+
+      TradingView watchlist -> /Users/ankit.srivastava/Documents/Analysis/ipo_anchor_report.txt  (232 symbols)
+      Total IPOs: 232   With watchlist anchor: 26
+  ✓ IPO Anchor Tracker complete
+
+======================================================================
+  BUILDING OUTPUTS
+======================================================================
+  Unified Excel: /Users/ankit.srivastava/Documents/Analysis/market_analysis_report.xlsx (14 sheets)
+  Excluded sheets (15): Sector Idx Summary, Sector Idx Values, FII Flow Summary, FII Daily Data, FII Sector Net Flows, FII Sector Detail, RS History, NSE Sector RS History, RRG 3 Day, RRG 7 Day, RRG 12 Day, RRG Weekly, RRG Monthly, RRG Quarterly, IPO Anchor Notes
+  ✓ Combined chart: market_charts.html (6 tabs)
+
+======================================================================
+  SENDING EMAIL
+======================================================================
+  WARNING: EMAIL_PASSWORD env var not set. Skipping email send.
+  Email not sent (check EMAIL_* env vars).
+
+======================================================================
+  SUMMARY — 29-Jun-2026
+======================================================================
+  Unified Excel : market_analysis_report.xlsx
+  Combined Chart: market_charts.html
+
+  All scenarios completed successfully!
+
+DONE!
+---------------------------------------------------------------
+Exit code: 0
+Finished : Mon Jun 29 18:09:17 IST 2026

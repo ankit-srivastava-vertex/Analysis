@@ -22,6 +22,8 @@ fii_equity_cache.csv
 fii_oi_cache.csv
 .cache/
 Output/.ohlcv_cache_*.pkl
+.ohlcv_cache/
+.angel_scrip_master.json
 
 # Excel lock files
 ~$*.xlsx

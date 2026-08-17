@@ -1,0 +1,34 @@
+[E 260605 17:00:44 smartWebSocketV2:87] Invalid initialization parameters. Provide valid values for all the tokens.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:38:29 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:49:51 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:49:51 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:49:51 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 18:49:51 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:26:31 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:26:31 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:26:31 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:26:31 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:52:57 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:52:57 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:52:57 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 20:52:57 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[W 260605 21:12:26 smartWebSocketV2:318] Attempting to resubscribe/reconnect (Attempt 1)...
+[W 260605 21:12:36 smartWebSocketV2:342] Connection closed due to max retry attempts reached.
+[W 260605 21:12:36 smartWebSocketV2:342] Connection closed due to max retry attempts reached.
+[W 260605 21:12:36 smartWebSocketV2:342] Connection closed due to max retry attempts reached.
+[E 260605 23:08:38 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:08:38 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:08:38 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:08:38 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:23:22 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': 'ce:00:7b:8c:75:77', 'Accept': 'application/json', 'X-PrivateKey': 'zRceTezC', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'clientcode': 'AACH360882', 'password': '0110', 'totp': '852202'}, Response: HTTPSConnectionPool(host='apiconnect.angelone.in', port=443): Max retries exceeded with url: /rest/auth/angelbroking/user/v1/loginByPassword (Caused by NewConnectionError("HTTPSConnection(host='apiconnect.angelone.in', port=443): Failed to establish a new connection: [Errno 57] Operation on closed file"))
+[E 260605 23:23:54 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:23:54 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:23:54 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.
+[E 260605 23:23:54 smartWebSocketV2:212] Error occurred during subscribe: socket is already closed.

@@ -2,6 +2,7 @@
 Bulk & Block Deals Scraper (NSE + BSE)
 =======================================
 
+
 SUMMARY
 -------
 Fetches today's bulk and block deals from both NSE and BSE, optionally
@@ -467,6 +468,7 @@ class BSEScraper:
 'UPADHYAYA AJAY SHIV NARAYAN',
 'AKASH BHANSHALI',
 'Ankit Vijay Kedia',
+'ANKUSH KEDIA',
 'Vijay Krishanlal Kedia',
 'Kedia Secuirities Private Limited',
 'ASHISH KACHOLIA',
@@ -519,8 +521,54 @@ class BSEScraper:
 'ROHAN GUPTA', #SG Finserve promoter
 'NALANDA INDIA EQUITY FUND LIMITED',
 'NALANDA INDIA FUND LIMITED',
+
+#Quick money
 'NAV CAPITAL VCC - NAV CAPITAL EMERGING STAR FUND',
-'MANSI SHARE AND STOCK BROKING PRIVATE LIMITED',
+'Nav Capital Vcc - Nav Capital Emerging Star Fund',
+'RAJASTHAN GLOBAL SECURITIES PVT.LTD',
+'RAJASTHAN GLOBAL SECURITIES PRIVATE LIMITED',
+'Rajasthan Global Securities Private Limited',
+'FINAVENUE CAPITAL TRUST-FINAVENUE GROWTH FUND',
+'Finavenue Capital Trust - Finavenue Growth Fund',
+'Finavenue Capital trust Finavenue Growth Fund',
+'Finavenue Capital Trust - Finavenue Strategic Fund',
+'SAINT CAPITAL FUND',
+'Saint Capital Fund',
+'MERU INVESTMENT FUND PCC-CELL 1',
+'Meru Investment Fund PCC-Cell 1',
+'MERU INVESTMENT FUND PCC - CELL 1',
+'MERU INVESTMENT FUND',
+'VIKASA INDIA EIF I FUND-INCUBE GLOBAL OPPORTUNITIES',
+'Vikasa India EIF I Fund - Incube Global Opportunities',
+'VIKASA INDIA EIF I FUND - INCUBE GLOBAL OPPORTUNITIES',
+'Vikasa India EIF I Fund- Share ClassP',
+'Vikasa India EIF I Fund - Share Class P',
+'Vikasa Global Fund PCC - Eubilia Capital Partners Fund - I',
+'VIKASA INDIA EIF I FUND - pte OPPORTUNITIES',
+'VIKASA CAPITAL INC',   
+'LRSD SECURITIES PRIVATE LIMITED',
+'LRSD SECURITIES PVT.LTD',
+'LRSD SECURITIES PVT LTD',
+'TIGER STRATEGIES FUND - 1',
+'Tiger Strategies Fund-I',
+'Tiger Strategies Fund - I',
+'EVERGROW CAPITAL OPPORTUNITIES FUND',
+'Evergrow Capital Opportunities Fund',
+'SAGEONE-FLAGSHIP GROWTH OE FUND',
+'Sageone - Flagship Growth OE Fund',
+'SageOne India Opportunity Trust',
+'Mint Focused Growth Fund PCC- CELL 1',
+'Mint Focused Growth Fund-PCC Cell 1',
+'Mint Focused Growth Fund PCC- Cell',
+'MINT FOCUSED GROWTH FUND',
+'Religo Commodities Venture Trust-Religo Commodities Ventures Fund',
+'RELIGO COMMODITIES VENTURES TRUST - RELIGO COMMODITIES VENTURES FUND',
+'Religo Commeadition Ventures Trust Religo Commodities Ventures Fund',
+'Hem Growth Opportunities Fund',
+'HEM GROWTH OPPORTUNITIES FUND',
+'RGSL INVESTMENT FUND - RGSL INVESTMENT LVF 1',
+#Quick money
+
 'RITU BAPNA',
 'SANDEEP SINGH',
 'Mukul Mahavir Agrawal',

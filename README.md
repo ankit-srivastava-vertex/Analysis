@@ -10,15 +10,17 @@ Automated daily market analysis pipeline for Indian equities. Covers bulk/block 
 2. [Architecture](#architecture)
 3. [Environment & Configuration](#environment--configuration)
    - [Replicating .venv / .vscode / .env](#replicating-venv--vscode--env)
-4. [run_all.py — Main Orchestrator](#run_allpy--main-orchestrator)
-5. [Standalone Analysis Scripts](#standalone-analysis-scripts)
-6. [Portfolio System](#portfolio-system)
-7. [Interactive Web Apps](#interactive-web-apps)
-8. [Data Layer](#data-layer)
-9. [Scheduling & Automation](#scheduling--automation)
-10. [Output Files & Directory Structure](#output-files--directory-structure)
-11. [Inter-Module Dependencies](#inter-module-dependencies)
-12. [Logging](#logging)
+4. [What Runs via run_all.py — and What Doesn't](#what-runs-via-run_allpy--and-what-doesnt)
+5. [run_all.py — Main Orchestrator](#run_allpy--main-orchestrator)
+6. [Standalone Analysis Scripts](#standalone-analysis-scripts)
+7. [Portfolio System](#portfolio-system)
+8. [Interactive Web Apps](#interactive-web-apps)
+9. [Data Layer](#data-layer)
+10. [Scheduling & Automation](#scheduling--automation)
+11. [Output Files — Which Script Produces What](#output-files--which-script-produces-what)
+12. [Inter-Module Dependencies](#inter-module-dependencies)
+13. [Logging](#logging)
+14. [Complete Command Reference](#complete-command-reference)
 
 ---
 
@@ -123,6 +125,7 @@ Analysis/
 ├── fno_max_oi.py                 # F&O Max OI strike scanner (standalone)
 ├── india_macro.py                # India macro dashboard (standalone)
 ├── forensic_accounting.py        # Single-stock forensic PDF report (standalone)
+├── ipo_listing_gainers.py        # IPO >=50% gainers + FULL anchor-investor lists (standalone)
 ├── breakout_review.py            # Walk-forward validation of breakout picks (standalone)
 ├── breakout_deep_analysis.py     # Rule-mining on review data → elite-subset filters (standalone)
 ├── breakout_scorecard_review.py  # Walk-forward validator for scorecard CompositeScore (standalone)
@@ -131,6 +134,7 @@ Analysis/
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
+├── ohlcv_cache.py                # 2-tier incremental daily-bar cache in front of Angel
 ├── email_sender.py               # SMTP helper (Gmail App Password)
 │
 ├── portfolio/                    # Portfolio analysis subsystem
@@ -152,12 +156,19 @@ Analysis/
 ├── tradingcharts/                # Browser charting dashboard (Flask, port 5050)
 │   ├── app.py                    # REST API + live ticks (Angel WS) + state
 │   ├── run.py / run.sh / run.bat # Cross-platform launchers
+│   ├── requirements.txt          # flask, flask-cors, waitress, pandas
+│   ├── README.md / RULES.md      # App docs + charting rules
 │   ├── static/                   # Single-page frontend (index.html, drawing-tools.js)
 │   ├── state/state.json          # Server-side persisted UI state
+│   ├── logs/                     # Per-day app logs
 │   └── multiscreen/              # Sidecar: 4 isolated workspaces (port 5051)
+│       ├── server.py             # Reverse-proxy + per-workspace state
+│       ├── run.py, shim.js       # Launcher + localStorage namespacing
+│       └── state/<wsid>.json     # default / ws2 / ws3 / ws4
 ├── screener/                     # Screener.in-backed valuation/financials app (Flask, port 5052)
 │   ├── app.py                    # Scrapes Screener.in → financial time-series API
 │   ├── run.py                    # Launcher
+│   ├── state/state.json          # Persisted UI state
 │   └── static/                   # Frontend (reuses tradingcharts assets)
 │
 ├── index_constituents.json       # Static sector → ticker mapping
@@ -173,6 +184,7 @@ Analysis/
 ├── data/                         # Data storage
 │   ├── india_macro/              # 28 indicator CSVs (append-only)
 │   ├── backtest/                 # Cached OHLCV parquets + backtest result JSONs
+│   ├── ipo/                      # Append-only IPO feed ledgers (NSE + BSE)
 │   └── bulkblock/                # Cached bulk/block deal data
 ├── logs/                         # Per-run pipeline logs (auto-pruned 30d)
 ├── Output/                       # Breakout scanner outputs, review archives
@@ -359,6 +371,66 @@ python -c "import os,dotenv; dotenv.load_dotenv(); print('env keys:', sorted(k f
 
 ---
 
+## What Runs via run_all.py — and What Doesn't
+
+The single most common source of confusion in this repo. **Only 8 of the 26 root
+scripts execute inside `run_all.py`.** Everything else must be invoked
+explicitly — nothing schedules it for you.
+
+### Runs INSIDE `run_all.py` (8 scenarios)
+
+Invoked as imported functions, not subprocesses. Each is wrapped in try/except,
+so one failure never aborts the pipeline. Their standalone Excel files are
+deleted after capture — only the unified workbook survives.
+
+| # | Scenario name (`--skip`) | Module | Contributes |
+|---|---|---|---|
+| 1 | `bulk_block` | `BulkBlock.py` | 4 sheets (BB) |
+| 2 | `sector_index` | `custom_sector_index.py` | 2 sheets + chart |
+| 3 | `fii_flows` | `fii_flows.py` | 2 sheets + chart |
+| 4 | `fii_sector_flows` | `fii_sector_flows.py` | 2 sheets + chart |
+| 5 | `sector_momentum` | `sector_momentum.py` | 2 sheets + chart |
+| 6 | `nse_sector_rs` | `nse_ready_sectors.py` | 1 sheet + chart |
+| 7 | `rrg` | `rrg_chart.py` | 8 sheets + chart |
+| 8 | `ipo_anchor` | `ipo_anchor_tracker.py` | IPO Anchor sheets + `.txt` |
+
+### Runs INDIRECTLY (called by another script, never scheduled alone)
+
+| Module | Called by | Note |
+|---|---|---|
+| `fii_stake_tracker.py` | `BulkBlock.py` | Runs inside scenario 1. Standalone use is quarterly/manual. |
+| `multi_pct_down.py` | `breakout_scanner_angel.py` | Runs inline as Universe 1. Also runnable alone. |
+| `breakout_scanner_scorecard.py` | `breakout_scanner_angel.py` | Attached post-process; reuses the scanner's candles. Has its own CLI for re-scoring an existing workbook. |
+
+### Does NOT run via `run_all.py` — manual invocation only
+
+| Script | Why it is separate | Cadence |
+|---|---|---|
+| `breakout_scanner_angel.py` | Heavy, long-running; its own pipeline | Weekly |
+| `ipo_listing_gainers.py` | Needs you to supply anchor filings | On demand |
+| `fno_max_oi.py` | Expiry-cycle specific | Weekly/monthly |
+| `india_macro.py` | Monthly data cadence, not daily | Monthly |
+| `forensic_accounting.py` | Single-stock, argument-driven | On demand |
+| `breakout_review.py` | Needs matured weeks | Review day |
+| `breakout_deep_analysis.py` | Consumes review output | Review day |
+| `breakout_scorecard_review.py` | Needs matured snapshots | Review day |
+| `universe_review.py` | Needs matured weeks | Review day |
+| `universe_mining.py` | Consumes universe_review output | Review day |
+| `portfolio/portfolio_run_all.py` | Separate 9-scenario orchestrator | On demand |
+| `tradingcharts/`, `screener/` | Long-lived web servers | Always-on / on demand |
+
+### Library modules (never run directly)
+
+`data_provider.py`, `angel_client.py`, `ohlcv_cache.py`, `email_sender.py`,
+`portfolio/holdings_loader.py`, `portfolio/_prices.py`. These have no `__main__`
+entry point worth invoking — importing them is the only intended use.
+
+> **`india_macro` naming trap:** older comments call it "Scenario 8". It is
+> **not** in `run_all.py` and never has been — `ipo_anchor` is scenario 8. Run
+> `india_macro.py` yourself.
+
+---
+
 ## run_all.py — Main Orchestrator
 
 The command-centre script that runs all market analysis scenarios in sequence.
@@ -397,19 +469,28 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 
 ### Output
 
-- `BULK_BLOCK_Deals_<timestamp>.xlsx` — Unified workbook with sheets:
-  - `nse_bulk`, `nse_block` — NSE deals filtered to superstar clients
-  - `Bulk Deals`, `Block Deals` — BSE deals filtered to superstar clients
-  - `FII_Summary` — Classification rules + per-sheet row counts
-  - `FII_New_Entry` — Stocks with new FII entry
-  - `FII_1Q_Increasing`, `FII_2Q_Increasing`, `FII_3Q_Increasing`, `FII_4Q_Increasing` — FII stake streak data
-  - `HNIs` — Superstar/HNI new buys + increased positions (sorted A-Z)
-  - `RS Ranking` — Sector relative strength ranking (from sector_momentum)
-  - `NSE Sector RS Ranking` — Official NSE sector-index relative strength ranking (from nse_ready_sectors)
-  - `IPO Anchor List` — Recent IPOs with watchlist anchor matches
-- 6 interactive Plotly HTML charts (sector_index, fii_flows, fii_sector_flows, sector_momentum, nse_sector_rs, rrg)
-- `market_charts.html` — Combined tabbed HTML with all 6 charts in iframe panels
-- Email with Excel + charts attached
+- **`market_analysis_report.xlsx`** — the unified workbook (~19 sheets), written
+  to the project root. Sheets:
+  - `NSE Bulk`, `NSE Block`, `BSE Bulk`, `BSE Block` — deals filtered to superstar clients
+  - `Sector Idx Summary`, `Sector Idx Values` — from custom_sector_index
+  - `FII Flow Summary`, `FII Daily Data` — from fii_flows
+  - `FII Sector Net Flows`, `FII Sector Detail` — from fii_sector_flows
+  - `RS Ranking`, `RS History` — from sector_momentum
+  - `NSE Sector RS Ranking` — from nse_ready_sectors
+  - `RRG 3 Day` … `RRG Quarterly` — 8 timeframe sheets from rrg_chart
+  - `IPO Anchor ...` — recent IPOs with watchlist anchor matches
+- 6 interactive Plotly HTML charts: `custom_sector_index_chart.html`,
+  `fii_flows_chart.html`, `fii_sector_flows_chart.html`,
+  `sector_momentum_chart.html`, `nse_sector_rs_chart.html`, `rrg_chart.html`
+- `market_charts.html` — combined tabbed HTML embedding all 6 charts in iframes
+- `ipo_anchor_report.txt` — TradingView watchlist from the ipo_anchor scenario
+- Email with the workbook + charts attached (unless `--no-email`)
+
+> **`BULK_BLOCK_Deals_<timestamp>.xlsx` is NOT produced by `run_all.py`.** That
+> file comes from running `BulkBlock.py` **standalone**. Inside the pipeline a
+> `_CapturingScraper` subclass suppresses it and folds the data into
+> `market_analysis_report.xlsx` instead. Every sub-module's standalone Excel is
+> deleted after capture, so the unified workbook is the only one left on disk.
 
 ### Notes
 
@@ -435,9 +516,19 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 
 **Output:** `BULK_BLOCK_Deals_<timestamp>.xlsx` (sheets: NSE Bulk, BSE Bulk, NSE Block, BSE Block, FII_Summary, FII_New_Entry, FII_1-4Q_Increasing, HNIs)
 
+**CLI Options:**
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Scrape and report without writing the Excel file |
+
+> Parsed directly from `sys.argv` (not argparse), so it must be spelled exactly
+> `--dry-run`.
+
 **Usage:**
 ```bash
 python3 BulkBlock.py              # standalone run
+python3 BulkBlock.py --dry-run    # scrape only, no file written
 ```
 
 ---
@@ -460,14 +551,15 @@ python3 BulkBlock.py              # standalone run
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--max` | 300 | Max symbols per universe |
-| `--min-score` | 3.0 | Minimum breakout score to include |
+| `--max` | `0` (no cap) | Max symbols per universe |
+| `--min-score` | `50` (`WATCHLIST_MIN_SCORE`) | Minimum breakout score to include |
+| `--lookback` | `252` (`LOOKBACK_DAYS`) | Trading days of history considered (~1 year) |
 | `--high-conviction` | off | Only show high-conviction setups |
 | `--skip-mpd` | off | Skip MPD universe |
 | `--skip-screener` | off | Skip Screener.in universe |
 | `--screener-url` | built-in | Custom Screener.in query URL |
-| `--symbols-csv` | — | CSV file with symbols to scan (bypass both universes) |
-| `--out-tag` | — | Custom suffix for output files |
+| `--symbols-csv` | `""` | CSV file with symbols to scan (bypass both universes) |
+| `--out-tag` | `""` | Custom suffix for output files |
 | `--no-strict` | off | Disable hard gate filtering |
 
 **Output:**
@@ -477,8 +569,10 @@ python3 BulkBlock.py              # standalone run
 **Usage:**
 ```bash
 python3 breakout_scanner_angel.py
-python3 breakout_scanner_angel.py --high-conviction --min-score 5
+python3 breakout_scanner_angel.py --high-conviction --min-score 60
+python3 breakout_scanner_angel.py --max 300 --lookback 252
 python3 breakout_scanner_angel.py --symbols-csv my_list.csv --no-strict
+python3 breakout_scanner_angel.py --skip-screener --out-tag mpd_only
 ```
 
 ---
@@ -503,7 +597,21 @@ to one label + one `CompositeScore` for at-a-glance triage.
 `breakout_watchlist_scorecard.html`; persists a dated row per name to
 `data/scorecard_snapshots.csv` (feeds `breakout_scorecard_review.py`).
 
-**Note:** Not run directly — invoked automatically by the scanner.
+**CLI Options** (for re-scoring an existing workbook without re-running the scan):
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--workbook` | **required** | Path to an existing `breakout_watchlist.xlsx` |
+| `--lookback` | `400` | Days of history to pull for scoring |
+| `--no-forensic` | off | Skip the deep forensic pass on the Stage-2-cheap shortlist |
+
+**Usage:**
+```bash
+# Normal path — nothing to do; the scanner invokes it automatically.
+# Manual re-score of an existing workbook:
+python3 breakout_scanner_scorecard.py --workbook Output/breakout_watchlist.xlsx
+python3 breakout_scanner_scorecard.py --workbook Output/breakout_watchlist.xlsx --no-forensic
+```
 
 ---
 
@@ -522,12 +630,13 @@ to one label + one `CompositeScore` for at-a-glance triage.
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--min` | 2 | Minimum % off high |
-| `--max` | 21 | Maximum % off high |
-| `--skip` | — | Skip specific universes (nse, nse-sme, bse-sme) |
-| `--workers` | 4 | Parallel download threads |
-| `--max-symbols` | — | Limit symbols per universe |
-| `-o` | — | Output prefix |
+| `--min` | `2.0` | Minimum % off high |
+| `--max` | `21.0` | Maximum % off high |
+| `--skip` | `[]` | Skip universes (space-separated: `nse`, `nse-sme`, `bse-sme`) |
+| `--workers` | `4` | Parallel download threads |
+| `--max-symbols` | `0` (all) | Limit symbols per universe |
+| `--out` | script dir | Output **directory** |
+| `-o`, `--output-prefix` | — | Output filename prefix |
 
 **Output:**
 - `multi_pct_down.xlsx` (one sheet per universe + combined)
@@ -626,7 +735,16 @@ python3 custom_sector_index.py -c my_sectors.json -o custom
 |------|--------|
 | `-o` | Output file prefix |
 
-**Output:** `rrg_chart_chart.html` (interactive scatter plot with rotation tails) + `.xlsx`
+**CLI Options:**
+
+| Flag | Effect |
+|------|--------|
+| `-o`, `--output` | Output file prefix (default `rrg_chart`) |
+
+**Output:** `rrg_chart.html` (interactive scatter plot with rotation tails) + `rrg_chart.xlsx` (8 timeframe sheets)
+
+> The chart is built as `prefix + ".html"`, so the default is `rrg_chart.html`.
+> A stale `rrg_chart_chart.html` in `Output/` is from an older prefix.
 
 ---
 
@@ -634,10 +752,93 @@ python3 custom_sector_index.py -c my_sectors.json -o custom
 
 **Purpose:** Fetches the last 15 months of IPOs from NSE, computes listing returns, and cross-references anchor investor allocations from chittorgarh.com against a ~85 name watchlist of quality anchors.
 
+**CLI Options:**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--months` | `14` | Months of IPO history to pull |
+| `--limit` | `0` (all) | Debug: first N IPOs only |
+| `--no-anchors` | off | Skip anchor scraping (listing returns only) |
+| `--out` | built-in | Output path |
+
 **Output:**
 - `.xlsx` with IPO details + anchor matches
 - TradingView watchlist `.txt` for IPOs held by quality anchors
 - "IPO Anchor List" sheet appended to BulkBlock Excel by run_all.py
+
+**Usage:**
+```bash
+python3 ipo_anchor_tracker.py                  # 14 months, with anchors
+python3 ipo_anchor_tracker.py --months 24     # wider history
+python3 ipo_anchor_tracker.py --no-anchors    # fast, listing returns only
+```
+
+> **Not the same as `ipo_listing_gainers.py`.** This one matches IPOs against a
+> *watchlist* of ~85 known-quality anchors and runs inside `run_all.py`.
+> `ipo_listing_gainers.py` extracts the **complete** anchor list from official
+> filings and is standalone. See below.
+
+---
+
+### ipo_listing_gainers.py — IPO ≥50% Gainers + Full Anchor Lists
+
+**Purpose:** Screens every IPO listed since a chosen date (default 2025-01-01)
+for a ≥50% gain, then extracts the **complete** anchor-investor list for each
+winner from its official "Allocation to Anchor Investors" filing — and ranks the
+investors that recur across deals. The recurrence ranking is the real output.
+
+**Two return measures** (either one qualifies, both on CLOSE not intraday high):
+1. Listing-day return vs issue price
+2. Peak CLOSE within 30 days of listing vs issue price
+
+**CLI Options:**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--start` | `2025-01-01` | Listing window start |
+| `--end` | today | Listing window end |
+| `--threshold` | `50.0` | Minimum qualifying gain % |
+| `--window-days` | `30` | Peak lookback after listing |
+| `--workers` | `5` | Price-fetch threads |
+| `--limit` | `0` (all) | Debug: first N IPOs only |
+| `--bse-recent` | off | Add BSE live-window supplement |
+| `--anchor-dir` | `./anchor_pdfs` | Folder of anchor filings |
+| `--freq-words` | `2` | Words used to key investor names |
+| `--no-ocr` | off | Skip OCR; text-layer PDFs only |
+| `--out` | `./ipo_listing_gainers.csv` | CSV path |
+| `--xlsx` | `./ipo_listing_gainers.xlsx` | Excel path |
+
+**Output (project root):**
+- `ipo_listing_gainers.csv` — gainers table
+- `ipo_listing_gainers.xlsx` — 3 sheets: `Gainers`, `Anchor Investors` (wide,
+  one column per symbol), `Investor Frequency` (recurrence ranking)
+- `data/ipo/*.json` — append-only NSE/BSE feed ledgers
+
+**Anchor extraction:** digital PDFs via pdfplumber; scanned PDFs/images via
+pdftoppm + tesseract across 4 render passes. Each pass is reconciled against the
+filing's own stated share total — if none reconciles, the list is **rejected**
+rather than returned partial.
+
+**Resilience:** both exchange feeds are folded into append-only ledgers under
+`data/ipo/`, and the ledger (not the live payload) drives the screen. If NSE
+blocks the API, historical IPOs and their issue prices still work.
+
+**Usage:**
+```bash
+python3 ipo_listing_gainers.py                     # 2025-01-01..today, >=50%
+python3 ipo_listing_gainers.py --threshold 100     # only >=100% movers
+python3 ipo_listing_gainers.py --window-days 60    # wider peak lookback
+python3 ipo_listing_gainers.py --bse-recent        # add BSE live supplement
+python3 ipo_listing_gainers.py --limit 10          # quick smoke test
+```
+
+> **Close the workbook first.** If `ipo_listing_gainers.xlsx` is open in Excel
+> the write is clobbered; a stale `~$ipo_listing_gainers.xlsx` is the tell.
+> Sheet 2 is merged, never overwritten, so hand-added columns survive re-runs.
+
+**Requires for scanned filings:** `brew install tesseract poppler`
+
+**Note:** Not part of `run_all.py` — always run independently.
 
 ---
 
@@ -679,15 +880,22 @@ python3 custom_sector_index.py -c my_sectors.json -o custom
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--expiry` | `weekly` | `weekly` or `monthly` expiry contracts |
-| `--eod` | off | Force BhavCopy mode (end-of-day data only) |
+| `--live` | off | Force Angel One live mode (skip BhavCopy) |
+| `--new` | off | Create a new Excel file (default: **append** to existing) |
 
-**Output:** `fno_max_oi.xlsx` (sheets: Equity F&O, Index F&O)
+**Output:** `fno_<month>.xlsx` — e.g. `fno_aug.xlsx` (sheets: Equity F&O, Index F&O)
+
+> **Naming is month-based, not `fno_max_oi.xlsx`.** By default the script
+> **appends** to the most recent existing `fno_*.xlsx` in the project root.
+> `--new` forces a fresh file named after the current month
+> (`date.today().strftime("%b").lower()`).
 
 **Usage:**
 ```bash
-python3 fno_max_oi.py                    # live Angel data, weekly expiry
+python3 fno_max_oi.py                    # weekly expiry, auto source, append
 python3 fno_max_oi.py --expiry monthly   # monthly expiry contracts
-python3 fno_max_oi.py --eod              # use NSE BhavCopy instead of live
+python3 fno_max_oi.py --live             # force live Angel OI, skip BhavCopy
+python3 fno_max_oi.py --new              # start a fresh workbook
 ```
 
 ---
@@ -732,7 +940,9 @@ python3 fno_max_oi.py --eod              # use NSE BhavCopy instead of live
 | `--add <id> <period> <value>` | Manually add a data point |
 | `--print <id>` | Print one indicator's data table with growth rates |
 | `--fetch-direct` | Run all 12 direct fetchers then rebuild dashboard |
+| `--fetch-browser` | Run browser-based fetchers |
 | `--ogd-test <uuid>` | Inspect a data.gov.in dataset |
+| `--ogd-find <query>` | Search data.gov.in for a dataset |
 | `--fetch <id>` | Pull single indicator from OGD |
 | `--fetch-all` | Pull all OGD + direct + browser fetchers |
 
@@ -773,10 +983,18 @@ python3 india_macro.py --print cement_production
 
 **Output:** `forensic_report_<SYMBOL>_<timestamp>.pdf`
 
+**CLI Options:**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `<SYMBOL>` (positional) | built-in `COMPANY_SYMBOL` | Ticker to analyse |
+| `--compare`, `-c` | `None` | Comma-separated peer tickers to compare against |
+
 **Usage:**
 ```bash
 python3 forensic_accounting.py TCS
 python3 forensic_accounting.py RELIANCE
+python3 forensic_accounting.py TCS --compare INFY,WIPRO
 python3 forensic_accounting.py              # uses default COMPANY_SYMBOL in file
 python3 -c "from forensic_accounting import run; run('RELIANCE')"
 ```
@@ -958,6 +1176,44 @@ python3 portfolio/portfolio_run_all.py --no-email   # dry run
 - `portfolio/premarket_dashboard_chart.html` — 4-panel breadth chart
 - Email with both attached (unless `--no-email`)
 
+### Running Portfolio Modules Individually
+
+**Every** portfolio module is independently runnable and each accepts a single
+`--out` flag. Useful when you only want one answer and not the full 9-scenario
+sweep. Run them from the project root:
+
+```bash
+python3 portfolio/portfolio_tracker.py       --out portfolio/portfolio_tracker.xlsx
+python3 portfolio/position_health.py         --out portfolio/position_health.xlsx
+python3 portfolio/sl_target_tracker.py       --out portfolio/sl_target.xlsx
+python3 portfolio/risk_metrics.py            --out portfolio/risk_metrics.xlsx
+python3 portfolio/correlation_clusters.py    --out portfolio/correlation_clusters.xlsx
+python3 portfolio/pledge_promoter.py         --out portfolio/pledge_promoter.xlsx
+python3 portfolio/mf_overlap.py              --out portfolio/mf_overlap.xlsx
+python3 portfolio/events_calendar.py         --out portfolio/events_calendar.xlsx
+python3 portfolio/premarket_dashboard.py     --out portfolio/premarket_dashboard.xlsx
+```
+
+The `--out` default for each is exactly the path shown above, so the flag can be
+omitted entirely:
+
+```bash
+python3 portfolio/position_health.py     # writes portfolio/position_health.xlsx
+```
+
+**Orchestrator flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--no-email` | Run all 9 scenarios but skip email delivery |
+
+> `portfolio_run_all.py` has **no** `--skip` flag — unlike `run_all.py`. To run a
+> subset, invoke the individual modules above.
+
+> **Prerequisite:** all modules need a broker holdings export discoverable by
+> `holdings_loader.py` (searches `portfolio/` → project root → `~/Downloads`).
+> Without it they exit early.
+
 ---
 
 ### Portfolio Modules — Detail
@@ -1110,6 +1366,8 @@ Unified parser for broker holdings exports.
 
 Shared helper that fetches & caches daily Close prices for all holdings. Used by `risk_metrics` and `correlation_clusters` to avoid duplicate data pulls within a single orchestrator run.
 
+**Library module — not runnable.**
+
 ---
 
 ## Interactive Web Apps
@@ -1129,43 +1387,147 @@ reuse the parent project's `.env` (Angel One) and `data_provider.py`.
 Flask + vanilla-JS single-page dashboard (lightweight-charts). Angel One
 SmartAPI primary, jugaad-data / yfinance fallback — all via `../data_provider.py`.
 
-- **Backend** (`app.py`): REST OHLCV (`/api/historical`), symbol search, live
-  quote polling, batched live-tick endpoint (`/api/ticks`, fed by an Angel
-  WebSocket thread into an in-memory cache), and server-side UI-state
-  persistence (`/api/state` → atomic `state/state.json`). Self-healing on
-  port 5050 (kills stale instances on boot). Served by `waitress`.
-- **Chart types:** Candles, Bars, Heikin Ashi. Themes Dark/Light. Layouts
-  1/2/4/6/8 panes. Timeframes 5m–1mo, view ranges 1M–10Y.
-- **Indicators:** SmartVPSG (gap/volume markers, 52w stats, R.Vol, optional
-  Volume Profile), SupResEPS (MAs 10/20/50/200 + pivots), RSI, MACD, Relative
-  Strength vs 9 benchmark indices, and **InstiAccum** (institutional-accumulation
-  composite score: 6m momentum, distance-from-52wH, volume-surge, vol-adjusted
-  return, plus bulk/block deal-days).
-- **Drawings:** 14 TradingView-style tools with stable IDs (alert-referenceable).
-- **Alerts:** Price / Volume / Drawing-Cross, Once/Hourly/Daily, browser
-  notification + audio beep.
-- **Watchlists:** up to 45 lists × 450 stocks, TV-style CSV upload, per-row live
-  quote.
+**Launch:**
+```bash
+python3 tradingcharts/run.py     # cross-platform (recommended)
+./tradingcharts/run.sh           # macOS/Linux
+tradingcharts\run.bat            # Windows
+PORT=5060 python3 tradingcharts/app.py   # custom port
+```
 
-See [tradingcharts/README.md](tradingcharts/README.md) for full detail.
+**No CLI flags.** All three launchers do the same three things: activate the
+parent venv, `pip install -q -r tradingcharts/requirements.txt`, then exec
+`app.py`.
+
+| Property | Value |
+|---|---|
+| Port | `FIXED_PORT = 5050`, overridable via `PORT` env var |
+| Server | `waitress`, `host=127.0.0.1`, `threads=16` |
+| Self-healing | Kills stale instances holding port 5050 on boot |
+| State | `tradingcharts/state/state.json` (atomic `os.replace`, thread-locked) |
+| Logs | `tradingcharts/logs/` (per-day subdirectories) |
+| Env | `PORT` (optional), `ANGEL_*` from parent `../.env` |
+| Extra deps | `flask`, `flask-cors`, `waitress` (in `tradingcharts/requirements.txt`) |
+
+**REST API (14 routes):**
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/` | GET | Serve `static/index.html` |
+| `/static/<path>` | GET | Frontend assets |
+| `/api/symbols` | GET | Popular symbols + custom indices (`CIDX:*`) |
+| `/api/search?q=` | GET | Symbol prefix search (min 3 chars) |
+| `/api/historical` | GET | OHLCV candles (`symbol`, `interval`, `days`); 1m–1mo |
+| `/api/quote?symbol=` | GET | Latest LTP/OHLC for one symbol |
+| `/api/quotes?symbols=` | GET | Batched quotes, comma-separated |
+| `/api/ticks?symbols=` | GET | Batched live-tick read (browser polls this) |
+| `/api/subscribe` | POST | Start streaming live ticks for symbols |
+| `/api/unsubscribe` | POST | Stop streaming live ticks |
+| `/api/bulkblock?symbol=` | GET | Bulk/block institutional deals for a symbol |
+| `/api/state` | GET | Read persisted UI state |
+| `/api/state` | POST | Replace persisted UI state |
+| `/api/health` | GET | Uptime, Angel session, WS connected, cache stats |
+
+**Data sources:** Angel One SmartAPI (+ WebSocket for live ticks), jugaad-data,
+yfinance, NSE `snapshot-capital-market-largedeal`, BSE bulk/block deal APIs.
+
+**Features:** Candles/Bars/Heikin Ashi; Dark/Light; 1/2/4/6/8-pane layouts;
+timeframes 5m–1mo; view ranges 1M–10Y. Indicators: SmartVPSG (gap/volume
+markers, 52w stats, R.Vol, optional Volume Profile), SupResEPS (MAs
+10/20/50/200 + pivots), RSI, MACD, Relative Strength vs 9 benchmarks, and
+InstiAccum (institutional-accumulation composite). 14 TradingView-style drawing
+tools with stable IDs. Alerts on Price/Volume/Drawing-Cross with browser
+notification + audio. Watchlists up to 45 lists × 450 stocks with TV-style CSV
+upload.
+
+Full detail: [tradingcharts/README.md](tradingcharts/README.md) and
+[tradingcharts/RULES.md](tradingcharts/RULES.md).
 
 ### multiscreen/ — 4 Isolated Workspaces (port 5051)
 
-Sidecar server that hosts four independent dashboards
-(`/w/default`, `/w/ws2`, `/w/ws3`, `/w/ws4`) **without touching** the main app.
-All `/api/*` calls except `/api/state` are reverse-proxied to port 5050 (one
-Angel WS, one cache, shared). Each workspace persists its own
-`multiscreen/state/<wsid>.json`; a `shim.js` namespaces every `localStorage`
-key with `tc:<wsid>:` so the tabs never collide. Killing the sidecar leaves the
-main server untouched. See [tradingcharts/multiscreen/README.md](tradingcharts/multiscreen/README.md).
+Sidecar server hosting four independent dashboards without touching the main app.
+
+**Launch:**
+```bash
+python3 tradingcharts/multiscreen/run.py
+MULTISCREEN_PORT=5055 python3 tradingcharts/multiscreen/server.py   # custom port
+```
+
+**No CLI flags.** `run.py` installs `flask`, `requests`, `waitress` then execs
+`server.py`.
+
+| Property | Value |
+|---|---|
+| Port | `MULTISCREEN_PORT` env var, default `5051` |
+| Upstream | `MULTISCREEN_UPSTREAM` env var, default `http://127.0.0.1:5050` |
+| Server | `waitress` (`threads=24`), falls back to Flask dev server |
+| State | `tradingcharts/multiscreen/state/<wsid>.json` — one per workspace |
+| Workspaces | `default`, `ws2`, `ws3`, `ws4` |
+
+**Routes (8):**
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/` | GET | Redirect to `/w/default` |
+| `/w/<wsid>` | GET | Chart UI for a workspace; injects the localStorage shim |
+| `/multiscreen/shim.js` | GET | Namespaces every `localStorage` key as `tc:<wsid>:` |
+| `/static/<path>` | GET | Serves `../static/` (same assets as main app) |
+| `/api/state?wsid=` | GET | Read workspace-local state |
+| `/api/state?wsid=` | POST | Write workspace-local state |
+| `/api/<path>` | GET/POST/PUT/DELETE/PATCH | Reverse-proxy to port 5050 |
+| `/multiscreen/health` | GET | `{ok, port, upstream, workspaces}` |
+
+**Key design point:** every `/api/*` call except `/api/state` is proxied
+upstream, so there is exactly **one** Angel WebSocket and **one** candle cache
+shared by all four workspaces. The main server's `state/state.json` is never
+touched, and killing the sidecar leaves port 5050 running.
+
+> **Requires the main app to be running first** — the sidecar proxies to 5050.
+
+Full detail: [tradingcharts/multiscreen/README.md](tradingcharts/multiscreen/README.md).
 
 ### screener/ — Valuation & Financials App (port 5052)
 
-Flask app that scrapes **Screener.in** (company financials) and yfinance, and
-exposes a financial time-series API (Sales, Net Profit, EPS, PE/PB, cash-flow,
-balance-sheet items, etc.) rendered as charts. Fully `__file__`-relative;
-reuses the tradingcharts frontend assets. Uses `SCREENER_USER` / `SCREENER_PASS`
-from `.env` for authenticated screens.
+Flask app that scrapes **Screener.in** for company financials and falls back to
+yfinance, exposing a financial time-series API rendered as charts.
+
+**Launch:**
+```bash
+python3 screener/run.py
+```
+
+**No CLI flags.** `run.py` installs the **root** `requirements.txt` then execs
+`app.py`.
+
+| Property | Value |
+|---|---|
+| Port | Hardcoded `PORT = 5052` in `app.py` |
+| Server | Flask dev server, `host=0.0.0.0` |
+| State | `screener/state/state.json` (atomic `.tmp` → `replace()`) |
+| Env | `SCREENER_USER`, `SCREENER_PASS` from root `.env` (optional) |
+| Extra deps | **None** — no local `requirements.txt` |
+
+**Routes (7):**
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/` | GET | Serve `static/index.html` |
+| `/tc-static/<path>` | GET | Cross-link to `../tradingcharts/static/` assets |
+| `/api/metrics` | GET | Metric catalog + metadata |
+| `/api/search?q=` | GET | Company search → `{ticker, name, slug, url}` |
+| `/api/stock` | GET | Financials for `symbol` + comma-separated `metrics` |
+| `/api/state` | GET | Read persisted UI state |
+| `/api/state` | POST | Persist UI state |
+| `/api/health` | GET | `{ok, provider, auth_configured, auth_ok}` |
+
+**Data:** Screener.in company pages (`/company/<TICKER>/consolidated/`, HTML
+scrape, CSRF login) with yfinance fallback.
+
+> Two caveats worth knowing. `run.py` sets `PORT=5052` in the environment but
+> `app.py` **ignores it** and uses its hardcoded constant — changing the port
+> means editing `app.py`. And unlike the other two apps, this one binds
+> `0.0.0.0`, not `127.0.0.1`, so it is reachable from your local network.
+> There is **no** `screener/README.md`.
 
 ---
 
@@ -1231,6 +1593,35 @@ Shared module for sending consolidated reports with file attachments over SMTP/T
 from email_sender import send_report
 send_report(subject="...", body="...", attachments=["file1.xlsx", "chart.html"])
 ```
+
+---
+
+### ohlcv_cache.py — Incremental Daily-Bar Cache
+
+Two-tier cache sitting in front of `angel_client`'s `getCandleData`, for **daily
+bars only**. Intraday intervals (5m/15m/…) bypass it entirely, so live charting
+behaviour is unchanged.
+
+| Tier | Scope | Purpose |
+|---|---|---|
+| **L1** in-memory | Per-process dict, TTL-bounded | Deduplicates repeat fetches within one run |
+| **L2** on-disk | One pickle per `(symbol, interval)` | Cross-run incremental history — a re-run pulls only new bars |
+
+**Correctness guards** (why it is safe to trust):
+1. **Closed-sessions-only** — today's in-progress bar is served to the caller but
+   never written to disk, so a partial bar can never be persisted.
+2. **Overlap-overwrite** — each run re-fetches the last `OVERLAP_DAYS` and merges
+   with `keep="last"`, so provisional bars get finalised and split/adjustment
+   restatements overwrite stale values.
+3. **Validate-or-rebuild** — any integrity failure (bad columns, duplicate or
+   unsorted index, NaN OHLC, `High < Low`, negative volume, unreadable file)
+   discards the entry and forces a full re-fetch.
+
+The cache is a performance layer, never a source of truth — deleting it costs
+time, never correctness.
+
+**Library module — not runnable.** Used by `ipo_listing_gainers.py` and the
+breakout/review family via `data_provider`.
 
 ---
 
@@ -1300,41 +1691,180 @@ the Excel + charts as artifacts, and dispatches a follow-on `send-email` job.
 
 ---
 
-## Output Files & Directory Structure
+## Output Files — Which Script Produces What
+
+Complete producer → output map. **Lifecycle**: *Overwritten* = same path every
+run; *Timestamped* = new file per run, old ones accumulate; *Append-only* =
+history grows and is never pruned.
+
+### Orchestrators
+
+| Producer | Output | Location | Lifecycle |
+|---|---|---|---|
+| `run_all.py` | `market_analysis_report.xlsx` (~19 sheets) | root | Overwritten |
+| `run_all.py` | `market_charts.html` (6 charts, tabbed) | root | Overwritten |
+| `run_all.py` | 6 × `*_chart.html` (see next table) | root | Overwritten |
+| `portfolio/portfolio_run_all.py` | `portfolio_report.xlsx` (~16 sheets) | `portfolio/` | Overwritten |
+| `portfolio/portfolio_run_all.py` | `premarket_dashboard_chart.html` | `portfolio/` | Overwritten |
+
+### Scenario modules (when run standalone)
+
+Under `run_all.py` the `.xlsx` files below are **deleted after capture** — their
+data goes into `market_analysis_report.xlsx` and only the charts survive.
+
+| Producer | Excel | Chart HTML |
+|---|---|---|
+| `BulkBlock.py` | `BULK_BLOCK_Deals_<timestamp>.xlsx` | — |
+| `custom_sector_index.py` | `custom_sector_index.xlsx` | `custom_sector_index_chart.html` |
+| `fii_flows.py` | `fii_flows.xlsx` | `fii_flows_chart.html` |
+| `fii_sector_flows.py` | `fii_sector_flows.xlsx` | `fii_sector_flows_chart.html` |
+| `sector_momentum.py` | `sector_momentum.xlsx` | `sector_momentum_chart.html` |
+| `nse_ready_sectors.py` | `nse_sector_rs.xlsx` | `nse_sector_rs_chart.html` |
+| `rrg_chart.py` | `rrg_chart.xlsx` | `rrg_chart.html` |
+| `ipo_anchor_tracker.py` | `ipo_anchor_tracker.xlsx` | — (+ `ipo_anchor_report.txt`) |
+| `fii_stake_tracker.py` | `fii_stake_tracker.xlsx` | — |
+
+All of the above take `-o PREFIX` / `--output PREFIX`, which changes the stem of
+both the `.xlsx` and the `_chart.html`.
+
+> `rrg_chart.py` builds its chart as `prefix + ".html"`, so the file is
+> **`rrg_chart.html`** — not `rrg_chart_chart.html`. A stale
+> `Output/rrg_chart_chart.html` from an older prefix may still exist; ignore it.
+
+### Breakout family
+
+| Producer | Output | Location | Lifecycle |
+|---|---|---|---|
+| `breakout_scanner_angel.py` | `breakout_watchlist.xlsx` (6 sheets) | root | Overwritten |
+| `breakout_scanner_angel.py` | `breakout_watchlist_<tag>.xlsx` (with `--out-tag`) | root | One per tag |
+| `breakout_scanner_angel.py` | `screener_data.xlsx` | `Output/` | Overwritten |
+| `breakout_scanner_angel.py` | `tv_breakouts_combined.txt`, `tv_common.txt`, `tv_unique_mpd.txt`, `tv_unique_screener.txt` | root | Overwritten |
+| `breakout_scanner_angel.py` | `logs_breakout_scanner_angel_v35_<timestamp>.txt` | root | Timestamped |
+| `breakout_scanner_scorecard.py` | `Scorecard` sheet appended to `breakout_watchlist.xlsx` | root | Overwritten |
+| `breakout_scanner_scorecard.py` | `breakout_watchlist_scorecard.html` | root | Overwritten |
+| `breakout_scanner_scorecard.py` | `data/scorecard_snapshots.csv` | `data/` | **Append-only** |
+| `multi_pct_down.py` | `multi_pct_down.xlsx` (sheet per universe) | root | Overwritten |
+| `multi_pct_down.py` | `multi_pct_down.txt` (TradingView) | root | Overwritten |
+
+### Review family
+
+| Producer | Output | Lifecycle |
+|---|---|---|
+| `breakout_review.py` | `Output/review_<YYYYMMDD_HHMMSS>.xlsx` | Timestamped |
+| `breakout_review.py` | `Output/review_cumulative.csv` | **Append-only** |
+| `breakout_deep_analysis.py` | Console report only — reads `Output/review_*.xlsx` | No file |
+| `breakout_scorecard_review.py` | `Output/scorecard_review_<timestamp>.xlsx` | Timestamped |
+| `universe_review.py` | `Output/universe_review_<YYYYMMDD>.xlsx` | One per day |
+| `universe_mining.py` | `Output/universe_mining_<YYYYMMDD>.xlsx` | One per day |
+
+**Input contract:** the review family reads weekly snapshots from
+`Output/Week<N>-<DDMon>/breakout_watchlist.xlsx`. Copy the scanner's workbook
+into a new `Week<N>` folder each week, or the reviewers find nothing to review.
+
+### Standalone analysis
+
+| Producer | Output | Location | Lifecycle |
+|---|---|---|---|
+| `ipo_listing_gainers.py` | `ipo_listing_gainers.csv` | root | Overwritten |
+| `ipo_listing_gainers.py` | `ipo_listing_gainers.xlsx` (3 sheets) | root | **Merged** — Sheet 2 keeps existing names |
+| `ipo_listing_gainers.py` | `nse_past_issues.json`, `bse_public_issues.json` | `data/ipo/` | **Append-only** |
+| `fno_max_oi.py` | `fno_<month>.xlsx` e.g. `fno_aug.xlsx` | root | Appends to latest; `--new` starts fresh |
+| `india_macro.py` | `india_macro_data.xlsx` (Overview + 1 sheet/indicator) | root | Overwritten |
+| `india_macro.py` | `india_macro_dashboard.html` | root | Overwritten |
+| `india_macro.py` | `<indicator_id>.csv` (28 files) | `data/india_macro/` | **Append-only** |
+| `forensic_accounting.py` | `forensic_report_<SYMBOL>_<timestamp>.pdf` | root | Timestamped |
+
+### Portfolio modules (when run standalone)
+
+Each writes into `portfolio/` and is overwritten every run. Under
+`portfolio_run_all.py` these become sheets inside `portfolio_report.xlsx` instead.
+
+| Producer | Output |
+|---|---|
+| `portfolio_tracker.py` | `portfolio_tracker.xlsx` |
+| `position_health.py` | `position_health.xlsx` |
+| `sl_target_tracker.py` | `sl_target.xlsx` (also generates a `holdings_meta.csv` template if missing) |
+| `risk_metrics.py` | `risk_metrics.xlsx` |
+| `correlation_clusters.py` | `correlation_clusters.xlsx` |
+| `pledge_promoter.py` | `pledge_promoter.xlsx` |
+| `mf_overlap.py` | `mf_overlap.xlsx` |
+| `events_calendar.py` | `events_calendar.xlsx` |
+| `premarket_dashboard.py` | `premarket_dashboard.xlsx` + `premarket_dashboard_chart.html` |
+
+### Web apps (state, not reports)
+
+| Producer | Output | Contents |
+|---|---|---|
+| `tradingcharts/app.py` | `tradingcharts/state/state.json` | Watchlists, drawings, alerts, pane layout, theme |
+| `tradingcharts/multiscreen/server.py` | `tradingcharts/multiscreen/state/<wsid>.json` | One per workspace: `default`, `ws2`, `ws3`, `ws4` |
+| `screener/app.py` | `screener/state/state.json` | UI selections and settings |
+| `tradingcharts/app.py` | `tradingcharts/logs/` | Per-day subdirectories |
+
+### Caches (safe to delete — costs time, never correctness)
+
+| Producer | Path | Purpose |
+|---|---|---|
+| `angel_client.py` | `.angel_scrip_master.json` | ~25 MB scrip master, 7-day TTL |
+| `ohlcv_cache.py` | `.cache/` pickles | One per `(symbol, interval)`, daily bars only |
+| `ipo_listing_gainers.py` | `.cache/ipo_gainers/` | TTL'd HTTP responses |
+| `forensic_accounting.py` | `.cache/screener_<md5>.html` | Scraped Screener.in pages |
+| `fii_flows.py` | `fii_equity_cache.csv` | **Append-only**, deduped by date |
+| `fii_flows.py` | `fii_oi_cache.csv` | **Append-only** derivatives OI |
+| `mf_overlap.py` | ETMoney scheme cache | 30-day TTL |
+| `scripts/run_market_analysis.sh` | `logs/run_all_<timestamp>.log` | Auto-pruned after 30 days |
+
+> **Do not delete `data/`.** `data/ipo/`, `data/india_macro/` and
+> `data/scorecard_snapshots.csv` are append-only histories that **cannot be
+> rebuilt** — the exchanges and regulators publish only current windows, so
+> anything not banked at the time is gone permanently.
+
+### Where everything lands
 
 ```
 Analysis/
+├── market_analysis_report.xlsx            ← run_all.py main report
+├── market_charts.html                     ← 6 charts, tabbed
+├── custom_sector_index_chart.html
+├── fii_flows_chart.html
+├── fii_sector_flows_chart.html
+├── sector_momentum_chart.html
+├── nse_sector_rs_chart.html
+├── rrg_chart.html
+├── breakout_watchlist.xlsx                ← scanner (+ Scorecard sheet)
+├── breakout_watchlist_scorecard.html
+├── multi_pct_down.{xlsx,txt}
+├── tv_*.txt                               ← TradingView watchlists
+├── ipo_listing_gainers.{csv,xlsx}         ← IPO gainers + anchor lists
+├── ipo_anchor_report.txt
+├── india_macro_data.xlsx
+├── india_macro_dashboard.html
+├── fno_<month>.xlsx
+├── BULK_BLOCK_Deals_<ts>.xlsx             ← only when BulkBlock.py is run alone
+├── forensic_report_<SYM>_<ts>.pdf
+│
 ├── Output/
-│   ├── BULK_BLOCK_Deals_<ts>.xlsx         ← main daily report
-│   ├── custom_sector_index_chart.html
-│   ├── fii_flows_chart.html
-│   ├── fii_sector_flows_chart.html
-│   ├── sector_momentum_chart.html
-│   ├── rrg_chart_chart.html
-│   ├── india_macro_dashboard.html
-│   ├── ipo_anchor_report.txt
-│   ├── tv_breakouts_combined.txt          ← TradingView watchlists
-│   ├── tv_common.txt
-│   ├── tv_unique_mpd.txt
-│   ├── tv_unique_screener.txt
-│   ├── review_cumulative.csv
-│   └── Week1-11May/                       ← weekly breakout snapshots
-│       └── breakout_watchlist.xlsx
+│   ├── screener_data.xlsx
+│   ├── review_<ts>.xlsx  /  review_cumulative.csv
+│   ├── scorecard_review_<ts>.xlsx
+│   ├── universe_review_<date>.xlsx
+│   ├── universe_mining_<date>.xlsx
+│   └── Week<N>-<DDMon>/breakout_watchlist.xlsx   ← weekly snapshots (review INPUT)
+│
 ├── portfolio/
 │   ├── portfolio_report.xlsx              ← unified portfolio report
 │   ├── premarket_dashboard_chart.html
-│   ├── holdings_meta.csv                  ← user SL/Target levels
+│   ├── <module>.xlsx                      ← per-module standalone outputs
+│   ├── holdings_meta.csv                  ← user-maintained SL/Target levels
 │   └── mf_holdings.csv
-├── data/
-│   ├── india_macro/                       ← 28 indicator CSVs
-│   │   ├── cement_production.csv
-│   │   ├── bank_credit_total.csv
-│   │   └── ... (one per indicator)
-│   ├── scorecard_snapshots.csv            ← dated scorecard rows (feeds scorecard review)
-│   └── scorecard_history.csv              ← scorecard run history
-├── logs/
-│   └── 2026-05-XX/                        ← daily run logs
-└── .angel_scrip_master.json               ← cached scrip master (25MB)
+│
+├── data/                                  ← APPEND-ONLY, never delete
+│   ├── ipo/{nse_past_issues,bse_public_issues}.json
+│   ├── india_macro/<indicator>.csv        (28 files)
+│   ├── scorecard_snapshots.csv
+│   └── scorecard_history.csv
+│
+├── logs/<YYYY-MM-DD>/                     ← pruned after 30 days
+└── .cache/, .angel_scrip_master.json      ← disposable
 ```
 
 ---
@@ -1403,38 +1933,13 @@ All data flows through public/free sources. No paid market-data feeds.
 | **BSE HTML scrape** | `BulkBlock.py` (fallback) | None |
 | **NSDL FPI fortnightly** | `fii_sector_flows.py` | None |
 | **NSDL FPI monthly** | `fii_flows.py` | None |
-| **NSE BhavCopy (F&O)** | `fno_max_oi.py` (EOD mode) | None |
+| **NSE BhavCopy (F&O)** | `fno_max_oi.py` (default EOD source) | None |
 | **Tickertape Screener API** | `fii_stake_tracker.py`, `pledge_promoter.py` | None |
 | **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py`, `screener/app.py` | `.env`: `SCREENER_*` |
 | **chittorgarh.com** | `ipo_anchor_tracker.py` (anchor tables) | None |
 | **ETMoney** | `mf_overlap.py` (MF scheme lists) | None |
 | **RBI / AMFI / CEA / PPAC / NSDL / CDSL** | `india_macro.py` (28 indicators) | None |
 | **NSE corporate APIs** | `events_calendar.py`, `forensic_accounting.py` | None |
-
----
-
-## Output File Lifecycle
-
-| File | Producer | Lifecycle |
-|---|---|---|
-| `BULK_BLOCK_Deals_<timestamp>.xlsx` | `run_all.py` / `BulkBlock.py` | New each run |
-| `market_charts.html` | `run_all.py` | Overwritten |
-| `Output/breakout_watchlist.xlsx` | `breakout_scanner_angel.py` | Overwritten |
-| `breakout_watchlist_scorecard.html` | `breakout_scanner_scorecard.py` (via scanner) | Overwritten |
-| `data/scorecard_snapshots.csv` | `breakout_scanner_scorecard.py` | Append-only |
-| `fno_max_oi.xlsx` | `fno_max_oi.py` | Overwritten |
-| `india_macro_data.xlsx` | `india_macro.py` | Overwritten |
-| `india_macro_dashboard.html` | `india_macro.py` | Overwritten |
-| `portfolio/portfolio_report.xlsx` | `portfolio_run_all.py` | Overwritten |
-| `forensic_report_<TICKER>_<ts>.pdf` | `forensic_accounting.py` | New per run |
-| `logs/run_all_<timestamp>.log` | `run_market_analysis.sh` | Auto-pruned > 30 days |
-| `Output/review_<ts>.xlsx` | `breakout_review.py` | New per run |
-| `Output/review_cumulative.csv` | `breakout_review.py` | Append-only |
-| `Output/scorecard_review_<ts>.xlsx` | `breakout_scorecard_review.py` | New per run |
-| `Output/universe_review_<ts>.xlsx` | `universe_review.py` | New per run |
-| `Output/universe_mining_<ts>.xlsx` | `universe_mining.py` | New per run |
-| `ipo_anchor_report.txt` | `ipo_anchor_tracker.py` | TradingView watchlist, overwritten |
-| `tv_breakouts_combined.txt` | `breakout_scanner_angel.py` | TradingView watchlist, overwritten |
 
 ---
 
@@ -1477,6 +1982,129 @@ Different scripts use different benchmarks depending on the analysis level:
 | BSE deals empty | BSE JSON API sometimes 0-rows pre-EOD; HTML fallback kicks in |
 | Scrip master download hangs | Delete `.angel_scrip_master.json` and re-run |
 | Delisted stock errors | Gracefully skipped — check logs for specific tickers |
+
+---
+
+## Complete Command Reference
+
+Every runnable entry point in one place. All commands assume:
+
+```bash
+cd /Users/ankit.srivastava/Documents/Analysis && source .venv/bin/activate
+```
+
+### Orchestrators
+
+```bash
+python3 run_all.py                                  # 8 scenarios + email
+python3 run_all.py --no-email                       # 8 scenarios, no email
+python3 run_all.py --skip bulk_block rrg            # skip named scenarios
+# scenario names: bulk_block sector_index fii_flows fii_sector_flows
+#                 sector_momentum nse_sector_rs rrg ipo_anchor
+
+python3 portfolio/portfolio_run_all.py              # 9 scenarios + email
+python3 portfolio/portfolio_run_all.py --no-email   # 9 scenarios, no email
+```
+
+### Scenario modules (also runnable standalone)
+
+```bash
+python3 BulkBlock.py [--dry-run]                           # --dry-run via sys.argv
+python3 custom_sector_index.py [-c FILE] [-o PREFIX]
+python3 fii_flows.py            [-o PREFIX] [--refresh]
+python3 fii_sector_flows.py     [-o PREFIX]
+python3 sector_momentum.py      [-c FILE] [-o PREFIX]
+python3 nse_ready_sectors.py    [-o PREFIX]
+python3 rrg_chart.py            [-o PREFIX]
+python3 ipo_anchor_tracker.py   [--months 14] [--limit 0] [--no-anchors] [--out PATH]
+python3 fii_stake_tracker.py    [-o PREFIX]            # default prefix: fii_stake_tracker
+```
+
+### Breakout family
+
+```bash
+python3 breakout_scanner_angel.py \
+    [--max 0] [--min-score 50] [--lookback 252] [--no-strict] \
+    [--high-conviction] [--symbols-csv FILE] [--screener-url URL] \
+    [--skip-mpd] [--skip-screener] [--out-tag TAG]
+
+python3 breakout_scanner_scorecard.py --workbook PATH [--lookback 400] [--no-forensic]
+
+python3 multi_pct_down.py \
+    [--min 2.0] [--max 21.0] [--skip nse nse-sme bse-sme] \
+    [--workers 4] [--max-symbols 0] [--out DIR] [-o PREFIX]
+```
+
+### Review family (run on a "let's review" day, in this order)
+
+```bash
+python3 breakout_review.py           [--weeks 1 2] [--full]
+python3 breakout_deep_analysis.py    [REVIEW_XLSX]
+python3 universe_review.py           [--weeks 1 2 3] [--min-days 15]
+python3 universe_mining.py           [--weeks 1 2 3] [--min-days 15] [--min-cover 30]
+python3 breakout_scorecard_review.py [--min-days 7] [--tradeable 15.0]
+```
+
+### Standalone analysis
+
+```bash
+python3 ipo_listing_gainers.py \
+    [--start 2025-01-01] [--end TODAY] [--threshold 50] [--window-days 30] \
+    [--workers 5] [--limit 0] [--bse-recent] [--anchor-dir ./anchor_pdfs] \
+    [--freq-words 2] [--no-ocr] [--out CSV] [--xlsx XLSX]
+
+python3 fno_max_oi.py       [--expiry weekly|monthly] [--live] [--new]
+
+python3 forensic_accounting.py SYMBOL [--compare PEER1,PEER2]
+
+python3 india_macro.py                          # rebuild dashboard, no fetch
+python3 india_macro.py --fetch-direct           # production run
+python3 india_macro.py --fetch-all              # OGD + direct + browser
+python3 india_macro.py --fetch-browser
+python3 india_macro.py --list
+python3 india_macro.py --print INDICATOR_ID
+python3 india_macro.py --add INDICATOR_ID 2025-05 38.5
+python3 india_macro.py --ogd-test UUID
+python3 india_macro.py --ogd-find QUERY
+```
+
+### Portfolio modules (each takes `--out`, all defaults are correct)
+
+```bash
+python3 portfolio/portfolio_tracker.py
+python3 portfolio/position_health.py
+python3 portfolio/sl_target_tracker.py
+python3 portfolio/risk_metrics.py
+python3 portfolio/correlation_clusters.py
+python3 portfolio/pledge_promoter.py
+python3 portfolio/mf_overlap.py
+python3 portfolio/events_calendar.py
+python3 portfolio/premarket_dashboard.py
+```
+
+### Web apps (long-running servers, no flags)
+
+```bash
+python3 tradingcharts/run.py                    # port 5050
+python3 tradingcharts/multiscreen/run.py        # port 5051 (needs 5050 up)
+python3 screener/run.py                         # port 5052
+
+PORT=5060 python3 tradingcharts/app.py                        # override port
+MULTISCREEN_PORT=5055 python3 tradingcharts/multiscreen/server.py
+```
+
+### Scheduling
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.analysis.runall   # trigger now
+launchctl bootout   gui/$(id -u)/com.analysis.runall      # disable
+tail -f logs/run_all_*.log                                # watch
+```
+
+### Not runnable (library modules — import only)
+
+`data_provider.py` · `angel_client.py` · `ohlcv_cache.py` · `email_sender.py` ·
+`portfolio/holdings_loader.py` · `portfolio/_prices.py`
 
 ---
 

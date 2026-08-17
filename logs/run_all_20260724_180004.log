@@ -1,0 +1,10 @@
+===============================================================
+Daily Market Analysis Run — Fri Jul 24 18:00:04 IST 2026
+===============================================================
+Traceback (most recent call last):
+  File "/Users/ankit.srivastava/Documents/Analysis/run_all.py", line 102, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+---------------------------------------------------------------
+Exit code: 1
+Finished : Fri Jul 24 18:00:04 IST 2026

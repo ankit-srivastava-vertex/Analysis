@@ -1,12 +1,12 @@
 """
-Breakout Review — Walk-Forward Validation
+Breakout Review — Walk-Forward Validation 
 ==========================================
 
 Reviews weekly breakout scanner snapshots to evaluate prediction accuracy.
 Compares breakout candidates against actual post-scan price action to
 measure hit rate and identify what separates true breakouts from false signals.
 
-WORKFLOW
+WORKFLOW 
 -------
   1. User saves breakout_watchlist.xlsx into Output/WeekN/ each week
   2. User says "let's review" → this script runs
@@ -67,6 +67,8 @@ BO_DAYS_ABOVE_R = 2        # must close above R for ≥N sessions
 BO_VOL_MULT = 1.3           # breakout-day volume ≥ 1.3× 50DMA avg
 MISSED_RALLY_PCT = 10.0     # universe stock rallied >10% = potential miss
 FETCH_LOOKBACK_DAYS = 90    # fetch enough history to cover ~8 weeks
+SPLIT_ARTIFACT_RATIO = 0.5  # post-scan HIGH < 50% of scan close => split/bonus
+                            #   artifact in unadjusted data, not a real loss
 
 
 # ─── Discovery & loading ────────────────────────────────────────────────────
@@ -114,16 +116,66 @@ def _load_week(week_num, folder_name):
 
 # ─── Data fetching ──────────────────────────────────────────────────────────
 
+def _cache_path(lookback_days):
+    """Per-day, per-lookback shared OHLCV cache file (same for all review scripts)."""
+    return os.path.join(OUTPUT_DIR,
+                        f".ohlcv_cache_{TODAY:%Y%m%d}_lb{int(lookback_days)}.pkl")
+
+
 def _fetch_ohlcv_bulk(tickers, lookback_days=FETCH_LOOKBACK_DAYS):
-    """Fetch recent OHLCV for all tickers via Angel One."""
-    from angel_client import angel_download_many
+    """Fetch recent OHLCV via Angel One, backed by a shared same-day cache.
 
-    end = TODAY + datetime.timedelta(days=1)
-    start = TODAY - datetime.timedelta(days=int(lookback_days * 1.5))
-    print(f"  Fetching OHLCV for {len(tickers)} tickers via Angel One ...")
-    raw = angel_download_many(tickers, start, end)
+    All review scripts import this function, so the cache is shared across
+    breakout_review / universe_review / universe_mining within the same day:
+    only tickers not already cached are fetched. The cache file is keyed by
+    date + lookback so it auto-invalidates when either changes.
+    """
+    import pickle
 
-    usable = {k: v for k, v in raw.items() if v is not None and not v.empty}
+    tickers = list(dict.fromkeys(tickers))  # dedupe, keep order
+    cache_file = _cache_path(lookback_days)
+
+    # drop stale cache files from previous days
+    try:
+        keep = os.path.basename(cache_file)
+        for f in os.listdir(OUTPUT_DIR):
+            if f.startswith(".ohlcv_cache_") and f.endswith(".pkl") and f != keep \
+               and f"_{TODAY:%Y%m%d}_" not in f:
+                os.remove(os.path.join(OUTPUT_DIR, f))
+    except Exception:
+        pass
+
+    cache = {}
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "rb") as fh:
+                cache = pickle.load(fh)
+        except Exception:
+            cache = {}
+
+    missing = [t for t in tickers if t not in cache]
+    if missing:
+        from angel_client import angel_download_many
+        end = TODAY + datetime.timedelta(days=1)
+        start = TODAY - datetime.timedelta(days=int(lookback_days * 1.5))
+        cached_n = len(tickers) - len(missing)
+        note = f" ({cached_n} from cache)" if cached_n else ""
+        print(f"  Fetching OHLCV for {len(missing)} tickers via Angel One{note} ...")
+        raw = angel_download_many(missing, start, end)
+        # store every requested ticker (None marks 'fetched, no data' to avoid refetch)
+        for t in missing:
+            cache[t] = raw.get(t)
+        try:
+            with open(cache_file, "wb") as fh:
+                pickle.dump(cache, fh)
+        except Exception as e:
+            print(f"  (cache write skipped: {e})")
+    else:
+        print(f"  OHLCV: all {len(tickers)} tickers served from cache "
+              f"({os.path.basename(cache_file)})")
+
+    usable = {t: cache[t] for t in tickers
+              if cache.get(t) is not None and not cache[t].empty}
     print(f"  Got usable data for {len(usable)}/{len(tickers)} tickers")
     return usable
 
@@ -212,7 +264,13 @@ def _classify_candidate(row, ohlcv_data, scan_date):
         vol_confirmed = bool((bo_days_df["Volume"] > v50 * BO_VOL_MULT).any())
 
     # ── Classification logic ──
-    if days_above >= BO_DAYS_ABOVE_R and vol_confirmed:
+    # DATA_ERROR guard: if even the post-scan HIGH is >50% below the scan close,
+    # this is almost certainly a corporate-action artifact (stock split / bonus)
+    # in unadjusted OHLCV — e.g. ZFCVINDIA 16086->3044, MBAPL 555->127 — NOT a
+    # real loss. Flag & exclude so it doesn't pollute FALSE_SIGNAL / loss stats.
+    if scan_close > 0 and max_high < scan_close * SPLIT_ARTIFACT_RATIO:
+        status = "DATA_ERROR"
+    elif days_above >= BO_DAYS_ABOVE_R and vol_confirmed:
         status = "TRUE_BREAKOUT"
     elif days_above >= BO_DAYS_ABOVE_R:
         status = "BREAKOUT_LOW_VOL"
@@ -378,7 +436,8 @@ def _update_cumulative(all_results, review_date):
     for (week, source), grp in df.groupby(["week", "source"]):
         total = len(grp)
         no_data = int((grp["status"] == "NO_DATA").sum())
-        valid = total - no_data
+        data_error = int((grp["status"] == "DATA_ERROR").sum())
+        valid = total - no_data - data_error
         true_bo = int(grp["status"].isin(["TRUE_BREAKOUT"]).sum())
         bo_low_vol = int(grp["status"].isin(["BREAKOUT_LOW_VOL"]).sum())
         attempted = int((grp["status"] == "ATTEMPTED").sum())
@@ -400,6 +459,7 @@ def _update_cumulative(all_results, review_date):
             "holding": holding,
             "false_signal": false_sig,
             "no_data": no_data,
+            "data_error": data_error,
             "hit_rate_strict_%": hit_strict,
             "hit_rate_loose_%": hit_loose,
         })
@@ -553,7 +613,7 @@ def main():
                 s = r["status"]
                 status_counts[s] = status_counts.get(s, 0) + 1
             for status in ["TRUE_BREAKOUT", "BREAKOUT_LOW_VOL", "ATTEMPTED",
-                           "HOLDING", "FALSE_SIGNAL", "NO_DATA"]:
+                           "HOLDING", "FALSE_SIGNAL", "DATA_ERROR", "NO_DATA"]:
                 if status in status_counts:
                     print(f"    {status:20s}: {status_counts[status]}")
 
@@ -600,7 +660,8 @@ def main():
     if not res_df.empty:
         total = len(res_df)
         no_data = int((res_df["status"] == "NO_DATA").sum())
-        valid = total - no_data
+        data_error = int((res_df["status"] == "DATA_ERROR").sum())
+        valid = total - no_data - data_error
         true_bo = int(res_df["status"].isin(["TRUE_BREAKOUT"]).sum())
         bo_low = int(res_df["status"].isin(["BREAKOUT_LOW_VOL"]).sum())
         attempted = int((res_df["status"] == "ATTEMPTED").sum())
@@ -620,6 +681,7 @@ def main():
                   f"  ({holding/valid*100:.1f}%)")
             print(f"  FALSE_SIGNAL              : {false_sig:>4d}"
                   f"  ({false_sig/valid*100:.1f}%)")
+        print(f"  DATA_ERROR (split/bonus)  : {data_error:>4d}")
         print(f"  NO_DATA                   : {no_data:>4d}")
 
         if valid:
@@ -692,7 +754,7 @@ def main():
         if not res_df.empty:
             summary_rows = []
             for (w, src), grp in res_df.groupby(["week", "source"]):
-                valid_g = grp[grp["status"] != "NO_DATA"]
+                valid_g = grp[~grp["status"].isin(["NO_DATA", "DATA_ERROR"])]
                 n_valid = len(valid_g)
                 n_true = int(valid_g["status"].isin(
                     ["TRUE_BREAKOUT"]).sum())

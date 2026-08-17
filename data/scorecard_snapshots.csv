@@ -1,0 +1,509 @@
+date,symbol,Sector,Close,entry,ValuationScore,MomentumScore,StageScore,QualityScore,QualityFlag,Stage,Substage,ScanScore,rr,base_days,base_range_pct,distance_pct,CompositeScore,Verdict
+2026-07-02,505036.BO,,2276.6,2256.15,,84.1,80.0,,,2.0,2B,63.51,1.54,54.0,25.8,1.38,49.4,Watch (no fundamentals) ·
+2026-07-02,505978.BO,,1090.9,1080.0,,86.9,80.0,,,2.0,2B,58.91,1.07,53.0,26.83,0.15,50.4,Watch (no fundamentals) ·
+2026-07-02,513472.BO,,529.9,535.05,,78.9,40.0,,,3.0,topping,67.1,1.5,143.0,28.12,-0.95,37.6,Watch (no fundamentals) ·
+2026-07-02,540718.BO,,1158.35,1185.15,,80.1,80.0,,,2.0,2B,68.83,1.91,171.0,12.06,-2.09,48.0,Watch (no fundamentals) ·
+2026-07-02,ACE.NS,Industrials,1016.7,987.85,61.8,51.3,60.0,100.0,OK,1.0,basing,50.73,1.41,175.0,31.14,-1.85,63.4,Watch ·
+2026-07-02,AGARWALEYE.NS,Health Care,476.6,474.5,7.1,52.2,60.0,100.0,OK,1.0,basing (vol contracting),59.28,1.09,148.0,20.72,-2.93,50.0,Watch ↑
+2026-07-02,AIMTRON.NS,Information Technology,1242.0,1247.05,9.4,87.5,80.0,100.0,OK,2.0,2B,58.37,1.84,56.0,26.94,-2.37,68.0,Hold / Add on pullback ·
+2026-07-02,ALIVUS.NS,Health Care,1159.2,1116.2,60.5,80.3,80.0,100.0,OK,2.0,2B / Late_Stage_Base,61.79,0.54,75.0,14.13,-2.3,78.2,Hold / Add on pullback ↑
+2026-07-02,ANGELONE.NS,Financials,346.15,328.75,45.1,81.0,80.0,70.0,WATCH,2.0,2B,66.02,3.17,68.0,21.14,0.24,70.1,Hold / Add on pullback ·
+2026-07-02,ARMANFIN.NS,Financials,1711.0,1660.3,44.1,58.3,40.0,100.0,OK,3.0,topping,68.0,2.1,173.0,36.18,0.82,56.4,Trim / Hold-tight ·
+2026-07-02,ASHIANA.NS,Real Estate,387.9,385.6,,74.3,80.0,0.0,FAIL,2.0,2B,67.15,1.34,52.0,17.84,0.3,0.0,Avoid (quality) ↓
+2026-07-02,BHARATSE.NS,Consumer Discretionary,240.76,187.45,51.4,94.7,40.0,100.0,OK,3.0,topping,53.54,1.57,75.0,27.3,2.77,71.0,Trim / Hold-tight ·
+2026-07-02,CARERATING.NS,Financials,1669.0,1680.0,32.4,54.5,40.0,100.0,OK,3.0,topping,74.97,2.13,153.0,26.67,-0.62,52.2,Trim / Hold-tight ·
+2026-07-02,CARYSIL.NS,Consumer Discretionary,1176.0,1188.1,40.3,87.7,80.0,100.0,OK,2.0,2B,58.42,0.55,35.0,18.03,-2.56,75.8,Hold / Add on pullback ·
+2026-07-02,CENTENKA.NS,Consumer Discretionary,533.25,511.05,81.7,67.9,80.0,100.0,OK,2.0,2B / Late_Stage_Base,65.76,3.9,143.0,39.85,1.36,79.2,Hold / Add on pullback ·
+2026-07-02,CHENNPETRO.NS,Energy,1134.1,1153.8,74.2,85.7,80.0,100.0,OK,2.0,2B,58.84,1.32,98.0,27.87,-3.36,83.5,Hold / Add on pullback ·
+2026-07-02,CNL.NS,Information Technology,736.0,735.0,80.4,71.8,60.0,100.0,OK,1.0,basing (vol contracting),65.78,1.82,178.0,32.9,1.24,75.2,Accumulate ·
+2026-07-02,CRAFTSMAN.NS,Industrials,9260.5,9388.0,13.6,86.2,80.0,85.0,WATCH,2.0,2B,67.23,1.05,52.0,18.27,-1.16,66.3,Hold / Add on pullback ·
+2026-07-02,DIACABS.NS,Industrials,210.29,208.54,19.9,90.9,80.0,100.0,OK,2.0,2B,59.99,1.19,45.0,18.01,1.79,71.8,Hold / Add on pullback ·
+2026-07-02,DIAMONDYD.NS,Consumer Staples,1192.2,1111.6,4.3,79.6,60.0,100.0,OK,1.0,basing (vol contracting),56.86,3.05,130.0,33.07,-3.8,58.9,Watch ↓
+2026-07-02,DIVGIITTS.NS,Industrials,980.8,873.35,13.3,96.6,80.0,100.0,OK,2.0,2B,56.61,1.03,28.0,15.34,0.61,72.1,Hold / Add on pullback ·
+2026-07-02,DLINKINDIA.NS,Information Technology,523.75,518.5,75.5,67.1,80.0,100.0,OK,2.0,2B,57.28,0.93,45.0,15.64,-0.57,77.4,Hold / Add on pullback ·
+2026-07-02,FINEORG.NS,Materials,5192.5,5325.0,19.6,68.9,80.0,100.0,OK,2.0,2B,66.78,0.93,68.0,18.35,-0.23,64.0,Hold / Add on pullback ·
+2026-07-02,FRESHARA.NS,Consumer Staples,252.3,236.0,26.8,91.2,80.0,0.0,FAIL,2.0,2B,53.56,1.04,132.0,39.04,-3.94,0.0,Avoid (quality) ↓
+2026-07-02,GAEL.NS,Consumer Staples,165.35,161.87,46.1,85.6,80.0,100.0,OK,2.0,2B,74.81,1.33,77.0,20.02,0.03,76.5,Hold / Add on pullback ↓
+2026-07-02,GANESHBE.NS,Materials,103.69,103.26,84.5,72.8,80.0,100.0,OK,2.0,2B,53.26,0.84,74.0,29.17,-2.05,81.6,Hold / Add on pullback ·
+2026-07-02,GEOJITFSL.NS,Financials,78.97,77.17,72.0,57.3,60.0,100.0,OK,1.0,basing (vol contracting),62.99,2.83,178.0,39.67,-1.54,68.1,Accumulate ·
+2026-07-02,GHCLTEXTIL.NS,Consumer Discretionary,104.06,94.91,76.4,79.8,80.0,100.0,OK,2.0,2B / Late_Stage_Base,71.42,3.6,70.0,30.9,0.48,82.0,Hold / Add on pullback ·
+2026-07-02,GKWLIMITED.NS,Industrials,1715.0,1748.9,93.2,48.4,60.0,100.0,OK,1.0,basing (vol contracting),57.74,4.11,175.0,31.28,1.45,70.2,Accumulate ·
+2026-07-02,GLOSTERLTD.NS,Consumer Discretionary,749.45,724.0,30.8,70.1,80.0,0.0,FAIL,2.0,2B,59.72,1.88,54.0,20.06,1.7,0.0,Avoid (quality) ·
+2026-07-02,GNFC.NS,Materials,534.15,546.45,72.5,61.8,60.0,100.0,OK,1.0,basing (vol contracting),58.33,0.97,41.0,24.09,0.28,69.8,Accumulate ·
+2026-07-02,GOODLUCK.NS,Materials,1490.7,1474.6,43.6,85.8,80.0,100.0,OK,2.0,2B,71.06,1.13,52.0,17.55,0.86,75.9,Hold / Add on pullback ·
+2026-07-02,GREENLAM.NS,Industrials,260.0,257.2,9.5,58.7,60.0,85.0,WATCH,1.0,basing (vol contracting),58.3,2.24,175.0,29.32,3.97,50.7,Watch ·
+2026-07-02,HARSHA.NS,Industrials,415.65,409.85,58.7,72.3,60.0,100.0,OK,1.0,basing,55.34,2.47,174.0,39.22,-3.14,70.0,Watch ·
+2026-07-02,HEALTHX.NS,Health Care,312.0,319.1,1.8,60.3,60.0,100.0,OK,1.0,basing (vol contracting),59.22,1.63,146.0,27.26,1.74,51.6,Watch ↑
+2026-07-02,HNDFDS.NS,Consumer Staples,563.0,549.2,26.8,73.3,60.0,85.0,WATCH,1.0,basing (vol contracting),67.93,2.64,137.0,19.6,1.19,60.1,Watch ↓
+2026-07-02,IGPL.NS,Materials,452.25,449.7,37.4,61.0,80.0,100.0,OK,2.0,2B,56.02,0.63,80.0,19.43,-2.59,65.7,Hold / Add on pullback ·
+2026-07-02,IIFLCAPS.NS,Financials,338.6,337.9,77.7,59.3,40.0,100.0,OK,3.0,topping,60.04,25.67,139.0,36.67,3.29,65.2,Trim / Hold-tight ·
+2026-07-02,IKS.NS,Health Care,1837.5,1700.0,39.3,79.2,60.0,100.0,OK,1.0,basing,80.29,4.47,175.0,30.07,-0.13,67.5,Watch ↑
+2026-07-02,INDGN.NS,Industrials,512.4,516.85,47.7,30.9,60.0,100.0,OK,1.0,basing (vol contracting),59.0,6.23,173.0,26.96,0.47,52.7,Watch ·
+2026-07-02,INDNIPPON.NS,Consumer Discretionary,996.0,957.5,72.4,75.2,60.0,100.0,OK,1.0,basing,55.62,2.11,132.0,33.21,-2.57,74.4,Watch ·
+2026-07-02,JAMNAAUTO.NS,Consumer Discretionary,139.46,132.86,65.1,77.9,80.0,100.0,OK,2.0,2B,66.33,1.0,167.0,33.09,-1.32,78.5,Hold / Add on pullback ·
+2026-07-02,JBMA.NS,Consumer Discretionary,712.3,684.5,5.6,71.2,60.0,85.0,WATCH,1.0,basing (vol contracting),62.31,2.94,173.0,38.93,-1.87,54.1,Watch ·
+2026-07-02,JINDALSAW.NS,Industrials,262.9,260.06,82.9,77.2,80.0,100.0,OK,2.0,2B,52.35,0.59,67.0,22.45,-4.25,82.7,Hold / Add on pullback ·
+2026-07-02,KICL.NS,Financials,5422.0,5299.0,26.9,65.3,40.0,100.0,OK,3.0,topping,54.49,2.2,174.0,29.81,-2.1,54.6,Trim / Hold-tight ·
+2026-07-02,KOPRAN.NS,Health Care,187.84,190.0,50.4,65.3,80.0,100.0,OK,2.0,2B,57.12,1.14,41.0,30.73,-2.36,70.5,Hold / Add on pullback ↑
+2026-07-02,KPIL.NS,Utilities,1370.2,1346.1,34.8,80.5,60.0,100.0,OK,1.0,basing,53.4,2.06,122.0,36.38,-3.52,66.9,Watch ·
+2026-07-02,KRISHIVAL.NS,Consumer Staples,404.5,405.7,38.0,59.2,60.0,100.0,OK,1.0,basing (vol contracting),60.26,5.29,172.0,32.69,-3.72,60.2,Watch ↓
+2026-07-02,KSL.NS,Materials,882.9,844.55,59.7,62.9,60.0,100.0,OK,1.0,basing,57.32,1.15,67.0,16.91,1.17,66.9,Watch ·
+2026-07-02,KTKBANK.NS,Financials,267.55,268.6,92.8,82.8,80.0,85.0,WATCH,2.0,2B,51.79,3.12,56.0,15.87,3.83,84.9,Hold / Add on pullback ·
+2026-07-02,LMW.NS,Industrials,15798.0,15998.0,0.0,59.5,60.0,100.0,OK,1.0,basing (vol contracting),72.6,5.87,139.0,31.16,1.05,50.8,Watch ·
+2026-07-02,LRRPL.NS,Consumer Discretionary,90.0,95.0,31.4,84.0,60.0,100.0,OK,1.0,basing,62.49,1.04,39.0,24.85,0.8,67.2,Watch ·
+2026-07-02,MAHLIFE.NS,Real Estate,372.2,367.05,,47.4,60.0,100.0,OK,1.0,basing (vol contracting),75.17,1.52,157.0,30.58,-0.05,46.6,Watch ↓
+2026-07-02,MANINDS.NS,Industrials,597.1,574.4,47.5,84.8,80.0,100.0,OK,2.0,2B,58.43,0.73,63.0,25.48,-1.93,76.6,Hold / Add on pullback ·
+2026-07-02,MANORAMA.NS,Consumer Staples,1581.2,1587.1,31.5,75.2,80.0,0.0,FAIL,2.0,2B,59.45,2.09,139.0,33.53,-2.71,0.0,Avoid (quality) ↓
+2026-07-02,MARKSANS.NS,Health Care,267.2,263.4,50.7,74.7,80.0,100.0,OK,2.0,2B,72.01,1.01,33.0,17.87,0.49,73.8,Hold / Add on pullback ↑
+2026-07-02,MBAPL.NS,Materials,604.3,562.25,27.4,84.3,80.0,70.0,WATCH,2.0,2B,75.29,1.54,82.0,14.67,1.03,66.9,Hold / Add on pullback ·
+2026-07-02,MENONBE.NS,Consumer Discretionary,160.08,161.93,54.7,85.9,80.0,100.0,OK,2.0,2B,56.83,0.83,46.0,30.42,-1.53,78.7,Hold / Add on pullback ·
+2026-07-02,METROPOLIS.NS,Health Care,544.3,521.8,12.3,76.9,80.0,100.0,OK,2.0,2B,54.88,6.18,175.0,37.25,-3.42,65.0,Hold / Add on pullback ↑
+2026-07-02,NAHARINDUS.NS,Consumer Discretionary,118.1,116.8,86.6,52.4,60.0,100.0,OK,1.0,basing (vol contracting),71.83,9.06,178.0,39.31,0.07,70.0,Accumulate ·
+2026-07-02,NAZARA.NS,Consumer Discretionary,305.25,303.75,20.7,54.0,60.0,100.0,OK,1.0,basing (vol contracting),50.39,1.57,175.0,33.59,-3.66,54.1,Watch ·
+2026-07-02,NIBE.NS,Industrials,1656.7,1642.1,0.0,63.2,80.0,100.0,OK,2.0,2B,50.44,0.89,35.0,30.11,-1.91,57.1,Hold / Add on pullback ·
+2026-07-02,NITINSPIN.NS,Consumer Discretionary,560.0,559.95,76.8,84.3,80.0,100.0,OK,2.0,2B,70.28,1.26,47.0,16.67,0.66,83.7,Hold / Add on pullback ·
+2026-07-02,PLASTIBLEN.NS,Materials,181.3,181.15,74.3,49.9,60.0,100.0,OK,1.0,basing (vol contracting),52.16,0.64,34.0,10.65,-1.41,66.0,Accumulate ·
+2026-07-02,PNBHOUSING.NS,Financials,1055.6,1034.0,75.9,67.7,80.0,85.0,WATCH,2.0,2B,71.73,3.07,175.0,36.62,-0.86,75.4,Hold / Add on pullback ·
+2026-07-02,PREMIERPOL.NS,Consumer Discretionary,68.4,65.82,66.3,78.7,80.0,100.0,OK,2.0,2B,64.66,1.46,109.0,27.6,1.93,79.1,Hold / Add on pullback ·
+2026-07-02,PTCIL.NS,Materials,17487.0,17193.0,0.0,69.1,40.0,100.0,OK,3.0,topping,57.32,6.54,167.0,30.55,1.89,49.2,Trim / Hold-tight ·
+2026-07-02,REDINGTON.NS,Information Technology,279.2,275.52,87.1,55.5,60.0,100.0,OK,1.0,basing (vol contracting),59.42,1.53,145.0,36.47,-0.62,71.2,Accumulate ·
+2026-07-02,REDTAPE.NS,Consumer Discretionary,137.33,135.2,43.7,62.1,60.0,100.0,OK,1.0,basing (vol contracting),59.62,4.97,167.0,36.78,3.49,62.7,Watch ·
+2026-07-02,RELIGARE.NS,Financials,264.0,269.0,17.2,68.1,60.0,100.0,OK,1.0,basing (vol contracting),69.51,1.46,173.0,31.19,-0.5,58.1,Watch ·
+2026-07-02,RIIL.NS,Energy,814.85,834.85,12.2,44.7,60.0,100.0,OK,1.0,basing,56.45,1.94,178.0,35.06,-0.71,48.7,Watch ·
+2026-07-02,SATIN.NS,Financials,259.68,235.89,62.3,88.2,80.0,85.0,WATCH,2.0,2B,53.22,1.92,48.0,17.05,3.66,79.2,Hold / Add on pullback ·
+2026-07-02,SBCL.NS,Materials,763.2,746.95,13.9,86.8,80.0,100.0,OK,2.0,2B,53.29,1.55,34.0,16.43,3.78,68.9,Hold / Add on pullback ·
+2026-07-02,SGFIN.NS,Financials,661.1,602.35,50.0,87.8,80.0,85.0,WATCH,2.0,2B,56.31,1.6,45.0,13.92,2.47,76.0,Hold / Add on pullback ·
+2026-07-02,SGIL.NS,Industrials,562.6,556.3,19.1,64.6,60.0,85.0,WATCH,1.0,basing (vol contracting),65.78,3.66,180.0,35.4,1.41,55.1,Watch ·
+2026-07-02,SHREEPUSHK.NS,Materials,399.3,404.35,49.3,70.9,60.0,100.0,OK,1.0,basing (vol contracting),54.58,2.69,180.0,36.11,3.1,67.1,Watch ·
+2026-07-02,SHYAMMETL.NS,Materials,962.35,952.05,33.0,74.7,80.0,100.0,OK,2.0,2B,53.03,3.32,33.0,8.18,3.95,69.4,Hold / Add on pullback ·
+2026-07-02,SKIPPER.NS,Utilities,566.05,528.55,34.1,75.2,80.0,100.0,OK,2.0,2B,54.47,4.55,69.0,29.08,-2.49,69.8,Hold / Add on pullback ·
+2026-07-02,SMARTWORKS.NS,Real Estate,483.0,492.3,,46.9,60.0,85.0,WATCH,1.0,basing (vol contracting),52.98,1.67,166.0,28.55,-2.18,44.2,Watch ↓
+2026-07-02,SRGHFL.NS,Financials,304.0,295.15,60.4,54.6,60.0,100.0,OK,1.0,basing (vol contracting),57.22,1.54,159.0,35.02,-2.61,64.2,Accumulate ·
+2026-07-02,SSWL.NS,Consumer Discretionary,248.06,229.51,60.8,66.3,60.0,100.0,OK,1.0,basing,59.32,1.52,173.0,32.39,-1.14,68.4,Watch ·
+2026-07-02,STEELCAS.NS,Materials,299.95,300.35,28.0,92.0,80.0,100.0,OK,2.0,2B,52.62,1.11,73.0,28.34,1.25,74.2,Hold / Add on pullback ·
+2026-07-02,SUNDRMFAST.NS,Consumer Discretionary,946.55,932.95,31.2,47.4,60.0,100.0,OK,1.0,basing,55.35,1.79,178.0,30.56,1.21,54.4,Watch ·
+2026-07-02,SUVEN.NS,Health Care,297.95,277.0,0.0,82.9,80.0,100.0,OK,2.0,2B,63.07,1.01,40.0,24.19,0.5,64.0,Hold / Add on pullback ↑
+2026-07-02,TATATECH.NS,Information Technology,712.4,715.0,18.7,67.1,80.0,100.0,OK,2.0,2B,64.63,10.73,172.0,39.6,-2.31,63.2,Hold / Add on pullback ·
+2026-07-02,TMB.NS,Financials,746.1,737.0,91.5,86.9,80.0,85.0,WATCH,2.0,2B,56.21,1.91,139.0,32.22,-3.89,86.0,Hold / Add on pullback ·
+2026-07-02,TVSSRICHAK.NS,Consumer Discretionary,4327.3,4119.0,30.7,77.1,40.0,100.0,OK,3.0,topping,66.67,3.37,152.0,37.78,1.85,59.7,Trim / Hold-tight ·
+2026-07-02,USHAMART.NS,Materials,502.4,484.35,24.7,81.3,80.0,100.0,OK,2.0,2B,55.57,2.24,56.0,16.22,2.81,69.6,Hold / Add on pullback ·
+2026-07-02,V2RETAIL.NS,Consumer Discretionary,229.79,229.0,25.4,80.1,40.0,85.0,WATCH,3.0,topping,53.33,2.12,145.0,39.89,-4.51,57.1,Trim / Hold-tight ·
+2026-07-02,VSSL.NS,Materials,273.1,280.2,40.5,47.9,60.0,100.0,OK,1.0,basing (vol contracting),69.72,3.33,178.0,35.53,0.35,56.9,Watch ·
+2026-07-02,VSTIND.NS,Consumer Staples,262.0,260.5,67.7,44.2,60.0,100.0,OK,1.0,basing (vol contracting),54.59,6.74,179.0,32.28,3.21,62.4,Accumulate ↓
+2026-07-02,VTL.NS,Consumer Discretionary,657.65,640.0,43.2,83.8,80.0,100.0,OK,2.0,2B,66.05,1.65,54.0,16.72,0.72,75.1,Hold / Add on pullback ·
+2026-07-02,WALCHANNAG.NS,Industrials,246.75,274.1,34.9,71.1,80.0,0.0,FAIL,2.0,2B,52.05,1.1,54.0,36.55,-1.15,0.0,Avoid (quality) ·
+2026-07-02,WANBURY.NS,Health Care,286.75,281.7,86.6,71.9,80.0,0.0,FAIL,2.0,2B,63.91,1.77,137.0,34.58,-0.17,0.0,Avoid (quality) ↑
+2026-07-02,WELENT.NS,Industrials,612.25,574.0,70.4,76.5,40.0,100.0,OK,3.0,topping,74.34,1.45,60.0,24.82,-1.4,69.4,Trim / Hold-tight ·
+2026-07-02,WSTCSTPAPR.NS,Materials,532.0,516.2,63.5,70.1,80.0,100.0,OK,2.0,2B,70.26,1.61,74.0,17.02,-0.22,75.4,Hold / Add on pullback ·
+2026-07-02,ZFCVINDIA.NS,Consumer Discretionary,2433.2,2686.0,24.6,69.3,100.0,100.0,OK,2.0,2A,53.03,0.99,174.0,33.99,-3.04,70.4,Buy (rich) ·
+2026-07-03,513472.BO,,536.05,536.05,,79.1,40.0,,,3.0,topping,71.89,1.6,101.0,27.79,-0.12,37.7,Watch (no fundamentals) ·
+2026-07-03,543920.BO,,880.0,880.0,,80.0,80.0,,,2.0,2B,70.7,1.0,59.0,23.65,-0.08,48.0,Watch (no fundamentals) ·
+2026-07-03,544037.BO,,1832.2,1832.2,,75.6,80.0,,,2.0,2B,76.06,1.22,53.0,21.77,-1.22,46.5,Watch (no fundamentals) ·
+2026-07-03,ACE.NS,Industrials,990.0,990.0,,40.3,60.0,100.0,OK,1.0,basing,59.6,1.84,179.0,30.4,0.3,44.1,Watch ·
+2026-07-03,AMBIKCO.NS,Consumer Discretionary,1742.5,1742.5,,84.3,80.0,100.0,OK,2.0,2B,55.7,0.64,58.0,18.05,-2.91,64.5,Hold / Add on pullback ·
+2026-07-03,APCOTEXIND.NS,Materials,525.55,525.55,,90.2,80.0,100.0,OK,2.0,2B,64.01,1.51,45.0,19.3,0.55,66.6,Hold / Add on pullback ·
+2026-07-03,ARMANFIN.NS,Financials,1740.5,1740.5,,58.7,40.0,100.0,OK,3.0,topping,58.58,1.45,177.0,36.18,-3.83,45.5,Trim / Hold-tight ·
+2026-07-03,ASHIANA.NS,Real Estate,388.2,388.2,,76.5,80.0,0.0,FAIL,2.0,2B,70.73,1.19,56.0,18.1,-0.37,0.0,Avoid (quality) ↓
+2026-07-03,AVTNPL.NS,Consumer Staples,71.17,71.17,,62.9,60.0,100.0,OK,1.0,basing,54.38,3.03,171.0,35.17,-2.12,52.0,Watch ↓
+2026-07-03,BANCOINDIA.NS,Consumer Discretionary,689.1,689.1,,61.2,60.0,100.0,OK,1.0,basing,56.32,3.22,142.0,29.14,3.08,51.4,Watch ·
+2026-07-03,BANSWRAS.NS,Consumer Discretionary,132.75,132.75,,60.1,60.0,100.0,OK,1.0,basing (vol contracting),56.55,1.97,148.0,38.52,-1.69,51.0,Watch ·
+2026-07-03,BELRISE.NS,Consumer Discretionary,230.74,230.74,,91.3,80.0,100.0,OK,2.0,2B,55.79,0.98,74.0,21.75,-1.37,67.0,Hold / Add on pullback ·
+2026-07-03,CAPITALSFB.NS,Financials,291.05,291.05,,54.2,60.0,100.0,OK,1.0,basing,60.87,1.27,60.0,20.32,1.11,49.0,Watch ·
+2026-07-03,CARYSIL.NS,Consumer Discretionary,1162.1,1162.1,,86.4,80.0,100.0,OK,2.0,2B,68.37,0.94,39.0,18.03,-0.38,65.2,Hold / Add on pullback ·
+2026-07-03,CCL.NS,Consumer Staples,1173.0,1173.0,,93.8,80.0,100.0,OK,2.0,2B,53.16,1.75,86.0,15.9,3.6,67.8,Hold / Add on pullback ↓
+2026-07-03,CENTENKA.NS,Consumer Discretionary,535.05,535.05,,69.0,80.0,100.0,OK,2.0,2B,61.84,2.32,147.0,39.83,-3.16,59.1,Hold / Add on pullback ·
+2026-07-03,CHAMBLFERT.NS,Materials,481.55,481.55,,41.3,60.0,100.0,OK,1.0,basing (vol contracting),51.49,2.4,179.0,20.02,1.7,44.5,Watch ·
+2026-07-03,CHENNPETRO.NS,Energy,1125.8,1125.8,,85.1,80.0,100.0,OK,2.0,2B,72.14,3.72,102.0,27.87,-0.96,64.8,Hold / Add on pullback ·
+2026-07-03,CHOICEIN.NS,Financials,800.05,800.05,,61.3,60.0,100.0,OK,1.0,basing,61.0,1.53,168.0,32.92,2.24,51.5,Watch ·
+2026-07-03,CNL.NS,Information Technology,764.6,764.6,,75.4,60.0,100.0,OK,1.0,basing (vol contracting),64.19,1.31,176.0,34.51,-2.41,56.4,Watch ·
+2026-07-03,CRAFTSMAN.NS,Industrials,9119.0,9119.0,,85.4,80.0,100.0,OK,2.0,2B,63.8,2.29,56.0,18.27,1.76,64.9,Hold / Add on pullback ·
+2026-07-03,CUB.NS,Financials,216.76,216.76,,77.5,40.0,100.0,OK,3.0,topping,72.54,1.14,178.0,33.94,-0.45,52.1,Trim / Hold-tight ·
+2026-07-03,DDEVPLSTIK.NS,Materials,282.45,282.45,,44.1,60.0,100.0,OK,1.0,basing,54.23,2.35,135.0,37.89,-0.15,45.4,Watch ·
+2026-07-03,DLINKINDIA.NS,Information Technology,524.75,524.75,,69.6,80.0,100.0,OK,2.0,2B,56.09,0.88,49.0,15.64,-1.76,59.4,Hold / Add on pullback ·
+2026-07-03,ELGIEQUIP.NS,Industrials,579.55,579.55,,78.9,80.0,100.0,OK,2.0,2B,67.88,11.48,130.0,31.54,-2.16,62.6,Hold / Add on pullback ·
+2026-07-03,ETL.NS,Industrials,1045.0,1045.0,,76.3,80.0,100.0,OK,2.0,2B,54.41,1.42,57.0,21.91,0.32,61.7,Hold / Add on pullback ·
+2026-07-03,FINEORG.NS,Materials,5206.5,5206.5,,72.4,80.0,100.0,OK,2.0,2B,51.11,1.69,72.0,18.34,2.93,60.3,Hold / Add on pullback ·
+2026-07-03,GAEL.NS,Consumer Staples,164.52,164.52,,86.8,80.0,100.0,OK,2.0,2B,69.93,1.34,81.0,19.9,-0.99,65.4,Hold / Add on pullback ↓
+2026-07-03,GANESHBE.NS,Materials,103.32,103.32,,78.4,80.0,100.0,OK,2.0,2B,52.42,2.21,78.0,29.22,-2.28,62.4,Hold / Add on pullback ·
+2026-07-03,GEECEE.NS,Real Estate,356.0,356.0,,52.7,60.0,100.0,OK,1.0,basing (vol contracting),59.19,0.94,46.0,19.02,-1.14,48.4,Watch ↓
+2026-07-03,GLOSTERLTD.NS,Consumer Discretionary,712.45,712.45,,70.6,80.0,0.0,FAIL,2.0,2B,50.09,2.37,58.0,21.07,3.35,0.0,Avoid (quality) ·
+2026-07-03,GOODLUCK.NS,Materials,1490.2,1490.2,,87.6,80.0,100.0,OK,2.0,2B,72.57,0.99,56.0,19.09,-0.19,65.7,Hold / Add on pullback ·
+2026-07-03,GREENLAM.NS,Industrials,267.05,267.05,,64.2,60.0,100.0,OK,1.0,basing (vol contracting),83.85,1.72,179.0,29.32,0.16,52.5,Watch ·
+2026-07-03,GSMFOILS.NS,Materials,236.25,236.25,,77.8,60.0,100.0,OK,1.0,basing (vol contracting),65.76,1.47,77.0,26.05,1.57,57.2,Watch ·
+2026-07-03,HAPPYFORGE.NS,Industrials,1499.1,1499.1,,95.7,80.0,100.0,OK,2.0,2B,62.82,0.69,52.0,18.09,-1.5,68.5,Hold / Add on pullback ·
+2026-07-03,HEALTHX.NS,Health Care,312.0,312.0,,59.6,60.0,100.0,OK,1.0,basing (vol contracting),50.95,0.78,155.0,29.69,-4.47,50.9,Watch ↑
+2026-07-03,HITECHGEAR.NS,Consumer Discretionary,708.0,708.0,,47.0,60.0,100.0,OK,1.0,basing,66.7,1.19,150.0,26.87,0.42,46.5,Watch ·
+2026-07-03,HMT.NS,Industrials,67.91,67.91,,70.2,80.0,0.0,FAIL,2.0,2B,59.59,0.67,108.0,30.39,-3.33,0.0,Avoid (quality) ·
+2026-07-03,HNDFDS.NS,Consumer Staples,553.0,553.0,,67.6,60.0,100.0,OK,1.0,basing,72.06,2.45,141.0,20.14,0.5,53.7,Watch ↓
+2026-07-03,IGPL.NS,Materials,455.0,455.0,,59.9,80.0,100.0,OK,2.0,2B,53.59,0.69,84.0,19.43,-3.73,56.0,Hold / Add on pullback ·
+2026-07-03,IMPAL.NS,Consumer Discretionary,1118.9,1118.9,,60.0,60.0,100.0,OK,1.0,basing (vol contracting),72.64,2.23,161.0,22.06,0.84,51.0,Watch ·
+2026-07-03,JBMA.NS,Consumer Discretionary,703.55,703.55,,72.6,60.0,100.0,OK,1.0,basing (vol contracting),55.42,2.41,177.0,38.93,-4.52,55.4,Watch ·
+2026-07-03,JINDALSAW.NS,Industrials,260.95,260.95,,79.3,80.0,100.0,OK,2.0,2B,52.68,0.59,71.0,22.39,-4.34,62.8,Hold / Add on pullback ·
+2026-07-03,JLHL.NS,Health Care,1456.3,1456.3,,48.1,60.0,100.0,OK,1.0,basing,52.73,1.0,179.0,20.32,-3.38,46.8,Watch ↑
+2026-07-03,KKCL.NS,Consumer Discretionary,512.75,512.75,,49.0,60.0,100.0,OK,1.0,basing,65.97,1.11,168.0,28.5,-0.32,47.1,Watch ·
+2026-07-03,KOPRAN.NS,Health Care,193.31,193.31,,67.5,80.0,100.0,OK,2.0,2B,52.23,0.7,45.0,30.87,-4.47,58.6,Hold / Add on pullback ↑
+2026-07-03,KRISHIVAL.NS,Consumer Staples,404.6,404.6,,57.6,60.0,100.0,OK,1.0,basing (vol contracting),53.43,10.85,176.0,32.69,-3.45,50.2,Watch ↓
+2026-07-03,MAHLIFE.NS,Real Estate,369.6,369.6,,42.4,60.0,100.0,OK,1.0,basing,68.04,1.27,161.0,30.88,-1.7,44.8,Watch ↓
+2026-07-03,MANINDS.NS,Industrials,584.0,584.0,,84.6,80.0,100.0,OK,2.0,2B,51.91,0.62,67.0,25.48,-3.54,64.6,Hold / Add on pullback ·
+2026-07-03,MARKSANS.NS,Health Care,264.45,264.45,,75.1,80.0,100.0,OK,2.0,2B,75.01,0.95,37.0,19.12,0.09,61.3,Hold / Add on pullback ↑
+2026-07-03,MENONBE.NS,Consumer Discretionary,161.99,161.99,,87.2,80.0,100.0,OK,2.0,2B,56.68,0.83,50.0,30.42,-1.57,65.5,Hold / Add on pullback ·
+2026-07-03,METROPOLIS.NS,Health Care,555.95,555.95,,80.4,80.0,100.0,OK,2.0,2B,63.0,1.54,56.0,18.58,0.96,63.1,Hold / Add on pullback ↑
+2026-07-03,MONARCH.NS,Financials,346.5,346.5,,68.6,80.0,100.0,OK,2.0,2B,65.13,1.2,37.0,10.88,0.3,59.0,Hold / Add on pullback ·
+2026-07-03,NAHARINDUS.NS,Consumer Discretionary,119.85,119.85,,53.6,60.0,100.0,OK,1.0,basing (vol contracting),67.75,4.54,175.0,39.31,-2.48,48.8,Watch ·
+2026-07-03,NAHARSPING.NS,Consumer Discretionary,265.4,265.4,,72.7,80.0,0.0,FAIL,2.0,2B,74.43,1.96,73.0,28.26,-0.01,0.0,Avoid (quality) ·
+2026-07-03,NBCC.NS,Industrials,102.36,102.36,,27.1,60.0,100.0,OK,1.0,basing,55.54,6.27,155.0,36.48,-0.62,39.5,Watch ·
+2026-07-03,NCLIND.NS,Materials,190.15,190.15,,25.1,60.0,100.0,OK,1.0,basing (vol contracting),51.86,3.3,140.0,27.17,1.63,38.8,Watch ·
+2026-07-03,NIBE.NS,Industrials,1648.0,1648.0,,63.4,80.0,100.0,OK,2.0,2B,55.38,0.84,39.0,30.11,-2.26,57.2,Hold / Add on pullback ·
+2026-07-03,NITINSPIN.NS,Consumer Discretionary,565.0,565.0,,86.2,80.0,100.0,OK,2.0,2B,73.24,1.64,51.0,17.84,-0.24,65.2,Hold / Add on pullback ·
+2026-07-03,NIVABUPA.NS,Financials,86.62,86.62,,65.8,80.0,100.0,OK,2.0,2B,55.58,2.15,53.0,13.07,3.44,58.0,Hold / Add on pullback ·
+2026-07-03,OMAXAUTO.NS,Consumer Discretionary,232.7,232.7,,85.2,80.0,100.0,OK,2.0,2B,59.54,2.13,53.0,28.56,2.43,64.8,Hold / Add on pullback ·
+2026-07-03,PDSL.NS,Consumer Discretionary,366.65,366.65,,50.1,60.0,100.0,OK,1.0,basing (vol contracting),58.95,1.76,176.0,37.42,1.21,47.5,Watch ·
+2026-07-03,PGHL.NS,Health Care,6355.0,6355.0,,72.0,60.0,100.0,OK,1.0,basing (vol contracting),65.72,2.38,37.0,13.15,1.92,55.2,Watch ↑
+2026-07-03,PREMIERPOL.NS,Consumer Discretionary,68.35,68.35,,80.6,80.0,100.0,OK,2.0,2B,72.99,1.04,113.0,29.14,-1.84,63.2,Hold / Add on pullback ·
+2026-07-03,PRUDENT.NS,Financials,3014.0,3014.0,,68.8,80.0,85.0,WATCH,2.0,2B,66.75,1.06,57.0,19.27,0.9,56.8,Hold / Add on pullback ·
+2026-07-03,PTCIL.NS,Materials,17763.0,17763.0,,70.0,40.0,100.0,OK,3.0,topping,67.08,2.56,171.0,30.55,-1.38,49.5,Trim / Hold-tight ·
+2026-07-03,RAJRATAN.NS,Materials,453.05,453.05,,65.6,40.0,100.0,OK,3.0,topping,55.51,1.04,73.0,17.73,-1.69,48.0,Trim / Hold-tight ·
+2026-07-03,REDINGTON.NS,Information Technology,275.35,275.35,,48.2,60.0,100.0,OK,1.0,basing (vol contracting),59.76,1.6,149.0,36.47,-0.55,46.9,Watch ·
+2026-07-03,REDTAPE.NS,Consumer Discretionary,139.18,139.18,,61.9,60.0,100.0,OK,1.0,basing (vol contracting),77.46,2.89,171.0,36.78,0.53,51.7,Watch ·
+2026-07-03,RPGLIFE.NS,Health Care,2401.0,2401.0,,54.3,60.0,100.0,OK,1.0,basing (vol contracting),67.72,1.89,177.0,32.96,0.08,49.0,Watch ↑
+2026-07-03,SANGAMIND.NS,Consumer Discretionary,552.5,552.5,,82.5,80.0,100.0,OK,2.0,2B,69.64,2.31,71.0,19.15,1.27,63.9,Hold / Add on pullback ·
+2026-07-03,SAREGAMA.NS,Communication Services,485.75,485.75,,63.3,80.0,100.0,OK,2.0,2B,55.55,0.38,32.0,16.3,-3.18,57.2,Hold / Add on pullback ↓
+2026-07-03,SARLAPOLY.NS,Consumer Discretionary,103.41,103.41,,55.0,80.0,100.0,OK,2.0,2B,59.38,3.05,150.0,37.11,-3.12,54.2,Hold / Add on pullback ·
+2026-07-03,SATIN.NS,Financials,254.8,254.8,,87.7,80.0,85.0,WATCH,2.0,2B,55.17,0.71,52.0,23.2,-4.04,63.4,Hold / Add on pullback ·
+2026-07-03,SHREEPUSHK.NS,Materials,405.0,405.0,,71.7,60.0,100.0,OK,1.0,basing (vol contracting),62.67,2.65,140.0,36.11,2.95,55.1,Watch ·
+2026-07-03,SHYAMMETL.NS,Materials,955.1,955.1,,70.3,80.0,100.0,OK,2.0,2B,55.54,2.9,37.0,8.18,3.62,59.6,Hold / Add on pullback ·
+2026-07-03,SKIPPER.NS,Utilities,574.95,574.95,,77.0,80.0,100.0,OK,2.0,2B,62.04,0.69,29.0,11.34,-1.22,62.0,Hold / Add on pullback ·
+2026-07-03,SOMANYCERA.NS,Industrials,537.0,537.0,,62.1,80.0,100.0,OK,2.0,2B,59.03,1.59,43.0,11.64,2.99,56.7,Hold / Add on pullback ·
+2026-07-03,SRGHFL.NS,Financials,307.0,307.0,,57.0,60.0,100.0,OK,1.0,basing (vol contracting),52.85,2.24,150.0,31.53,3.99,50.0,Watch ·
+2026-07-03,STEELCAS.NS,Materials,310.8,310.8,,96.0,80.0,100.0,OK,2.0,2B,50.64,0.98,77.0,28.34,-2.15,68.6,Hold / Add on pullback ·
+2026-07-03,SUNDRMFAST.NS,Consumer Discretionary,932.15,932.15,,37.4,60.0,100.0,OK,1.0,basing,52.71,1.81,176.0,30.56,1.29,43.1,Watch ·
+2026-07-03,SUPRAJIT.NS,Consumer Discretionary,480.95,480.95,,65.2,60.0,100.0,OK,1.0,basing (vol contracting),80.74,2.48,175.0,24.46,0.68,52.8,Watch ·
+2026-07-03,TVSSCS.NS,Industrials,136.41,136.41,,73.9,60.0,100.0,OK,1.0,basing (vol contracting),72.93,2.38,140.0,38.47,-0.95,55.9,Watch ·
+2026-07-03,TVSSRICHAK.NS,Consumer Discretionary,4248.0,4248.0,,76.2,40.0,100.0,OK,3.0,topping,71.83,2.12,156.0,37.78,-1.25,51.7,Trim / Hold-tight ·
+2026-07-03,USHAMART.NS,Materials,514.1,514.1,,82.9,80.0,100.0,OK,2.0,2B,59.05,0.6,60.0,16.22,-3.14,64.0,Hold / Add on pullback ·
+2026-07-03,VARROC.NS,Consumer Discretionary,667.55,667.55,,74.7,60.0,100.0,OK,1.0,basing,60.66,1.45,179.0,32.31,-3.09,56.1,Watch ·
+2026-07-03,VERANDA.NS,Consumer Discretionary,246.9,246.9,,75.0,60.0,100.0,OK,1.0,basing (vol contracting),66.51,0.84,50.0,15.78,-0.75,56.2,Watch ·
+2026-07-03,VIESL.NS,Industrials,312.3,312.3,,82.7,80.0,0.0,FAIL,2.0,2B,52.37,1.37,78.0,33.7,-2.27,0.0,Avoid (quality) ·
+2026-07-03,VIJAYA.NS,Health Care,1365.2,1365.2,,93.4,80.0,100.0,OK,2.0,2B,55.48,1.73,53.0,15.44,2.36,67.7,Hold / Add on pullback ↑
+2026-07-03,VINCOFE.NS,Consumer Staples,154.27,154.27,,68.7,60.0,100.0,OK,1.0,basing,56.78,3.29,161.0,31.33,1.93,54.0,Watch ↓
+2026-07-03,VISAKAIND.NS,Materials,80.0,80.0,,58.5,60.0,100.0,OK,1.0,basing,53.67,0.92,53.0,14.85,-0.1,50.5,Watch ·
+2026-07-03,VISHNU.NS,Materials,622.0,622.0,,79.9,80.0,100.0,OK,2.0,2B,70.19,1.34,73.0,13.64,1.18,63.0,Hold / Add on pullback ·
+2026-07-03,WANBURY.NS,Health Care,286.45,286.45,,75.2,80.0,0.0,FAIL,2.0,2B,56.94,1.44,141.0,34.78,-2.38,0.0,Avoid (quality) ↑
+2026-07-03,WSTCSTPAPR.NS,Materials,529.4,529.4,,70.7,80.0,100.0,OK,2.0,2B,53.0,0.8,78.0,19.96,-3.47,59.7,Hold / Add on pullback ·
+2026-07-15,513472.BO,,537.65,537.65,,80.8,40.0,,,3.0,topping,78.35,2.79,113.0,27.7,-0.09,38.3,Watch (no fundamentals) ·
+2026-07-15,526530.BO,,128.3,128.3,,91.5,80.0,,,2.0,2B,77.75,1.27,55.0,25.32,-0.26,52.0,Watch (no fundamentals) ·
+2026-07-15,532329.BO,,1010.0,1010.0,,67.9,80.0,,,2.0,2B,56.82,1.5,43.0,24.98,1.42,43.8,Watch (no fundamentals) ·
+2026-07-15,539682.BO,,315.1,315.1,,93.5,80.0,,,2.0,2B,57.96,1.12,36.0,25.4,1.47,52.7,Watch (no fundamentals) ·
+2026-07-15,544037.BO,,1783.75,1783.75,,67.0,80.0,,,2.0,2B,73.58,1.94,65.0,24.3,0.8,43.5,Watch (no fundamentals) ·
+2026-07-15,544091.BO,,438.0,438.0,,77.3,80.0,,,2.0,2B,64.1,1.16,47.0,29.81,-0.47,47.1,Watch (no fundamentals) ·
+2026-07-15,544332.BO,,410.0,410.0,,69.6,80.0,,,2.0,2B,60.12,1.7,44.0,19.52,1.52,44.4,Watch (no fundamentals) ·
+2026-07-15,544431.BO,,121.0,121.0,,89.2,80.0,,,2.0,2B,53.92,3.12,69.0,17.66,2.95,51.2,Watch (no fundamentals) ·
+2026-07-15,544501.BO,,146.75,146.75,,74.1,40.0,,,3.0,topping,68.04,1.1,76.0,28.24,-0.48,35.9,Watch (no fundamentals) ·
+2026-07-15,5PAISA.NS,Financials,395.95,395.95,33.7,66.4,60.0,100.0,OK,1.0,basing (vol contracting),71.14,1.81,177.0,39.4,-0.96,61.7,Watch ·
+2026-07-15,ACE.NS,Industrials,984.8,984.8,62.9,39.4,60.0,100.0,OK,1.0,basing (vol contracting),50.8,2.63,84.0,20.19,1.34,59.5,Accumulate ·
+2026-07-15,ALIVUS.NS,Health Care,1166.2,1166.2,57.1,78.9,80.0,100.0,OK,2.0,2B,72.87,1.27,65.0,16.96,-0.12,76.9,Hold / Add on pullback ↑
+2026-07-15,AMANTA.NS,Health Care,172.08,172.08,36.0,71.1,80.0,85.0,WATCH,2.0,2B,53.93,0.67,33.0,29.56,-3.56,66.6,Hold / Add on pullback ↑
+2026-07-15,AMBIKCO.NS,Consumer Discretionary,1760.1,1760.1,65.0,82.0,80.0,100.0,OK,2.0,2B,68.77,1.23,70.0,17.57,-1.29,80.0,Hold / Add on pullback ·
+2026-07-15,APCOTEXIND.NS,Materials,539.1,539.1,30.9,86.0,80.0,100.0,OK,2.0,2B,65.81,0.81,57.0,19.26,-1.77,72.8,Hold / Add on pullback ·
+2026-07-15,APTUS.NS,Financials,293.35,293.35,55.7,40.7,60.0,100.0,OK,1.0,basing (vol contracting),67.53,2.75,161.0,36.05,0.15,58.2,Watch ·
+2026-07-15,AVTNPL.NS,Consumer Staples,71.04,71.04,52.5,60.2,60.0,100.0,OK,1.0,basing (vol contracting),66.58,4.48,166.0,35.05,-1.59,64.2,Watch ↓
+2026-07-15,AYMSYNTEX.NS,Consumer Discretionary,240.39,240.39,6.1,75.3,80.0,100.0,OK,2.0,2B,56.11,1.31,83.0,32.48,0.5,62.9,Hold / Add on pullback ·
+2026-07-15,BOROSCI.NS,Health Care,161.58,162.03,39.6,71.9,80.0,100.0,OK,2.0,2B,61.0,0.98,42.0,19.01,0.0,70.1,Hold / Add on pullback ↑
+2026-07-15,CANFINHOME.NS,Financials,912.25,912.25,83.3,74.3,40.0,100.0,OK,3.0,topping,66.97,1.95,176.0,20.48,2.67,71.8,Trim / Hold-tight ·
+2026-07-15,CAPITALSFB.NS,Financials,298.6,298.6,86.9,69.0,60.0,100.0,OK,1.0,basing (vol contracting),52.98,0.98,72.0,20.25,-1.08,75.9,Accumulate ·
+2026-07-15,CREDITACC.NS,Financials,1486.0,1487.7,49.6,70.7,80.0,100.0,OK,2.0,2B,60.19,1.7,162.0,34.74,-4.2,72.1,Hold / Add on pullback ·
+2026-07-15,CUB.NS,Financials,223.42,223.22,64.7,78.8,40.0,100.0,OK,3.0,topping,57.04,1.17,140.0,28.91,-3.94,68.8,Trim / Hold-tight ·
+2026-07-15,DCBBANK.NS,Financials,190.41,190.63,93.1,83.4,40.0,100.0,OK,3.0,topping,67.72,2.96,177.0,24.57,2.39,77.5,Trim / Hold-tight ·
+2026-07-15,DENORA.NS,Industrials,903.1,903.1,18.9,70.9,80.0,100.0,OK,2.0,2B,50.02,1.53,83.0,31.56,-3.62,64.5,Hold / Add on pullback ·
+2026-07-15,DIAMONDYD.NS,Consumer Staples,1187.9,1187.9,4.3,76.4,40.0,100.0,OK,3.0,topping,80.45,2.77,167.0,31.22,-0.24,52.8,Trim / Hold-tight ↓
+2026-07-15,EPL.NS,Materials,237.98,237.98,44.2,70.4,100.0,100.0,OK,2.0,2A,70.93,2.27,86.0,17.88,0.97,75.7,Buy (rich) ·
+2026-07-15,FDC.NS,Health Care,423.05,423.05,69.8,39.8,60.0,100.0,OK,1.0,basing (vol contracting),52.09,1.36,49.0,15.99,1.62,61.4,Accumulate ↑
+2026-07-15,FUSION.NS,Financials,231.59,231.59,6.5,77.1,80.0,100.0,OK,2.0,2B,62.6,1.1,69.0,34.91,-0.74,63.6,Hold / Add on pullback ·
+2026-07-15,GARFIBRES.NS,Consumer Discretionary,777.85,777.85,27.1,56.8,60.0,100.0,OK,1.0,basing (vol contracting),62.97,2.11,162.0,30.32,1.29,56.7,Watch ·
+2026-07-15,GREENLAM.NS,Industrials,253.5,253.5,9.9,60.4,60.0,85.0,WATCH,1.0,basing (vol contracting),72.34,5.42,173.0,31.38,-1.44,51.4,Watch ·
+2026-07-15,GREENPLY.NS,Materials,318.55,318.55,11.3,65.4,60.0,100.0,OK,1.0,basing (vol contracting),50.61,0.61,28.0,12.07,-1.52,55.7,Watch ·
+2026-07-15,HARSHA.NS,Industrials,425.7,425.7,58.4,67.8,60.0,100.0,OK,1.0,basing (vol contracting),72.57,5.02,160.0,36.34,0.64,68.3,Watch ·
+2026-07-15,HCG.NS,Health Care,674.4,674.4,2.7,66.5,60.0,85.0,WATCH,1.0,basing (vol contracting),50.69,0.98,61.0,14.43,0.28,51.7,Watch ↑
+2026-07-15,HEALTHX.NS,Health Care,339.2,339.2,1.3,76.3,60.0,100.0,OK,1.0,basing (vol contracting),58.58,1.43,162.0,29.27,-3.97,57.0,Watch ↑
+2026-07-15,HMVL.NS,Communication Services,88.07,88.07,75.5,75.5,80.0,0.0,FAIL,2.0,2B,60.61,2.33,36.0,18.36,1.37,0.0,Avoid (quality) ↓
+2026-07-15,HNDFDS.NS,Consumer Staples,562.55,562.55,27.3,69.7,60.0,85.0,WATCH,1.0,basing (vol contracting),67.87,2.0,153.0,24.15,-1.37,59.0,Watch ↓
+2026-07-15,HONAUT.NS,Information Technology,38585.0,38585.0,12.9,62.1,80.0,100.0,OK,2.0,2B,61.87,0.63,54.0,17.42,-3.58,60.0,Hold / Add on pullback ·
+2026-07-15,IMPAL.NS,Consumer Discretionary,1128.7,1128.7,72.8,67.1,60.0,100.0,OK,1.0,basing (vol contracting),51.11,1.14,173.0,28.76,-4.24,71.7,Accumulate ·
+2026-07-15,INDOSTAR.NS,Financials,265.65,265.65,34.1,47.6,60.0,100.0,OK,1.0,basing (vol contracting),55.75,1.15,47.0,22.33,-1.9,55.2,Watch ·
+2026-07-15,JAMNAAUTO.NS,Consumer Discretionary,132.48,132.68,67.3,78.5,100.0,100.0,OK,2.0,2A,61.35,4.57,89.0,23.66,1.24,84.3,Buy ·
+2026-07-15,JBMA.NS,Consumer Discretionary,688.35,688.2,5.6,67.0,80.0,85.0,WATCH,2.0,2B,64.84,1.82,78.0,19.16,-0.76,57.6,Hold / Add on pullback ·
+2026-07-15,JGCHEM.NS,Materials,444.0,445.05,34.0,51.2,80.0,100.0,OK,2.0,2B,54.55,1.65,69.0,19.35,-0.09,61.4,Hold / Add on pullback ·
+2026-07-15,JINDALSAW.NS,Industrials,254.45,254.45,57.0,74.8,80.0,100.0,OK,2.0,2B,59.01,2.49,83.0,26.02,-1.9,75.4,Hold / Add on pullback ·
+2026-07-15,KAJARIACER.NS,Industrials,1240.5,1240.5,28.4,66.8,80.0,100.0,OK,2.0,2B,58.87,2.07,78.0,18.28,1.58,65.5,Hold / Add on pullback ·
+2026-07-15,KIMS.NS,Health Care,821.0,821.0,0.0,75.7,80.0,85.0,WATCH,2.0,2B,67.9,1.51,65.0,18.49,-2.38,59.2,Hold / Add on pullback ↑
+2026-07-15,KOPRAN.NS,Health Care,206.1,208.0,46.2,70.5,80.0,100.0,OK,2.0,2B,57.87,1.56,47.0,20.35,3.97,71.2,Hold / Add on pullback ↑
+2026-07-15,KRISHIVAL.NS,Consumer Staples,402.2,402.2,39.3,58.4,60.0,100.0,OK,1.0,basing (vol contracting),58.87,8.92,154.0,32.58,-2.54,60.3,Watch ↓
+2026-07-15,LALPATHLAB.NS,Health Care,1773.0,1773.0,14.4,76.5,60.0,100.0,OK,1.0,basing (vol contracting),63.04,1.4,72.0,24.19,-3.71,60.4,Watch ↑
+2026-07-15,LLOYDSENT.NS,Materials,79.19,79.19,45.4,68.7,80.0,0.0,FAIL,2.0,2B,60.75,1.52,49.0,21.75,-0.41,0.0,Avoid (quality) ·
+2026-07-15,LMW.NS,Industrials,16365.0,16365.0,0.0,65.0,60.0,100.0,OK,1.0,basing (vol contracting),77.0,3.74,155.0,31.38,-1.92,52.8,Watch ·
+2026-07-15,MAHLIFE.NS,Real Estate,374.6,374.6,,46.1,60.0,100.0,OK,1.0,basing (vol contracting),67.36,1.78,173.0,30.59,-2.07,46.1,Watch ·
+2026-07-15,MANAPPURAM.NS,Financials,329.8,329.8,44.3,80.7,80.0,70.0,WATCH,2.0,2B,72.09,2.7,177.0,31.73,-1.81,69.8,Hold / Add on pullback ·
+2026-07-15,MENONBE.NS,Consumer Discretionary,178.5,178.5,50.3,88.4,80.0,100.0,OK,2.0,2B,62.32,1.25,35.0,16.1,2.24,78.5,Hold / Add on pullback ·
+2026-07-15,METROPOLIS.NS,Health Care,577.25,577.25,13.1,77.3,80.0,100.0,OK,2.0,2B,64.51,0.8,68.0,18.53,-2.49,65.3,Hold / Add on pullback ↑
+2026-07-15,MINDACORP.NS,Consumer Discretionary,680.25,680.25,40.6,77.8,80.0,100.0,OK,2.0,2B,55.87,1.78,30.0,10.48,3.15,72.4,Hold / Add on pullback ·
+2026-07-15,MMFL.NS,Materials,521.7,521.7,39.8,95.7,80.0,85.0,WATCH,2.0,2B,71.73,1.47,146.0,32.96,-1.64,76.2,Hold / Add on pullback ·
+2026-07-15,MONARCH.NS,Financials,358.5,358.3,74.9,62.6,80.0,85.0,WATCH,2.0,2B,55.75,0.69,49.0,14.52,-2.47,73.4,Hold / Add on pullback ·
+2026-07-15,MUFIN.NS,Financials,127.85,127.85,10.4,86.2,80.0,70.0,WATCH,2.0,2B,62.71,3.98,176.0,35.26,-4.62,63.3,Hold / Add on pullback ·
+2026-07-15,NAZARA.NS,Consumer Discretionary,308.05,308.05,20.5,61.2,80.0,100.0,OK,2.0,2B,59.05,3.3,167.0,33.37,-3.39,61.5,Hold / Add on pullback ·
+2026-07-15,NITINSPIN.NS,Consumer Discretionary,562.2,562.2,77.5,87.1,80.0,100.0,OK,2.0,2B,72.01,2.69,63.0,17.73,0.86,84.9,Hold / Add on pullback ·
+2026-07-15,NIVABUPA.NS,Financials,86.73,86.73,20.0,70.3,80.0,100.0,OK,2.0,2B,62.56,3.31,65.0,13.09,3.13,64.6,Hold / Add on pullback ·
+2026-07-15,OLECTRA.NS,Industrials,1386.5,1386.5,33.6,62.2,80.0,100.0,OK,2.0,2B,52.77,1.85,68.0,27.92,0.65,65.2,Hold / Add on pullback ·
+2026-07-15,OMAXAUTO.NS,Consumer Discretionary,245.51,245.51,74.0,87.7,80.0,100.0,OK,2.0,2B,62.24,1.01,65.0,28.52,-2.78,84.2,Hold / Add on pullback ·
+2026-07-15,ONDOOR.NS,Consumer Discretionary,192.0,192.0,65.5,80.5,80.0,0.0,FAIL,2.0,2B,53.16,4.46,96.0,34.46,-3.65,0.0,Avoid (quality) ·
+2026-07-15,POLYPLEX.NS,Materials,1058.65,1058.0,52.5,66.7,80.0,0.0,FAIL,2.0,2B,54.24,1.06,55.0,20.02,-0.83,0.0,Avoid (quality) ·
+2026-07-15,PRECOT.NS,Consumer Discretionary,818.25,818.25,39.8,84.0,80.0,100.0,OK,2.0,2B,57.5,1.7,47.0,25.79,3.89,74.3,Hold / Add on pullback ·
+2026-07-15,PRICOLLTD.NS,Consumer Discretionary,622.0,622.45,55.7,75.5,40.0,100.0,OK,3.0,topping,77.2,1.76,174.0,21.46,1.34,65.3,Trim / Hold-tight ·
+2026-07-15,PRUDENT.NS,Financials,2975.5,2975.5,24.9,80.1,80.0,85.0,WATCH,2.0,2B,58.47,4.77,69.0,19.25,2.34,67.0,Hold / Add on pullback ·
+2026-07-15,RAIN.NS,Materials,208.5,208.5,62.9,85.8,80.0,0.0,FAIL,2.0,2B,71.28,1.09,42.0,18.63,1.07,0.0,Avoid (quality) ·
+2026-07-15,REDINGTON.NS,Information Technology,285.15,285.15,77.1,57.5,60.0,100.0,OK,1.0,basing (vol contracting),55.84,1.64,161.0,36.47,-3.97,69.4,Accumulate ·
+2026-07-15,RELIGARE.NS,Financials,265.0,265.0,16.9,67.5,60.0,100.0,OK,1.0,basing (vol contracting),70.3,3.2,154.0,31.0,1.64,57.9,Watch ·
+2026-07-15,RGL.NS,Consumer Discretionary,119.25,119.25,84.5,41.0,60.0,100.0,OK,1.0,basing (vol contracting),57.05,2.09,68.0,26.18,-0.88,65.5,Accumulate ·
+2026-07-15,SARLAPOLY.NS,Consumer Discretionary,102.88,102.88,62.2,51.9,80.0,0.0,FAIL,2.0,2B,56.8,2.14,84.0,20.79,0.77,0.0,Avoid (quality) ·
+2026-07-15,SGIL.NS,Industrials,602.1,602.1,19.3,74.3,60.0,85.0,WATCH,1.0,basing (vol contracting),64.16,1.97,65.0,21.84,2.67,58.6,Watch ·
+2026-07-15,SIS.NS,Industrials,438.35,438.35,34.3,91.7,80.0,100.0,OK,2.0,2B,69.42,1.22,40.0,18.98,0.83,75.7,Hold / Add on pullback ·
+2026-07-15,SJS.NS,Consumer Discretionary,2169.1,2169.1,33.5,88.4,80.0,100.0,OK,2.0,2B,53.51,2.0,69.0,21.02,-3.84,74.3,Hold / Add on pullback ·
+2026-07-15,SOBHA.NS,Real Estate,1503.1,1503.1,,44.6,60.0,100.0,OK,1.0,basing (vol contracting),53.66,2.12,142.0,30.43,-2.29,45.6,Watch ·
+2026-07-15,SOMANYCERA.NS,Industrials,534.5,534.5,43.7,61.0,80.0,100.0,OK,2.0,2B,56.31,2.38,55.0,11.64,3.47,67.3,Hold / Add on pullback ·
+2026-07-15,SPARC.NS,Health Care,254.96,254.81,98.7,85.2,80.0,85.0,WATCH,2.0,2B,59.17,1.38,50.0,37.97,-1.9,87.2,Hold / Add on pullback ↑
+2026-07-15,SRGHFL.NS,Financials,310.25,310.25,49.4,57.2,60.0,100.0,OK,1.0,basing (vol contracting),58.68,2.02,162.0,31.56,2.79,62.4,Watch ·
+2026-07-15,SSWL.NS,Consumer Discretionary,253.15,253.15,60.2,73.9,80.0,100.0,OK,2.0,2B,74.82,0.9,30.0,13.39,-0.16,75.9,Hold / Add on pullback ·
+2026-07-15,STEELCAS.NS,Materials,304.5,304.5,29.9,91.1,80.0,100.0,OK,2.0,2B,62.71,2.0,89.0,28.56,-0.87,74.4,Hold / Add on pullback ·
+2026-07-15,SUNDRMFAST.NS,Consumer Discretionary,960.0,960.0,30.1,51.8,60.0,100.0,OK,1.0,basing (vol contracting),71.54,1.51,174.0,30.51,-1.48,55.7,Watch ·
+2026-07-15,SUPRAJIT.NS,Consumer Discretionary,491.6,491.6,27.6,66.1,60.0,100.0,OK,1.0,basing (vol contracting),81.1,2.31,162.0,25.65,-1.23,60.0,Watch ·
+2026-07-15,SUYOG.NS,Industrials,873.4,873.4,73.6,70.7,80.0,100.0,OK,2.0,2B,50.73,0.99,96.0,30.48,-4.19,78.1,Hold / Add on pullback ·
+2026-07-15,TALBROAUTO.NS,Consumer Discretionary,396.7,396.7,56.0,85.4,80.0,100.0,OK,2.0,2B,50.65,0.87,54.0,30.7,-4.35,78.9,Hold / Add on pullback ·
+2026-07-15,TVSSRICHAK.NS,Consumer Discretionary,4176.6,4179.8,30.3,67.1,40.0,100.0,OK,3.0,topping,77.26,4.8,168.0,37.63,0.78,56.1,Trim / Hold-tight ·
+2026-07-15,UJJIVANSFB.NS,Financials,66.56,66.56,66.5,87.6,80.0,100.0,OK,2.0,2B,75.95,1.21,173.0,28.87,-2.39,82.3,Hold / Add on pullback ·
+2026-07-15,UNIMECH.NS,Industrials,1216.3,1216.3,13.0,64.3,80.0,100.0,OK,2.0,2B,58.16,1.13,35.0,15.01,1.31,60.8,Hold / Add on pullback ·
+2026-07-15,USHAMART.NS,Materials,499.15,500.45,24.7,80.2,80.0,100.0,OK,2.0,2B,75.78,1.18,72.0,16.15,-0.06,69.2,Hold / Add on pullback ·
+2026-07-15,VIJAYA.NS,Health Care,1387.6,1387.6,3.3,90.8,80.0,100.0,OK,2.0,2B,70.11,1.62,65.0,15.44,0.71,67.6,Hold / Add on pullback ↑
+2026-07-15,VISHNU.NS,Materials,619.0,619.0,39.4,81.8,80.0,100.0,OK,2.0,2B,70.41,1.73,85.0,13.61,1.92,73.5,Hold / Add on pullback ·
+2026-07-15,VIYASH.NS,Health Care,280.1,280.1,5.6,89.9,80.0,100.0,OK,2.0,2B,61.48,0.84,56.0,24.54,-2.82,67.9,Hold / Add on pullback ↑
+2026-07-15,WINDMACHIN.NS,Industrials,312.5,312.5,34.6,49.8,80.0,100.0,OK,2.0,2B,54.3,1.4,89.0,23.72,-2.06,61.1,Hold / Add on pullback ·
+2026-07-15,ZIMLAB.NS,Health Care,118.2,118.2,0.0,71.5,80.0,100.0,OK,2.0,2B,62.56,1.65,64.0,35.09,-1.87,60.0,Hold / Add on pullback ↑
+2026-07-15,ZOTA.NS,Health Care,1382.0,1382.0,3.9,51.6,60.0,100.0,OK,1.0,basing (vol contracting),63.61,2.19,174.0,32.19,1.57,49.0,Watch ↑
+2026-07-21,504176.BO,,626.7,626.7,,43.7,60.0,,,1.0,basing (vol contracting),51.95,1.05,155.0,33.57,-2.55,30.3,Watch (no fundamentals) ·
+2026-07-21,526530.BO,,129.2,129.2,,86.5,80.0,,,2.0,2B,74.93,2.71,61.0,25.32,-0.95,50.3,Watch (no fundamentals) ·
+2026-07-21,532329.BO,,1017.0,1017.0,,70.9,80.0,,,2.0,2B,62.76,1.33,49.0,24.98,0.72,44.8,Watch (no fundamentals) ·
+2026-07-21,538715.BO,,406.35,406.35,,64.4,60.0,,,1.0,basing (vol contracting),57.55,3.48,152.0,35.0,1.26,37.5,Watch (no fundamentals) ·
+2026-07-21,543787.BO,,1174.0,1174.0,,83.2,80.0,,,2.0,2B,61.28,1.17,61.0,26.19,1.75,49.1,Watch (no fundamentals) ·
+2026-07-21,543874.BO,,93.9,93.9,,76.5,40.0,,,3.0,topping,62.7,1.34,175.0,33.3,-2.85,36.8,Watch (no fundamentals) ·
+2026-07-21,AIMTRON.NS,Information Technology,1320.0,1320.0,7.9,85.8,80.0,100.0,OK,2.0,2B,62.3,1.08,48.0,22.78,-0.38,67.0,Hold / Add on pullback ·
+2026-07-21,AMANTA.NS,Health Care,167.93,167.93,36.6,74.7,80.0,85.0,WATCH,2.0,2B,66.73,1.51,40.0,29.56,-1.18,68.0,Hold / Add on pullback ↑
+2026-07-21,AMBIKCO.NS,Consumer Discretionary,1735.0,1735.0,64.8,79.7,80.0,100.0,OK,2.0,2B,72.11,2.41,76.0,17.48,0.64,79.1,Hold / Add on pullback ·
+2026-07-21,APCOTEXIND.NS,Materials,558.3,558.3,29.8,86.6,80.0,100.0,OK,2.0,2B,65.14,1.6,74.0,19.37,2.27,72.8,Hold / Add on pullback ·
+2026-07-21,APTUS.NS,Financials,301.05,301.05,60.1,45.1,60.0,100.0,OK,1.0,basing (vol contracting),52.3,2.1,167.0,39.47,-2.41,60.8,Accumulate ·
+2026-07-21,ASAL.NS,Consumer Discretionary,551.55,551.55,43.8,61.2,60.0,85.0,WATCH,1.0,basing (vol contracting),50.7,2.07,173.0,37.55,-3.57,60.1,Watch ·
+2026-07-21,BALAMINES.NS,Materials,2366.5,2366.5,26.6,81.9,80.0,100.0,OK,2.0,2B,51.98,0.5,48.0,24.81,-4.87,70.3,Hold / Add on pullback ·
+2026-07-21,BANSWRAS.NS,Consumer Discretionary,133.99,133.99,83.0,65.0,80.0,100.0,OK,2.0,2B,62.62,2.23,166.0,37.81,-0.77,78.5,Hold / Add on pullback ·
+2026-07-21,BELRISE.NS,Consumer Discretionary,236.76,236.76,29.6,90.8,80.0,85.0,WATCH,2.0,2B,50.79,0.6,92.0,21.96,-4.82,71.9,Hold / Add on pullback ·
+2026-07-21,BHAGCHEM.NS,Materials,272.85,272.85,1.0,60.4,80.0,100.0,OK,2.0,2B,50.47,3.78,82.0,27.89,-2.25,56.4,Hold / Add on pullback ·
+2026-07-21,BOROSCI.NS,Health Care,162.0,162.0,38.8,73.5,80.0,100.0,OK,2.0,2B,56.31,1.43,48.0,18.84,0.94,70.4,Hold / Add on pullback ↑
+2026-07-21,BUTTERFLY.NS,Consumer Discretionary,752.05,752.05,35.8,63.8,60.0,100.0,OK,1.0,basing (vol contracting),65.55,1.91,131.0,27.32,3.71,61.3,Watch ·
+2026-07-21,CARYSIL.NS,Consumer Discretionary,1170.1,1170.1,39.4,84.2,80.0,100.0,OK,2.0,2B,66.58,1.33,57.0,20.66,-0.02,74.3,Hold / Add on pullback ·
+2026-07-21,CCL.NS,Consumer Staples,1209.9,1209.9,21.5,85.3,80.0,85.0,WATCH,2.0,2B,81.13,2.7,104.0,16.3,1.02,68.0,Hold / Add on pullback ↓
+2026-07-21,CENTENKA.NS,Consumer Discretionary,540.2,540.2,79.9,81.8,80.0,100.0,OK,2.0,2B,55.99,1.73,46.0,25.2,1.46,83.6,Hold / Add on pullback ·
+2026-07-21,CENTUM.NS,Information Technology,3710.0,3710.0,13.2,87.7,80.0,100.0,OK,2.0,2B,67.86,2.04,50.0,17.61,1.96,69.0,Hold / Add on pullback ·
+2026-07-21,CHOICEIN.NS,Financials,816.9,816.9,23.4,70.4,60.0,100.0,OK,1.0,basing (vol contracting),68.83,2.13,173.0,33.83,0.33,60.5,Watch ·
+2026-07-21,CONFIPET.NS,Energy,75.65,75.65,32.7,84.5,80.0,100.0,OK,2.0,2B,64.05,0.68,33.0,18.95,-1.65,72.8,Hold / Add on pullback ·
+2026-07-21,CRAFTSMAN.NS,Industrials,9403.5,9403.5,12.9,86.9,80.0,85.0,WATCH,2.0,2B,73.87,2.63,74.0,17.79,1.35,66.4,Hold / Add on pullback ·
+2026-07-21,CREDITACC.NS,Financials,1534.7,1534.7,48.9,70.8,80.0,100.0,OK,2.0,2B,59.71,2.0,77.0,24.05,2.69,72.0,Hold / Add on pullback ·
+2026-07-21,CUB.NS,Financials,229.83,229.83,63.6,78.5,40.0,100.0,OK,3.0,topping,73.1,1.89,168.0,31.32,1.75,68.4,Trim / Hold-tight ·
+2026-07-21,DCBBANK.NS,Financials,190.22,190.22,92.9,83.1,40.0,100.0,OK,3.0,topping,65.51,2.86,160.0,24.76,1.82,77.3,Trim / Hold-tight ·
+2026-07-21,DEEM.NS,Materials,55.4,55.4,91.7,56.8,80.0,0.0,FAIL,2.0,2B,50.87,1.62,50.0,24.21,1.41,0.0,Avoid (quality) ·
+2026-07-21,DEEPAKFERT.NS,Materials,1607.0,1607.0,25.6,68.8,80.0,100.0,OK,2.0,2B,69.48,1.0,36.0,12.66,0.45,65.5,Hold / Add on pullback ·
+2026-07-21,DENORA.NS,Industrials,882.0,882.0,18.7,64.9,80.0,100.0,OK,2.0,2B,57.12,2.45,89.0,31.79,-2.02,62.4,Hold / Add on pullback ·
+2026-07-21,EIEL.NS,Utilities,229.46,229.46,72.1,47.3,80.0,0.0,FAIL,2.0,2B,55.72,2.61,96.0,31.59,-0.81,0.0,Avoid (quality) ·
+2026-07-21,ELGIEQUIP.NS,Industrials,601.0,601.0,34.9,77.5,80.0,100.0,OK,2.0,2B,56.17,1.99,53.0,10.97,3.86,70.8,Hold / Add on pullback ·
+2026-07-21,EQUITASBNK.NS,Financials,81.43,81.43,19.4,82.1,80.0,100.0,OK,2.0,2B,66.38,0.85,35.0,12.42,-0.34,68.6,Hold / Add on pullback ·
+2026-07-21,FINEORG.NS,Materials,4907.5,4907.5,20.4,61.1,100.0,100.0,OK,2.0,2A,65.0,7.62,168.0,31.62,-2.28,66.5,Buy (rich) ·
+2026-07-21,FMGOETZE.NS,Consumer Discretionary,489.4,489.4,79.4,45.9,60.0,100.0,OK,1.0,basing (vol contracting),61.67,2.04,174.0,29.94,-0.72,65.9,Accumulate ·
+2026-07-21,GANESHHOU.NS,Real Estate,808.9,808.9,,51.2,60.0,100.0,OK,1.0,basing (vol contracting),52.7,1.05,46.0,17.69,0.66,47.9,Watch ·
+2026-07-21,GARFIBRES.NS,Consumer Discretionary,783.0,783.0,25.5,51.2,60.0,100.0,OK,1.0,basing (vol contracting),69.12,2.26,168.0,30.35,0.53,54.3,Watch ·
+2026-07-21,GEECEE.NS,Real Estate,354.95,354.95,,56.1,60.0,100.0,OK,1.0,basing (vol contracting),59.49,1.79,64.0,18.8,0.35,49.6,Watch ·
+2026-07-21,GEOJITFSL.NS,Financials,82.45,82.45,39.9,66.6,80.0,100.0,OK,2.0,2B,58.71,0.91,28.0,10.57,0.03,68.3,Hold / Add on pullback ·
+2026-07-21,GOODLUCK.NS,Materials,1554.1,1554.1,41.4,91.3,80.0,100.0,OK,2.0,2B,50.42,1.09,74.0,27.8,-3.47,77.3,Hold / Add on pullback ·
+2026-07-21,GREENLAM.NS,Industrials,248.35,248.35,9.6,55.1,60.0,85.0,WATCH,1.0,basing (vol contracting),74.04,9.04,179.0,31.38,0.6,49.4,Watch ·
+2026-07-21,GREENPLY.NS,Materials,325.0,325.0,11.0,65.5,80.0,100.0,OK,2.0,2B,52.39,0.38,34.0,12.75,-3.48,60.7,Hold / Add on pullback ·
+2026-07-21,GUFICBIO.NS,Health Care,395.65,395.65,23.2,78.9,60.0,100.0,OK,1.0,basing (vol contracting),65.4,1.15,43.0,25.12,0.03,63.4,Watch ↑
+2026-07-21,HARSHA.NS,Industrials,414.15,414.15,56.9,60.2,100.0,100.0,OK,2.0,2A,56.49,10.8,166.0,36.37,3.36,75.3,Buy ·
+2026-07-21,HMVL.NS,Communication Services,91.5,91.5,73.0,79.4,80.0,0.0,FAIL,2.0,2B,59.36,1.3,42.0,19.79,-2.43,0.0,Avoid (quality) ↓
+2026-07-21,HNDFDS.NS,Consumer Staples,571.0,571.0,26.1,72.3,60.0,85.0,WATCH,1.0,basing (vol contracting),65.11,1.65,159.0,24.0,-2.2,59.6,Watch ↓
+2026-07-21,HOLMARC.NS,Industrials,110.0,110.0,36.6,44.0,60.0,100.0,OK,1.0,basing (vol contracting),59.82,1.07,46.0,16.17,0.93,54.5,Watch ·
+2026-07-21,HOMEFIRST.NS,Financials,1280.1,1280.1,62.1,58.9,60.0,100.0,OK,1.0,basing (vol contracting),65.93,2.08,175.0,33.08,0.11,66.1,Accumulate ·
+2026-07-21,INDIANHUME.NS,Utilities,390.05,390.05,74.4,52.3,60.0,100.0,OK,1.0,basing (vol contracting),57.64,1.51,173.0,38.84,0.47,66.9,Accumulate ·
+2026-07-21,INDIGOPNTS.NS,Materials,1077.5,1077.5,24.3,40.9,60.0,100.0,OK,1.0,basing (vol contracting),50.04,3.33,168.0,38.66,-2.99,50.4,Watch ·
+2026-07-21,JAMNAAUTO.NS,Consumer Discretionary,136.07,136.07,65.2,78.3,100.0,100.0,OK,2.0,2A,68.07,2.85,95.0,23.66,-1.28,83.7,Buy ·
+2026-07-21,JSWCEMENT.NS,Materials,140.97,140.97,35.2,55.6,80.0,100.0,OK,2.0,2B,65.7,1.57,91.0,17.11,-0.19,63.3,Hold / Add on pullback ·
+2026-07-21,KAJARIACER.NS,Industrials,1229.3,1229.3,27.3,66.9,80.0,100.0,OK,2.0,2B,55.17,2.94,84.0,18.26,2.57,65.2,Hold / Add on pullback ·
+2026-07-21,KKCL.NS,Consumer Discretionary,513.0,513.0,67.6,50.4,60.0,100.0,OK,1.0,basing (vol contracting),74.67,3.1,168.0,28.47,-0.29,64.5,Accumulate ·
+2026-07-21,KPIL.NS,Utilities,1344.0,1344.0,37.1,73.8,80.0,100.0,OK,2.0,2B,65.12,3.46,144.0,36.36,-3.3,70.1,Hold / Add on pullback ·
+2026-07-21,LALPATHLAB.NS,Health Care,1700.1,1700.1,14.6,75.2,80.0,100.0,OK,2.0,2B,74.9,3.16,78.0,24.11,0.74,65.0,Hold / Add on pullback ↑
+2026-07-21,LLOYDSENGG.NS,Industrials,91.17,91.17,19.4,80.1,80.0,100.0,OK,2.0,2B,51.28,1.3,29.0,15.12,2.26,67.9,Hold / Add on pullback ·
+2026-07-21,LMW.NS,Industrials,16145.0,16145.0,0.0,63.6,60.0,100.0,OK,1.0,basing (vol contracting),76.91,4.85,161.0,31.54,-1.07,52.3,Watch ·
+2026-07-21,MAHLIFE.NS,Real Estate,370.0,370.0,,46.7,60.0,100.0,OK,1.0,basing (vol contracting),72.37,4.2,179.0,30.59,-0.85,46.3,Watch ·
+2026-07-21,MANBA.NS,Financials,142.0,142.0,72.3,71.1,60.0,100.0,OK,1.0,basing,67.88,3.1,173.0,31.25,1.2,73.0,Watch ·
+2026-07-21,MANGLMCEM.NS,Materials,980.0,980.0,32.3,83.5,80.0,100.0,OK,2.0,2B,62.5,1.21,153.0,28.67,-4.46,72.3,Hold / Add on pullback ·
+2026-07-21,MARINE.NS,Industrials,260.6,260.6,23.7,80.0,80.0,100.0,OK,2.0,2B,52.98,2.05,89.0,35.34,-2.61,68.9,Hold / Add on pullback ·
+2026-07-21,MARKSANS.NS,Health Care,260.3,260.3,50.7,70.6,80.0,100.0,OK,2.0,2B,67.67,3.96,55.0,20.26,1.28,72.4,Hold / Add on pullback ↑
+2026-07-21,MAWANASUG.NS,Consumer Staples,116.22,116.22,77.4,79.4,80.0,0.0,FAIL,2.0,2B,53.47,0.62,89.0,25.15,-3.53,0.0,Avoid (quality) ↓
+2026-07-21,MINDACORP.NS,Consumer Discretionary,681.15,681.15,40.1,77.8,80.0,100.0,OK,2.0,2B,57.24,2.32,36.0,10.48,3.01,72.3,Hold / Add on pullback ·
+2026-07-21,MONARCH.NS,Financials,359.95,359.95,75.0,63.9,80.0,85.0,WATCH,2.0,2B,57.0,0.78,55.0,14.41,-2.17,73.9,Hold / Add on pullback ·
+2026-07-21,NAZARA.NS,Consumer Discretionary,309.3,309.3,19.8,62.5,80.0,100.0,OK,2.0,2B,61.67,2.28,67.0,16.58,1.0,61.8,Hold / Add on pullback ·
+2026-07-21,NIRLON.NS,Real Estate,625.9,625.9,,68.5,50.0,85.0,WATCH,,,57.98,3.14,70.0,15.74,1.37,49.2,Watch (stage NA) ·
+2026-07-21,NITINSPIN.NS,Consumer Discretionary,547.25,547.25,77.4,85.7,80.0,100.0,OK,2.0,2B,55.27,5.68,69.0,17.69,3.84,84.3,Hold / Add on pullback ·
+2026-07-21,OMAXAUTO.NS,Consumer Discretionary,235.5,235.5,75.3,85.6,80.0,100.0,OK,2.0,2B,63.54,1.79,71.0,28.52,1.35,83.8,Hold / Add on pullback ·
+2026-07-21,PACEDIGITK.NS,Utilities,205.24,205.24,79.3,63.4,40.0,100.0,OK,3.0,topping,52.35,3.14,160.0,39.93,-2.23,67.0,Trim / Hold-tight ·
+2026-07-21,PARAGON.NS,Materials,49.8,49.8,73.2,37.8,60.0,100.0,OK,1.0,basing (vol contracting),58.2,4.21,146.0,39.72,3.14,61.5,Accumulate ·
+2026-07-21,PCBL.NS,Materials,332.3,332.3,22.0,37.4,60.0,85.0,WATCH,1.0,basing (vol contracting),61.06,2.19,168.0,34.48,-2.68,46.3,Watch ·
+2026-07-21,PGHL.NS,Health Care,6779.5,6779.5,40.9,72.6,80.0,100.0,OK,2.0,2B,51.43,0.61,55.0,17.29,-3.89,70.6,Hold / Add on pullback ↑
+2026-07-21,POKARNA.NS,Materials,982.0,982.0,28.1,73.9,100.0,100.0,OK,2.0,2A,54.71,3.29,137.0,38.13,-3.19,72.9,Buy (rich) ·
+2026-07-21,PRECOT.NS,Consumer Discretionary,854.0,854.0,38.1,84.5,80.0,100.0,OK,2.0,2B,77.13,1.25,53.0,27.09,-0.46,74.1,Hold / Add on pullback ·
+2026-07-21,PRICOLLTD.NS,Consumer Discretionary,610.95,610.95,55.1,70.8,40.0,100.0,OK,3.0,topping,66.73,3.19,180.0,21.46,3.25,63.6,Trim / Hold-tight ·
+2026-07-21,PTCIL.NS,Materials,17853.0,17853.0,0.0,72.9,40.0,100.0,OK,3.0,topping,67.72,1.81,124.0,31.05,-3.44,50.5,Trim / Hold-tight ·
+2026-07-21,RACLGEAR.NS,Consumer Discretionary,1357.0,1357.0,31.6,82.8,80.0,85.0,WATCH,2.0,2B,58.61,0.88,118.0,22.15,-2.68,69.6,Hold / Add on pullback ·
+2026-07-21,RANEHOLDIN.NS,Consumer Discretionary,1760.9,1760.9,51.2,72.0,80.0,100.0,OK,2.0,2B,68.99,1.2,32.0,14.9,1.61,73.0,Hold / Add on pullback ·
+2026-07-21,RAYMONDREL.NS,Real Estate,691.8,691.8,,53.1,80.0,100.0,OK,2.0,2B,52.93,2.15,75.0,27.87,1.54,53.6,Hold / Add on pullback ·
+2026-07-21,REDINGTON.NS,Information Technology,269.95,269.95,89.7,48.2,60.0,100.0,OK,1.0,basing (vol contracting),63.68,13.07,167.0,36.47,1.44,69.3,Accumulate ·
+2026-07-21,RGL.NS,Consumer Discretionary,119.75,119.75,83.5,41.8,60.0,100.0,OK,1.0,basing (vol contracting),58.24,2.72,74.0,26.18,-1.29,65.5,Accumulate ·
+2026-07-21,RICHA.NS,Industrials,93.0,93.0,12.9,89.5,80.0,100.0,OK,2.0,2B,59.8,1.42,55.0,14.37,-0.49,69.5,Hold / Add on pullback ·
+2026-07-21,RPEL.NS,Materials,1264.3,1264.3,5.4,87.2,80.0,100.0,OK,2.0,2B,54.25,0.36,36.0,18.85,-2.99,66.9,Hold / Add on pullback ·
+2026-07-21,RSWM.NS,Consumer Discretionary,216.25,216.25,62.8,80.9,80.0,0.0,FAIL,2.0,2B,68.76,1.36,41.0,18.54,2.66,0.0,Avoid (quality) ·
+2026-07-21,SAKAR.NS,Health Care,878.75,878.75,11.4,88.7,80.0,100.0,OK,2.0,2B,68.69,1.31,57.0,25.25,-0.84,68.9,Hold / Add on pullback ↑
+2026-07-21,SAWALIYA.NS,Consumer Staples,295.95,295.95,5.2,66.5,40.0,85.0,WATCH,3.0,topping,55.21,1.48,74.0,17.99,-1.79,47.3,Trim / Hold-tight ↓
+2026-07-21,SENCO.NS,Consumer Discretionary,377.8,377.8,94.3,82.5,80.0,0.0,FAIL,2.0,2B / Late_Stage_Base,61.66,1.81,159.0,29.88,1.33,0.0,Avoid (quality) ·
+2026-07-21,SFL.NS,Consumer Discretionary,751.05,751.05,25.3,70.2,80.0,100.0,OK,2.0,2B,56.86,0.6,36.0,18.43,-1.95,65.9,Hold / Add on pullback ·
+2026-07-21,SHRINGARMS.NS,Consumer Discretionary,222.41,222.41,63.9,63.3,60.0,100.0,OK,1.0,basing (vol contracting),58.09,1.87,125.0,32.71,-4.07,68.1,Accumulate ·
+2026-07-21,SIGNPOST.NS,Communication Services,305.6,305.6,58.0,83.2,80.0,85.0,WATCH,2.0,2B,64.79,1.13,71.0,32.73,0.39,76.4,Hold / Add on pullback ↓
+2026-07-21,SIS.NS,Industrials,441.25,441.25,32.3,91.8,80.0,100.0,OK,2.0,2B,75.65,1.12,46.0,18.93,0.42,75.2,Hold / Add on pullback ·
+2026-07-21,SOBHA.NS,Real Estate,1456.3,1456.3,,45.1,60.0,100.0,OK,1.0,basing,52.97,3.62,148.0,30.43,0.85,45.8,Watch ·
+2026-07-21,SOTL.NS,Materials,601.75,601.75,55.4,86.5,80.0,100.0,OK,2.0,2B,55.27,1.3,47.0,23.01,3.14,79.1,Hold / Add on pullback ·
+2026-07-21,SPORTKING.NS,Consumer Discretionary,198.46,198.46,69.0,89.5,80.0,100.0,OK,2.0,2B,55.19,0.58,50.0,22.01,-3.07,83.6,Hold / Add on pullback ·
+2026-07-21,STEELCAS.NS,Materials,306.05,306.05,29.3,93.2,80.0,100.0,OK,2.0,2B,62.18,2.17,95.0,28.56,-1.37,74.9,Hold / Add on pullback ·
+2026-07-21,SUNDRMFAST.NS,Consumer Discretionary,967.3,967.3,30.0,58.2,60.0,100.0,OK,1.0,basing (vol contracting),70.29,1.89,180.0,30.41,-1.91,57.9,Watch ·
+2026-07-21,SUPRAJIT.NS,Consumer Discretionary,486.1,486.1,27.2,63.3,60.0,100.0,OK,1.0,basing (vol contracting),86.06,2.89,168.0,25.62,-0.01,59.0,Watch ·
+2026-07-21,SURYODAY.NS,Financials,190.41,190.41,78.0,86.6,80.0,100.0,OK,2.0,2B,69.85,1.56,69.0,19.96,0.53,84.8,Hold / Add on pullback ·
+2026-07-21,SUYOG.NS,Industrials,846.2,846.2,73.7,71.1,80.0,100.0,OK,2.0,2B,70.82,2.25,102.0,30.48,-1.11,78.3,Hold / Add on pullback ·
+2026-07-21,TEXINFRA.NS,Real Estate,114.19,114.19,,80.6,60.0,100.0,OK,1.0,basing (vol contracting),58.35,1.88,29.0,15.02,1.29,58.2,Watch ·
+2026-07-21,TFCILTD.NS,Financials,83.21,83.21,22.2,91.7,80.0,100.0,OK,2.0,2B,61.14,1.59,147.0,31.16,-3.01,72.6,Hold / Add on pullback ·
+2026-07-21,TRAVELFOOD.NS,Industrials,1301.9,1301.9,39.0,67.2,60.0,100.0,OK,1.0,basing (vol contracting),59.76,4.42,158.0,27.43,-3.66,63.3,Watch ·
+2026-07-21,UJJIVANSFB.NS,Financials,65.63,65.63,65.8,81.8,80.0,100.0,OK,2.0,2B,82.75,1.46,179.0,28.72,-0.46,80.1,Hold / Add on pullback ·
+2026-07-21,USHAMART.NS,Materials,500.2,500.2,23.8,76.4,80.0,100.0,OK,2.0,2B,74.22,1.26,78.0,16.1,0.29,67.7,Hold / Add on pullback ·
+2026-07-21,VAIBHAVGBL.NS,Consumer Discretionary,258.11,258.11,69.1,76.7,60.0,100.0,OK,1.0,basing (vol contracting),65.88,2.85,168.0,35.54,2.43,74.1,Accumulate ·
+2026-07-21,VARROC.NS,Consumer Discretionary,658.15,658.15,30.7,79.7,60.0,100.0,OK,1.0,basing (vol contracting),56.28,2.06,167.0,35.35,-4.89,65.6,Watch ·
+2026-07-21,VINCOFE.NS,Consumer Staples,156.61,156.61,39.3,66.2,60.0,100.0,OK,1.0,basing (vol contracting),71.53,2.49,179.0,31.49,-0.11,63.0,Watch ↓
+2026-07-21,VISAKAIND.NS,Materials,81.14,81.14,85.9,68.2,80.0,0.0,FAIL,2.0,2B,52.27,1.34,71.0,21.66,-0.5,0.0,Avoid (quality) ·
+2026-07-21,VSSL.NS,Materials,303.35,303.35,34.7,71.4,60.0,100.0,OK,1.0,basing (vol contracting),66.97,0.92,84.0,19.3,-1.04,63.7,Watch ·
+2026-07-21,WELSPUNLIV.NS,Consumer Discretionary,166.04,166.04,15.7,85.5,80.0,100.0,OK,2.0,2B,55.31,3.07,33.0,15.86,3.12,68.8,Hold / Add on pullback ·
+2026-07-21,WINDLAS.NS,Health Care,880.25,880.25,53.4,46.0,60.0,100.0,OK,1.0,basing (vol contracting),68.45,2.56,162.0,22.98,-0.42,59.4,Watch ↑
+2026-07-21,WSTCSTPAPR.NS,Materials,519.65,519.65,63.7,72.8,80.0,100.0,OK,2.0,2B,57.27,1.45,96.0,22.9,-1.66,76.4,Hold / Add on pullback ·
+2026-07-21,ZIMLAB.NS,Health Care,118.58,118.58,0.0,75.4,80.0,100.0,OK,2.0,2B,63.66,3.18,71.0,35.09,-2.18,61.4,Hold / Add on pullback ↑
+2026-07-27,504605.BO,,4789.0,4789.0,,79.2,80.0,,NA,2,2B,67.14,2.22,59.0,37.66,-0.21,47.7,Watch (no fundamentals) ·
+2026-07-27,532329.BO,,1010.0,1010.0,,70.6,80.0,,NA,2,2B,68.44,1.19,55.0,25.35,-0.05,44.7,Watch (no fundamentals) ·
+2026-07-27,543874.BO,,95.0,95.0,,78.2,60.0,,NA,1,basing (vol contracting),65.54,1.43,164.0,38.14,-2.08,42.4,Watch (no fundamentals) ·
+2026-07-27,AARTIIND.NS,Materials,486.1,486.1,29.1,73.2,80.0,100.0,OK,2,2B,58.81,1.24,167.0,27.77,-4.8,67.9,Hold / Add on pullback ·
+2026-07-27,AIMTRON.NS,Information Technology,1339.3,1339.3,9.0,87.0,80.0,100.0,OK,2,2B,56.65,0.79,54.0,22.78,-1.81,67.7,Hold / Add on pullback ·
+2026-07-27,ALIVUS.NS,Health Care,1132.5,1132.5,59.2,80.5,80.0,100.0,OK,2,2B,53.43,0.57,103.0,18.49,-4.66,78.0,Hold / Add on pullback ↑
+2026-07-27,AMBIKCO.NS,Consumer Discretionary,1717.3,1717.3,64.4,76.0,80.0,100.0,OK,2,2B,69.95,3.46,82.0,17.48,1.68,77.7,Hold / Add on pullback ·
+2026-07-27,ARVIND.NS,Consumer Discretionary,523.45,523.45,39.2,83.1,80.0,100.0,OK,2,2B,51.22,1.4,68.0,26.23,-2.45,73.9,Hold / Add on pullback ·
+2026-07-27,AUTOIND.NS,Consumer Discretionary,89.9,89.9,84.1,76.1,80.0,85.0,WATCH,2,2B,60.46,2.18,69.0,36.89,1.04,80.4,Hold / Add on pullback ·
+2026-07-27,AVADHSUGAR.NS,Consumer Staples,534.0,534.0,57.6,71.6,80.0,85.0,WATCH,2,2B,53.4,1.72,80.0,24.48,2.52,72.2,Hold / Add on pullback ↓
+2026-07-27,BELRISE.NS,Consumer Discretionary,232.66,232.66,29.2,90.8,80.0,85.0,WATCH,2,2B,57.01,1.03,98.0,21.96,-3.15,71.8,Hold / Add on pullback ·
+2026-07-27,BHAGERIA.NS,Materials,218.7,218.7,63.1,67.4,80.0,100.0,OK,2,2B,65.09,0.78,48.0,18.01,-0.71,74.4,Hold / Add on pullback ·
+2026-07-27,BUILDPRO.NS,Industrials,1219.3,1219.3,57.9,85.9,50.0,100.0,OK,NA,,57.77,0.97,98.0,32.2,0.09,72.0,Watch (stage NA) ·
+2026-07-27,BUTTERFLY.NS,Consumer Discretionary,770.0,770.0,34.4,63.4,60.0,100.0,OK,1,basing (vol contracting),81.12,1.54,137.0,27.34,1.19,60.8,Watch ·
+2026-07-27,CAPITALSFB.NS,Financials,299.85,299.85,88.0,68.6,60.0,100.0,OK,1,basing (vol contracting),60.94,1.22,61.0,14.22,0.15,76.0,Accumulate ·
+2026-07-27,CARYSIL.NS,Consumer Discretionary,1157.0,1157.0,40.7,83.1,80.0,100.0,OK,2,2B,61.53,1.69,63.0,20.66,1.11,74.3,Hold / Add on pullback ·
+2026-07-27,CCL.NS,Consumer Staples,1174.4,1174.4,21.8,83.9,80.0,85.0,WATCH,2,2B,65.94,8.52,110.0,16.31,3.98,67.6,Hold / Add on pullback ↓
+2026-07-27,CERA.NS,Industrials,6225.0,6225.0,29.6,59.0,80.0,100.0,OK,2,2B,51.16,3.7,76.0,21.32,3.03,63.0,Hold / Add on pullback ·
+2026-07-27,CHOICEIN.NS,Financials,800.0,800.0,23.6,65.1,60.0,100.0,OK,1,basing (vol contracting),61.72,4.73,179.0,33.75,2.69,58.7,Watch ·
+2026-07-27,COSMOFIRST.NS,Materials,905.0,905.0,66.4,52.1,80.0,85.0,WATCH,2,2B,52.07,1.32,67.0,23.97,-1.45,67.6,Hold / Add on pullback ·
+2026-07-27,CRAFTSMAN.NS,Industrials,9327.0,9327.0,12.2,85.4,80.0,85.0,WATCH,2,2B,69.57,3.24,80.0,17.79,2.19,65.7,Hold / Add on pullback ·
+2026-07-27,CRISIL.NS,Financials,4486.3,4486.3,19.9,34.4,60.0,100.0,OK,1,basing (vol contracting),53.11,1.25,154.0,21.41,0.38,47.0,Watch ·
+2026-07-27,CUB.NS,Financials,221.45,221.45,69.1,82.6,40.0,100.0,OK,3,topping,61.61,1.79,152.0,30.11,-3.17,71.2,Trim / Hold-tight ·
+2026-07-27,DCBBANK.NS,Financials,190.26,190.26,93.7,86.3,40.0,100.0,OK,3,topping,68.07,2.85,166.0,24.76,1.79,78.6,Trim / Hold-tight ·
+2026-07-27,DEEPAKFERT.NS,Materials,1634.5,1634.5,26.3,67.5,80.0,100.0,OK,2,2B,65.68,0.64,42.0,12.68,-1.44,65.2,Hold / Add on pullback ·
+2026-07-27,DENORA.NS,Industrials,879.4,879.4,18.6,63.2,80.0,100.0,OK,2,2B,56.45,2.42,95.0,31.99,-2.35,61.8,Hold / Add on pullback ·
+2026-07-27,FMGOETZE.NS,Consumer Discretionary,483.75,483.75,79.5,44.1,60.0,100.0,OK,1,basing (vol contracting),62.4,2.35,180.0,29.94,0.44,65.3,Accumulate ·
+2026-07-27,GANESHBE.NS,Materials,112.35,112.35,81.6,88.6,80.0,100.0,OK,2,2B,63.73,1.15,52.0,20.74,1.72,86.4,Hold / Add on pullback ·
+2026-07-27,GANESHHOU.NS,Real Estate,823.95,823.95,,58.3,60.0,100.0,OK,1,basing (vol contracting),50.11,0.8,52.0,17.69,-1.18,50.4,Watch ·
+2026-07-27,GIPCL.NS,Utilities,162.58,162.58,91.6,34.1,60.0,100.0,OK,1,basing (vol contracting),58.22,4.13,167.0,34.15,-0.36,64.8,Accumulate ·
+2026-07-27,GOODLUCK.NS,Materials,1531.5,1531.5,41.9,82.9,80.0,100.0,OK,2,2B,60.44,1.9,80.0,27.8,-2.04,74.5,Hold / Add on pullback ·
+2026-07-27,GRAVITA.NS,Materials,1788.8,1788.8,32.3,66.8,60.0,100.0,OK,1,basing (vol contracting),65.66,3.13,167.0,32.98,2.22,61.5,Watch ·
+2026-07-27,HNDFDS.NS,Consumer Staples,577.5,577.5,26.3,72.0,60.0,85.0,WATCH,1,basing (vol contracting),62.78,1.26,165.0,24.3,-3.8,59.5,Watch ↓
+2026-07-27,HOLMARC.NS,Industrials,109.0,109.0,35.6,45.1,60.0,100.0,OK,1,basing (vol contracting),55.71,1.21,53.0,16.17,1.85,54.7,Watch ·
+2026-07-27,HOMEFIRST.NS,Financials,1182.5,1182.5,64.7,43.0,60.0,100.0,OK,1,basing (vol contracting),61.68,5.41,168.0,33.09,1.19,61.2,Accumulate ·
+2026-07-27,ICEMAKE.NS,Industrials,863.25,863.25,0.0,72.2,40.0,100.0,OK,3,topping,64.94,1.02,154.0,31.27,-3.78,50.3,Trim / Hold-tight ·
+2026-07-27,IMPAL.NS,Consumer Discretionary,1125.0,1125.0,83.7,65.8,60.0,100.0,OK,1,basing (vol contracting),57.89,1.54,173.0,28.66,-3.58,74.0,Accumulate ·
+2026-07-27,INDIAGLYCO.NS,Materials,1184.0,1184.0,34.8,80.6,40.0,100.0,OK,3,topping,64.13,1.38,80.0,23.74,1.08,61.9,Trim / Hold-tight ·
+2026-07-27,INDIANHUME.NS,Utilities,386.85,386.85,74.4,53.6,60.0,100.0,OK,1,basing (vol contracting),64.69,1.81,179.0,38.84,1.3,67.4,Accumulate ·
+2026-07-27,INDOSTAR.NS,Financials,269.5,269.5,34.1,56.2,40.0,100.0,OK,3,topping,53.74,1.49,59.0,22.33,-3.3,53.2,Trim / Hold-tight ·
+2026-07-27,INFLUX.NS,Health Care,285.0,285.0,5.1,84.9,80.0,100.0,OK,2,2B,72.18,3.61,97.0,30.75,1.49,66.0,Hold / Add on pullback ↑
+2026-07-27,INNOVACAP.NS,Health Care,970.4,970.4,44.2,78.1,80.0,100.0,OK,2,2B,53.01,1.4,82.0,21.98,-3.97,73.4,Hold / Add on pullback ↑
+2026-07-27,JAMNAAUTO.NS,Consumer Discretionary,135.06,135.06,64.9,82.3,100.0,100.0,OK,2,2A,73.4,3.11,101.0,23.58,-0.21,85.0,Buy ·
+2026-07-27,JINDALSAW.NS,Industrials,250.85,250.85,65.6,76.3,80.0,100.0,OK,2,2B,59.9,7.11,95.0,26.02,-0.49,78.1,Hold / Add on pullback ·
+2026-07-27,JUBLINGREA.NS,Materials,745.0,745.0,26.2,64.5,60.0,100.0,OK,1,basing (vol contracting),62.6,0.99,95.0,26.11,0.26,59.1,Watch ·
+2026-07-27,KAJARIACER.NS,Industrials,1220.0,1220.0,28.0,64.9,80.0,100.0,OK,2,2B,58.47,5.58,90.0,18.28,3.27,64.7,Hold / Add on pullback ·
+2026-07-27,KDDL.NS,Consumer Discretionary,3119.0,3119.0,40.2,78.0,80.0,100.0,OK,2,2B,55.07,1.13,67.0,24.84,-4.85,72.3,Hold / Add on pullback ·
+2026-07-27,KICL.NS,Financials,5390.0,5390.0,25.0,67.8,100.0,100.0,OK,2,2A,69.52,5.97,151.0,32.81,-0.1,70.0,Buy (rich) ·
+2026-07-27,KIMS.NS,Health Care,800.45,800.45,0.0,76.0,80.0,85.0,WATCH,2,2B,78.72,3.07,77.0,18.49,0.12,59.3,Hold / Add on pullback ↑
+2026-07-27,KKCL.NS,Consumer Discretionary,498.0,498.0,66.8,46.0,60.0,100.0,OK,1,basing (vol contracting),56.06,6.58,174.0,28.46,2.76,62.8,Accumulate ·
+2026-07-27,KNAGRI.NS,Consumer Staples,222.9,222.9,60.8,52.8,60.0,100.0,OK,1,basing (vol contracting),67.83,2.11,157.0,31.96,0.92,63.7,Accumulate ↓
+2026-07-27,KRISHNADEF.NS,Industrials,1295.9,1295.9,29.7,90.3,80.0,0.0,FAIL,2,2B,59.45,2.71,77.0,28.09,3.83,0.0,Avoid (quality) ·
+2026-07-27,LLOYDSENGG.NS,Industrials,91.33,91.33,19.5,82.3,80.0,100.0,OK,2,2B,65.21,1.26,35.0,15.13,2.01,68.7,Hold / Add on pullback ·
+2026-07-27,LLOYDSENT.NS,Materials,81.64,81.64,45.0,79.3,80.0,0.0,FAIL,2,2B,60.99,0.74,35.0,17.03,-1.49,0.0,Avoid (quality) ·
+2026-07-27,LMW.NS,Industrials,16140.0,16140.0,2.4,68.1,60.0,100.0,OK,1,basing (vol contracting),70.77,4.89,167.0,36.18,-1.04,54.4,Watch ·
+2026-07-27,MAHLIFE.NS,Real Estate,380.25,380.25,,58.0,60.0,100.0,OK,1,basing (vol contracting),51.41,2.35,152.0,33.04,-3.53,50.3,Watch ·
+2026-07-27,MANALIPETC.NS,Materials,66.97,66.97,80.9,51.5,60.0,100.0,OK,1,basing (vol contracting),52.99,1.62,66.0,19.82,1.85,68.2,Accumulate ·
+2026-07-27,MANGLMCEM.NS,Materials,984.7,984.7,31.9,84.2,80.0,100.0,OK,2,2B,65.45,1.36,159.0,28.67,-4.92,72.4,Hold / Add on pullback ·
+2026-07-27,MANORAMA.NS,Consumer Staples,1658.9,1658.9,27.8,77.0,80.0,85.0,WATCH,2,2B,73.1,1.94,83.0,23.73,-1.11,66.7,Hold / Add on pullback ↓
+2026-07-27,MAWANASUG.NS,Consumer Staples,110.0,110.0,78.8,72.6,80.0,0.0,FAIL,2,2B,60.89,0.67,111.0,27.91,-3.1,0.0,Avoid (quality) ↓
+2026-07-27,METROPOLIS.NS,Health Care,582.0,582.0,11.9,79.7,80.0,100.0,OK,2,2B,64.98,0.98,80.0,18.3,-2.07,65.9,Hold / Add on pullback ↑
+2026-07-27,NAHARPOLY.NS,Consumer Discretionary,279.55,279.55,89.2,48.2,60.0,100.0,OK,1,basing (vol contracting),65.75,1.07,108.0,20.69,-0.85,69.2,Accumulate ·
+2026-07-27,NAHARSPING.NS,Consumer Discretionary,280.2,280.2,28.5,71.6,80.0,100.0,OK,2,2B,60.73,1.08,63.0,14.78,-1.26,67.2,Hold / Add on pullback ·
+2026-07-27,NEOGEN.NS,Materials,2064.1,2064.1,8.0,82.4,80.0,100.0,OK,2,2B,56.78,1.4,41.0,25.57,0.23,65.8,Hold / Add on pullback ·
+2026-07-27,NITINSPIN.NS,Consumer Discretionary,544.0,544.0,77.1,84.4,80.0,100.0,OK,2,2B,55.5,1.03,82.0,21.2,-4.07,83.8,Hold / Add on pullback ·
+2026-07-27,NIVABUPA.NS,Financials,86.92,86.92,10.0,68.7,100.0,100.0,OK,2,2A,64.43,2.98,77.0,13.15,2.44,66.5,Buy (rich) ·
+2026-07-27,OMAXE.NS,Real Estate,89.95,89.95,,70.4,80.0,0.0,FAIL,2,2B,60.04,1.23,95.0,31.93,-0.95,0.0,Avoid (quality) ·
+2026-07-27,ORBTEXP.NS,Consumer Discretionary,244.0,244.0,70.7,72.8,80.0,100.0,OK,2,2B,65.66,0.85,40.0,25.69,-2.48,78.2,Hold / Add on pullback ·
+2026-07-27,PACEDIGITK.NS,Utilities,197.8,197.8,78.2,49.6,40.0,100.0,OK,3,topping,53.53,7.5,166.0,39.93,1.45,61.9,Trim / Hold-tight ·
+2026-07-27,PGHL.NS,Health Care,6784.0,6784.0,40.9,73.5,80.0,100.0,OK,2,2B,55.16,0.62,61.0,17.29,-3.95,70.9,Hold / Add on pullback ↑
+2026-07-27,PLASTIBLEN.NS,Materials,191.08,191.08,76.2,71.8,80.0,100.0,OK,2,2B,52.45,1.45,90.0,29.8,0.93,79.2,Hold / Add on pullback ·
+2026-07-27,POKARNA.NS,Materials,933.3,933.3,29.6,58.2,100.0,100.0,OK,2,2A,63.57,5.71,143.0,38.13,1.86,67.8,Buy (rich) ·
+2026-07-27,POWERMECH.NS,Industrials,2692.9,2692.9,59.8,49.7,80.0,100.0,OK,2,2B,61.44,1.67,80.0,25.07,-0.25,67.3,Hold / Add on pullback ·
+2026-07-27,PRIVISCL.NS,Materials,3628.0,3628.0,14.9,86.4,80.0,100.0,OK,2,2B,65.65,4.73,77.0,21.02,2.6,69.0,Hold / Add on pullback ·
+2026-07-27,PTCIL.NS,Materials,17923.0,17923.0,0.0,68.3,40.0,100.0,OK,3,topping,65.84,4.02,174.0,28.83,3.56,48.9,Trim / Hold-tight ·
+2026-07-27,RANEHOLDIN.NS,Consumer Discretionary,1762.7,1762.7,50.3,72.0,80.0,100.0,OK,2,2B,74.11,1.96,38.0,14.92,1.42,72.8,Hold / Add on pullback ·
+2026-07-27,RAYMOND.NS,Consumer Discretionary,595.0,595.0,99.0,53.4,80.0,0.0,FAIL,2,2B,52.13,3.64,63.0,25.35,-1.47,0.0,Avoid (quality) ·
+2026-07-27,RGL.NS,Consumer Discretionary,118.04,118.04,83.4,40.2,60.0,100.0,OK,1,basing (vol contracting),66.9,5.9,80.0,26.18,0.14,64.9,Accumulate ·
+2026-07-27,RICHA.NS,Industrials,93.0,93.0,13.3,90.1,80.0,100.0,OK,2,2B,60.73,1.42,58.0,14.37,-0.49,69.9,Hold / Add on pullback ·
+2026-07-27,RPEL.NS,Materials,1291.0,1291.0,5.4,88.1,80.0,100.0,OK,2,2B,50.34,0.15,42.0,18.85,-5.0,67.2,Hold / Add on pullback ·
+2026-07-27,RSWM.NS,Consumer Discretionary,213.0,213.0,62.7,81.4,80.0,0.0,FAIL,2,2B,59.69,1.57,47.0,18.59,3.91,0.0,Avoid (quality) ·
+2026-07-27,SANSERA.NS,Consumer Discretionary,3273.0,3273.0,10.7,88.8,80.0,100.0,OK,2,2B,57.79,1.59,32.0,11.51,2.57,68.8,Hold / Add on pullback ·
+2026-07-27,SGIL.NS,Industrials,595.1,595.1,18.4,71.0,80.0,85.0,WATCH,2,2B,58.96,2.29,77.0,21.85,3.81,62.2,Hold / Add on pullback ·
+2026-07-27,SHILPAMED.NS,Health Care,623.0,623.0,20.4,82.5,80.0,100.0,OK,2,2B,58.0,0.74,47.0,21.05,-3.96,69.0,Hold / Add on pullback ↑
+2026-07-27,SHRINGARMS.NS,Consumer Discretionary,220.0,220.0,64.6,63.7,60.0,100.0,OK,1,basing (vol contracting),64.89,5.74,131.0,32.71,-3.02,68.4,Accumulate ·
+2026-07-27,SIGNPOST.NS,Communication Services,306.5,306.5,57.4,83.7,80.0,85.0,WATCH,2,2B,66.58,1.1,77.0,32.73,0.09,76.4,Hold / Add on pullback ↓
+2026-07-27,SILVERTUC.NS,Information Technology,202.42,202.42,30.5,91.7,80.0,0.0,FAIL,2,2B,51.95,1.33,41.0,20.34,3.15,0.0,Avoid (quality) ·
+2026-07-27,SIS.NS,Industrials,435.4,435.4,31.3,80.7,80.0,100.0,OK,2,2B,67.16,1.48,52.0,18.92,1.87,71.1,Hold / Add on pullback ·
+2026-07-27,STEELCAS.NS,Materials,311.8,311.8,28.7,83.6,80.0,100.0,OK,2,2B,61.01,1.73,101.0,28.56,-3.19,71.4,Hold / Add on pullback ·
+2026-07-27,SUNDRMFAST.NS,Consumer Discretionary,958.3,958.3,29.0,58.0,60.0,100.0,OK,1,basing (vol contracting),69.47,3.99,166.0,25.6,-0.99,57.5,Watch ·
+2026-07-27,SUPRAJIT.NS,Consumer Discretionary,491.4,491.4,26.1,65.8,60.0,100.0,OK,1,basing (vol contracting),80.68,2.35,174.0,25.62,-1.08,59.6,Watch ·
+2026-07-27,SUYOG.NS,Communication Services,872.0,872.0,68.3,72.1,80.0,85.0,WATCH,2,2B,62.72,1.49,108.0,30.48,-4.03,75.1,Hold / Add on pullback ↓
+2026-07-27,TALBROAUTO.NS,Consumer Discretionary,386.85,386.85,54.6,82.1,80.0,100.0,OK,2,2B,62.18,8.86,66.0,30.7,-1.91,77.4,Hold / Add on pullback ·
+2026-07-27,TEXINFRA.NS,Real Estate,113.5,113.5,,78.2,60.0,100.0,OK,1,basing (vol contracting),72.92,2.11,35.0,15.03,1.82,57.4,Watch ·
+2026-07-27,THYROCARE.NS,Health Care,584.05,584.05,18.1,95.9,80.0,0.0,FAIL,2,2B,55.89,0.67,48.0,19.55,-1.94,0.0,Avoid (quality) ↑
+2026-07-27,TRAVELFOOD.NS,Industrials,1280.0,1280.0,39.3,62.7,60.0,100.0,OK,1,basing (vol contracting),67.62,5.09,164.0,27.43,-2.01,61.8,Watch ·
+2026-07-27,UNIVCABLES.NS,Industrials,1256.2,1256.2,53.3,84.9,80.0,100.0,OK,2,2B,73.49,1.71,80.0,36.9,-0.13,78.0,Hold / Add on pullback ·
+2026-07-27,USHAMART.NS,Materials,502.1,502.1,24.5,83.0,80.0,100.0,OK,2,2B,80.27,2.13,84.0,16.07,0.06,70.2,Hold / Add on pullback ·
+2026-07-27,VADILALIND.NS,Consumer Staples,6765.0,6765.0,49.6,77.6,80.0,100.0,OK,2,2B,53.28,0.27,32.0,14.99,-3.88,74.6,Hold / Add on pullback ↓
+2026-07-27,VIJAYA.NS,Health Care,1350.8,1350.8,3.8,85.2,80.0,100.0,OK,2,2B,53.05,3.39,77.0,16.23,3.98,65.8,Hold / Add on pullback ↑
+2026-07-27,VINCOFE.NS,Consumer Staples,162.87,162.87,38.8,70.9,60.0,100.0,OK,1,basing (vol contracting),55.69,1.43,173.0,31.5,-3.97,64.5,Watch ↓
+2026-07-27,VISHNU.NS,Materials,636.3,636.3,38.5,84.0,80.0,100.0,OK,2,2B,76.74,1.12,97.0,16.33,-0.08,74.0,Hold / Add on pullback ·
+2026-07-27,WELENT.NS,Industrials,596.8,596.8,68.4,77.0,80.0,0.0,FAIL,2,2B,55.01,3.43,88.0,32.94,-4.54,0.0,Avoid (quality) ·
+2026-07-27,ZIMLAB.NS,Health Care,118.0,118.0,0.0,73.2,80.0,100.0,OK,2,2B,65.63,3.59,77.0,35.09,-1.7,60.6,Hold / Add on pullback ↑

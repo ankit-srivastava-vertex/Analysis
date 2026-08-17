@@ -1,0 +1,153 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>InstAccum Backtest Report</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 980px; margin: 40px auto; padding: 0 20px; color: #1f2937; }
+h1 { font-size: 22px; border-bottom: 2px solid #2962ff; padding-bottom: 6px; }
+h2 { font-size: 16px; margin-top: 26px; color: #2962ff; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
+th { background: #f3f4f6; padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; }
+td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; font-variant-numeric: tabular-nums; }
+.kpi { display: inline-block; margin: 6px 18px 6px 0; }
+.kpi b { font-size: 18px; color: #2962ff; }
+.caveat { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 14px 0; font-size: 13px; }
+.good { color: #089981; font-weight: 600; }
+.bad { color: #f23645; font-weight: 600; }
+</style></head><body>
+<h1>InstAccum Backtest Report</h1>
+<p style="color:#6b7280;font-size:12px">Generated 2026-06-16 22:55 · NIFTY 500 · 2023-04-18 → 2026-06-16 · universe size 381</p>
+
+<div class="caveat">
+<b>Caveats:</b> Universe = current NIFTY 500 (survivorship bias affects absolute returns; less so cross-sectional ranking).
+Forward returns are price-only (no dividends). Deal component (30 pts) is NOT in this backtest — historical bulk-deal data
+is not available; the production weight is held as a theoretical prior. Spearman IC of 0.02–0.05 is considered useful in
+cross-sectional equity factor research; >0.05 is strong.
+</div>
+
+<h2>Summary KPIs</h2>
+<div class="kpi">Avg test-IC (optimised): <b>-0.0314</b></div>
+<div class="kpi">Avg test-IC (production weights): <b>-0.0270</b></div>
+<div class="kpi">Improvement: <b class="bad">-16.3%</b></div>
+<div class="kpi">Folds: <b>5</b></div>
+
+<h2>Univariate factor analysis (Spearman IC vs forward-60d return)</h2>
+<table>
+<tr><th>Feature</th><th>Mean IC</th><th>Std</th><th>t-stat</th><th>Decile 10−Decile 1</th><th>Top decile</th><th>Bot decile</th></tr>
+
+        <tr>
+            <td><b>pp_count60</b></td>
+            <td>-0.0051</td>
+            <td>0.0928</td>
+            <td>-1.41</td>
+            <td>+0.31%</td>
+            <td>+5.14%</td>
+            <td>+4.82%</td>
+        </tr>
+        <tr>
+            <td><b>div_count60</b></td>
+            <td>-0.0114</td>
+            <td>0.0809</td>
+            <td>-3.63</td>
+            <td>-0.58%</td>
+            <td>+3.27%</td>
+            <td>+3.85%</td>
+        </tr>
+        <tr>
+            <td><b>cmf_state</b></td>
+            <td>-0.0118</td>
+            <td>0.0861</td>
+            <td>-3.63</td>
+            <td>-0.52%</td>
+            <td>+5.45%</td>
+            <td>+5.97%</td>
+        </tr>
+        <tr>
+            <td><b>cmf_trend</b></td>
+            <td>+0.0005</td>
+            <td>0.0721</td>
+            <td>+0.19</td>
+            <td>-0.07%</td>
+            <td>+5.42%</td>
+            <td>+5.49%</td>
+        </tr>
+        <tr>
+            <td><b>upvol20</b></td>
+            <td>-0.0133</td>
+            <td>0.0911</td>
+            <td>-3.86</td>
+            <td>+0.48%</td>
+            <td>+6.14%</td>
+            <td>+5.66%</td>
+        </tr>
+</table>
+
+<h2>Walk-forward folds</h2>
+<table>
+<tr><th>Test window</th><th>Train IC</th><th>Test IC</th><th>Baseline IC</th><th>w_pp</th><th>w_div</th><th>w_cmf</th><th>w_upvol</th></tr>
+
+        <tr>
+            <td>2024-10-10→2025-01-06</td>
+            <td>+0.0107</td>
+            <td>-0.0639</td>
+            <td>-0.0544</td>
+            <td>0.25</td>
+            <td>0.25</td>
+            <td>0.25</td>
+            <td>0.25</td>
+        </tr>
+        <tr>
+            <td>2025-01-07→2025-04-02</td>
+            <td>+0.0111</td>
+            <td>-0.0783</td>
+            <td>-0.0456</td>
+            <td>0.31</td>
+            <td>0.00</td>
+            <td>0.40</td>
+            <td>0.29</td>
+        </tr>
+        <tr>
+            <td>2025-04-03→2025-07-01</td>
+            <td>-0.0055</td>
+            <td>-0.0830</td>
+            <td>-0.0797</td>
+            <td>0.26</td>
+            <td>0.26</td>
+            <td>0.27</td>
+            <td>0.22</td>
+        </tr>
+        <tr>
+            <td>2025-07-02→2025-09-25</td>
+            <td>-0.0160</td>
+            <td>-0.0195</td>
+            <td>-0.0406</td>
+            <td>0.35</td>
+            <td>0.35</td>
+            <td>0.30</td>
+            <td>0.00</td>
+        </tr>
+        <tr>
+            <td>2025-09-26→2025-12-23</td>
+            <td>-0.0276</td>
+            <td>+0.0878</td>
+            <td>+0.0853</td>
+            <td>0.25</td>
+            <td>0.25</td>
+            <td>0.25</td>
+            <td>0.25</td>
+        </tr>
+</table>
+
+<h2>Final optimised weights (re-scaled to sum=70; deal=30 unchanged)</h2>
+<table>
+<tr><th>Component</th><th>Production</th><th>Optimised</th><th>Delta</th></tr>
+<tr><td><b>Pocket Pivots</b></td><td>25.00</td><td>19.92</td><td>-5.08</td></tr>
+<tr><td><b>Divergences</b></td><td>20.00</td><td>15.45</td><td>-4.55</td></tr>
+<tr><td><b>CMF state</b></td><td>15.00</td><td>20.51</td><td>+5.51</td></tr>
+<tr><td><b>Up-Vol Share</b></td><td>10.00</td><td>14.13</td><td>+4.13</td></tr>
+<tr><td><b>Deals (prior, not backtested)</b></td><td>30.00</td><td>30.00</td><td>0.00</td></tr>
+</table>
+
+<p style="color:#6b7280;font-size:11px;margin-top:30px">
+Artifacts: <code>data/backtest/results.json</code>, <code>data/backtest/optimized_weights.json</code>,
+OHLCV cache: <code>data/backtest/ohlcv/*.parquet</code>
+</p>
+</body></html>

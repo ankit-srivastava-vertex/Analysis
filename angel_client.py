@@ -55,6 +55,11 @@ from typing import Optional
 
 import pandas as pd
 
+try:
+    import ohlcv_cache  # persistent incremental daily-OHLCV cache (L1 + L2)
+except Exception:       # pragma: no cover - cache is optional, never fatal
+    ohlcv_cache = None
+
 warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,12 +74,14 @@ SCRIP_MASTER_TTL_DAYS = 7
 
 # Adaptive limiter tuned for Angel's documented caps:
 #   getCandleData: 3 req/sec, 180 req/min.
-# RATE_LIMIT_PER_SEC stays exported for back-compat (angel_download_many uses it
-# as max_workers default and for ETA print).
-# NOTE: dropped from 3 -> 2 req/sec. Angel's historical endpoint returns
-# AB1021 ("Too many requests") well below the nominal 3/sec under concurrent
-# multi-pane / multi-workspace load, so we run a touch under the cap.
-RATE_LIMIT_PER_SEC = 2
+# RATE_LIMIT_PER_SEC stays exported for back-compat (ETA print / callers).
+# Run at the documented 3 req/sec nominal. The adaptive _RateLimiter still
+# self-protects: it halves the effective budget on AB1021/AB1004/AB1011 and
+# recovers gradually, so a transient burst under multi-pane load can't cause a
+# sustained rate-limit storm. Bulk fetch concurrency is decoupled and driven by
+# _RATE_LIMIT_MAX_INFLIGHT (see angel_download_many) so the in-flight pipe stays
+# full without exceeding the per-second budget.
+RATE_LIMIT_PER_SEC = 3
 _RATE_LIMIT_PER_MIN = 180
 _RATE_LIMIT_MAX_INFLIGHT = 4
 # Angel error codes that mean "you are being rate-limited". AB1004 is the
@@ -619,6 +626,33 @@ def angel_download(ticker: str,
                    retries: int = 2) -> pd.DataFrame:
     """Drop-in replacement for `yf.download(ticker, start, end)`.
 
+    For daily bars ("1d") this is served through the persistent incremental
+    OHLCV cache (ohlcv_cache): on a warm cache only new/adjusted bars are pulled
+    from Angel; on a cold cache the full range is fetched and stored. Intraday
+    intervals bypass the cache and hit Angel directly (unchanged behaviour).
+    Any cache error falls back to a direct fetch, so caching can never break a
+    download. Returns DataFrame indexed by Timestamp with columns
+    ['Open','High','Low','Close','Volume']; empty on failure.
+    """
+    if interval == "1d" and ohlcv_cache is not None and ohlcv_cache.enabled():
+        try:
+            return ohlcv_cache.get(
+                ticker, start, end, interval,
+                lambda fs, fe: _angel_download_raw(ticker, fs, fe, interval, retries),
+            )
+        except Exception:
+            # Cache must never break a fetch — fall back to the raw path.
+            return _angel_download_raw(ticker, start, end, interval, retries)
+    return _angel_download_raw(ticker, start, end, interval, retries)
+
+
+def _angel_download_raw(ticker: str,
+                        start,
+                        end=None,
+                        interval: str = "1d",
+                        retries: int = 2) -> pd.DataFrame:
+    """Uncached direct Angel getCandleData fetch. See angel_download().
+
     Returns DataFrame indexed by Timestamp with columns
     ['Open','High','Low','Close','Volume']. Empty on failure.
     Note: Angel daily candles cap at 2 000 days per request.
@@ -714,8 +748,14 @@ def angel_download(ticker: str,
 def angel_download_many(tickers,
                         start,
                         end=None,
-                        max_workers: int = RATE_LIMIT_PER_SEC) -> dict:
-    """Bulk fetch. Returns {ticker: DataFrame}, omitting empties."""
+                        max_workers: int = _RATE_LIMIT_MAX_INFLIGHT) -> dict:
+    """Bulk fetch. Returns {ticker: DataFrame}, omitting empties.
+
+    max_workers defaults to _RATE_LIMIT_MAX_INFLIGHT so the in-flight pipe stays
+    full (hiding per-call network RTT); the adaptive _RateLimiter still governs
+    the actual per-second/per-minute request budget, so more workers never means
+    more requests than Angel's cap allows.
+    """
     out = {}
     if not tickers:
         return out
