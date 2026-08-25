@@ -1,6 +1,7 @@
 # ── Core data / scraping ──────────────────────────────
 requests
 httpx
+urllib3                # india_macro.py patches urllib3.util.connection directly
 beautifulsoup4
 pandas
 numpy
@@ -15,10 +16,34 @@ yfinance
 # ── Charting ──────────────────────────────────────────
 plotly
 
+# ── Web apps (screener/app.py, tradingcharts/app.py, multiscreen/server.py) ──
+# tradingcharts/requirements.txt is a subset of these; installing this file is enough.
+flask>=2.3
+flask-cors>=4.0
+waitress>=3.0            # production WSGI server used by both chart apps
+
 # ── PDF / document parsing & generation ───────────────
 pdfplumber
 fpdf2
 PyPDF2
+
+# ── OCR image pipeline (ipo_listing_gainers.py, scanned anchor filings) ──
+Pillow                 # page-image load / deskew / enhance
+scipy                  # despeckle + rule-line removal fallback when cv2 absent
+opencv-contrib-python  # provides cv2; only core APIs are used, so plain
+                       # opencv-python also works — do NOT install both
+
+# Optional heavy OCR tiers — uncomment only if you need them.
+# Both are pulled in lazily behind try/except; the script degrades without them.
+# surya-ocr            # transformer OCR tier (installs torch, ~2.5GB)
+# paddleocr            # PaddleOCR tier (installs paddlepaddle)
+
+# NOTE: OCR also needs two SYSTEM binaries that pip CANNOT install.
+#   macOS:  brew install poppler tesseract
+#   Debian: apt-get install -y poppler-utils tesseract-ocr
+# They are invoked as CLIs (`pdftoppm`, `tesseract`) via subprocess. If missing,
+# the run does NOT fail — scanned filings are silently skipped and you get a
+# workbook with fewer anchor names. Verify with: which pdftoppm tesseract
 
 # ── Angel One SmartAPI (broker historical/live data) ──
 smartapi-python
