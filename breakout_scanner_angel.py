@@ -160,6 +160,9 @@ RS_RISING_LOOKBACK = 50    # v4.4: rising RS-line over last 50 sessions
 MIN_AVG_VOL = 0            # v4.3: liquidity filter disabled
 WATCHLIST_MIN_SCORE = 50
 TRIGGER_MIN_SCORE = 65
+# Observational tag only — never ANDed with the score gates (near-orthogonal).
+ENERGY_VCR_MAX = -0.20        # vcr_raw <= this => ATR expanded >=20% into pivot
+ENERGY_BASE_RANGE_MIN = 28.0  # base_range_pct floor, in percent
 
 
 # ─── Universe ────────────────────────────────────────────────────────────────
@@ -824,6 +827,21 @@ def write_excel(rows: list, out_path: str):
                 others = [c for c in hc.columns if c not in cols_front]
                 hc[cols_front + others].to_excel(
                     w, sheet_name="High Conviction", index=False)
+
+        # ── Sheet 5: Energy Expansion (observational, not gated) ──
+        if "energy_expansion" in df.columns:
+            ee = df[df["energy_expansion"] == True].copy()  # noqa: E712
+            if not ee.empty:
+                ee = ee.sort_values("vcr_raw", ascending=True)
+                cols_front = [
+                    "symbol", "close", "resistance", "distance_pct",
+                    "vcr_raw", "base_range_pct", "score", "hc_path",
+                    "rr", "stop", "target",
+                ]
+                cols_front = [c for c in cols_front if c in ee.columns]
+                others = [c for c in ee.columns if c not in cols_front]
+                ee[cols_front + others].to_excel(
+                    w, sheet_name="Energy Expansion", index=False)
     print(f"  Excel written: {out_path}")
 
 
@@ -1150,6 +1168,12 @@ def scan(symbols: list, ohlcv: dict, bench: pd.Series,
                     ["base_quality", "vcr", "vdu", "proximity", "trend", "rs"]},
                 "vcr_raw": score["vcr_raw"],
                 "vdu_raw": score["vdu_raw"],
+                # Observational tag only (v4.4): ATR expanded >=20% into the
+                # pivot on a wide base. Scores 0/10 on vcr yet had the best
+                # risk-adjusted outcomes in the 15-week review. Not gated.
+                "energy_expansion": bool(
+                    score["vcr_raw"] <= ENERGY_VCR_MAX
+                    and base_geo["range_pct"] * 100 >= ENERGY_BASE_RANGE_MIN),
                 "higher_lows": score["higher_lows"],
                 "rs_rising_50d": rs["pass"],
                 "rs_slope_50d": round(rs["slope"], 6),
@@ -1391,6 +1415,28 @@ def main():
                 {"Note": ["No breakout candidates in either universe"]}).to_excel(
                 w, sheet_name="Combined Breakouts", index=False)
 
+        # Sheet 7: Energy Expansion — observational tag, not gated on anything.
+        n_energy = 0
+        ee_df = (all_bo_df[all_bo_df.get("energy_expansion") == True]  # noqa: E712
+                 .drop_duplicates(subset=["symbol"])
+                 if (not all_bo_df.empty
+                     and "energy_expansion" in all_bo_df.columns)
+                 else pd.DataFrame())
+        if not ee_df.empty:
+            ee_df = ee_df.sort_values("vcr_raw", ascending=True)
+            front = [c for c in ("symbol", "close", "resistance", "distance_pct",
+                                 "vcr_raw", "base_range_pct", "score", "hc_path",
+                                 "rr", "stop", "target") if c in ee_df.columns]
+            rest = [c for c in ee_df.columns if c not in front]
+            ee_df[front + rest].to_excel(
+                w, sheet_name="Energy Expansion", index=False)
+            n_energy = len(ee_df)
+        else:
+            pd.DataFrame({"Note": [
+                f"No candidates with vcr_raw <= {ENERGY_VCR_MAX} and "
+                f"base_range_pct >= {ENERGY_BASE_RANGE_MIN}"]}).to_excel(
+                w, sheet_name="Energy Expansion", index=False)
+
     n_combined = len(combined_bo_syms) if 'combined_bo_syms' in dir() else 0
     n_combined_all = n_combined_all if 'n_combined_all' in dir() else 0
     print(f"  Excel written: {excel_out}")
@@ -1400,6 +1446,7 @@ def main():
     print(f"    Sheet 4: Screener Breakouts ({len(scr_rows)} candidates)")
     print(f"    Sheet 5: Common Breakout ({n_combined} stocks in both)")
     print(f"    Sheet 6: Combined Breakouts ({n_combined_all} stocks, union)")
+    print(f"    Sheet 7: Energy Expansion ({n_energy} tagged, observational)")
 
     # ── TradingView TXT files ──
     tv_dir = os.path.dirname(excel_out)
