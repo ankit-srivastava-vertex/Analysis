@@ -5,9 +5,10 @@ Bulk & Block Deals Scraper (NSE + BSE)
 
 SUMMARY
 -------
-Fetches today's bulk and block deals from both NSE and BSE, optionally
-filters by "superstar" client names, exports to Excel, and sends an
-email report with styled HTML preview.
+Fetches today's bulk and block deals from both NSE and BSE, applies two
+independent filters — a hardcoded superstar-investor list and a hardcoded
+stock watchlist — exports to Excel, and sends an email report with styled
+HTML preview.
 
 WORKFLOW
 --------
@@ -18,9 +19,13 @@ WORKFLOW
    Primary: BSE JSON API (api.bseindia.com).
    Fallback: BSE HTML website scraping (bseindia.com).
 3. Parse and normalise deal data from both exchanges.
-4. Optionally filter deals by a hardcoded list of superstar client names.
+4. Filter the same four feeds two ways:
+   a. by a hardcoded list of superstar client names (who traded?)
+   b. by the hardcoded STOCK_WATCHLIST of scrips (what was traded?)
+   Either filter matching nothing yields a one-row "Status" sheet, so "no
+   deals today" is never confused with "the fetch failed".
 5. Save all deals to Excel with separate sheets:
-   NSE Bulk, NSE Block, BSE Bulk, BSE Block.
+   nse_bulk, nse_block, bse_bulk, bse_block and the four watchlist_* views.
 6. Generate styled HTML email preview table.
 7. Send email with Excel attachment via SMTP.
 
@@ -33,7 +38,9 @@ DATA SOURCES
 
 OUTPUT
 ------
-- BULK_BLOCK_Deals_<timestamp>.xlsx — Multi-sheet Excel (NSE Bulk, NSE Block, BSE Bulk, BSE Block)
+- BULK_BLOCK_Deals_<timestamp>.xlsx — 8 sheets: nse_bulk, nse_block,
+  bse_bulk, bse_block (investor filter) + watchlist_nse_bulk,
+  watchlist_nse_block, watchlist_bse_bulk, watchlist_bse_block (scrip filter)
 - HTML email with styled deal tables
 
 USAGE
@@ -70,6 +77,214 @@ try:
     _HAS_NSEPYTHON = True
 except Exception:
     _HAS_NSEPYTHON = False
+
+
+# ─── Stock watchlist ───────────────────────────────────────────────────────
+# Mirror image of the superstar-investor filter in BSEScraper.run(): that one
+# asks "did these people trade anything?", this one asks "did anyone trade
+# these scrips?". Every NSE/BSE bulk and block deal is checked against the
+# list below and reported regardless of who the counterparty was.
+#
+# Tuple layout: (NSE symbol, BSE scrip code, BSE scrip id, company name)
+#   - NSE symbol  is None for scrips listed only on BSE.
+#   - BSE code/id are None for scrips listed only on NSE (mostly SME) and for
+#     BSE Ltd itself, which is not traded on its own exchange.
+#   - BSE deals are matched on the numeric scrip CODE, because the BSE feed's
+#     "Scrip Name" column carries a short scrip id ("GLAND", "TATATECH"), not
+#     the company name. The scrip id is kept as a secondary key for the HTML
+#     fallback path, whose columns differ from the JSON API's.
+#
+# Resolved against the NSE EQUITY_L + SME_EQUITY_L and the BSE ListofScripData
+# masters via ISIN, so the symbols/codes are exchange-authoritative rather than
+# hand-typed. Re-verify against those masters if you edit this list: a wrong
+# symbol fails silently as "no deals".
+STOCK_WATCHLIST = [
+    ('ADANIPOWER', 533096,  'ADANIPOWER', 'Adani Power Limited'),
+    ('ABSLAMC',    543374,  'ABSLAMC',    'Aditya Birla Sun Life AMC Limited'),
+    ('AEROFLEX',   543972,  'AEROFLEX',   'Aeroflex Industries Limited'),
+    ('AERON',      None,    None,         'Aeron Composite Limited'),
+    ('AIMTRON',    None,    None,         'Aimtron Electronics Limited'),
+    ('ALLETEC',    None,    None,         'All E Technologies Limited'),
+    ('ANAWIL',     None,    None,         'Anawil Wire and Engineering Limited'),
+    ('ARDEE',      544860,  'ARDEE',      'Ardee Industries Limited'),
+    ('AUGMONT',    544888,  'AUGMONT',    'Augmont Enterprises Limited'),
+    ('AURIONPRO',  532668,  'AURIONPRO',  'Aurionpro Solutions Limited'),
+    ('AWFIS',      544181,  'AWFIS',      'Awfis Space Solutions Limited'),
+    ('BAJEL',      544042,  'BAJEL',      'Bajel Projects Limited'),
+    ('BLEL',       544870,  'BLEL',       'Behari Lal Engineering Limited'),
+    ('BHADORA',    None,    None,         'Bhadora Industries Limited'),
+    ('BDL',        541143,  'BDL',        'Bharat Dynamics Limited'),
+    ('BLS',        540073,  'BLS',        'BLS International Services Limited'),
+    ('BSE',        None,    None,         'BSE Limited'),
+    (None,         544343,  'CNINFOTECH', 'Capitalnumbers Infotech Ltd'),
+    ('CHANDAN',    None,    None,         'Chandan Healthcare Limited'),
+    ('CMRGREEN',   544777,  'CMRGREEN',   'CMR Green Technologies Limited'),
+    ('CREDITACC',  541770,  'CREDITACC',  'CreditAccess Grameen Limited'),
+    ('DANISH',     None,    None,         'Danish Power Limited'),
+    ('DEEPINDS',   543288,  'DEEPINDS',   'Deep Industries Limited'),
+    ('EFFWA',      None,    None,         'Effwa Infra & Research Limited'),
+    ('EIMCOELECO', 523708,  'EIMCOELECO', 'Eimco Elecon (India) Limited'),
+    ('EMMIL',      None,    None,         'Energy Mission Machineries (India) Limited'),
+    ('EXCELSOFT',  544617,  'EXCELSOFT',  'Excelsoft Technologies Limited'),
+    ('EXICOM',     544133,  'EXICOM',     'Exicom Tele-Systems Limited'),
+    ('FINBUD',     None,    None,         'Finbud Financial Services Limited'),
+    ('FUSION',     543652,  'FUSION',     'Fusion Finance Limited'),
+    ('GAUDIUMIVF', 544709,  'GAUDIUMIVF', 'Gaudium IVF and Women Health Limited'),
+    ('GENSOL',     542851,  'GENSOL',     'Gensol Engineering Limited'),
+    ('GSFC',       500690,  'GSFC',       'Gujarat State Fertilizers & Chemicals Limited'),
+    ('HARIOMPIPE', 543517,  'HARIOMPIPE', 'Hariom Pipe Industries Limited'),
+    ('HAVELLS',    517354,  'HAVELLS',    'Havells India Limited'),
+    ('HITECH',     543411,  'HITECH',     'Hi-Tech Pipes Limited'),
+    ('HINDCOPPER', 513599,  'HINDCOPPER', 'Hindustan Copper Limited'),
+    ('HPL',        540136,  'HPL',        'HPL Electric & Power Limited'),
+    ('IOC',        530965,  'IOC',        'Indian Oil Corporation Limited'),
+    ('INA',        543620,  'INA',        'Insolation Energy Limited'),
+    ('ITCHOTELS',  544325,  'ITCHOTELS',  'ITC Hotels Limited'),
+    ('ITC',        500875,  'ITC',        'ITC Limited'),
+    ('JSFB',       544118,  'JSFB',       'Jana Small Finance Bank Limited'),
+    ('JASH',       544402,  'JASH',       'Jash Engineering Limited'),
+    ('JAYBEE',     None,    None,         'Jay Bee Laminations Limited'),
+    ('JLHL',       543980,  'JLHL',       'Jupiter Life Line Hospitals Limited'),
+    ('KARURVYSYA', 590003,  'KARURVYSYA', 'Karur Vysya Bank Limited'),
+    ('KEI',        517569,  'KEI',        'KEI Industries Limited'),
+    ('KPIGREEN',   542323,  'KPIGREEN',   'KPI Green Energy Limited'),
+    (None,         544554,  'KVSCASTING', 'KVS Castings Ltd'),
+    ('LALITHAA',   544879,  'LALITHAA',   'Lalithaa Jewellery Mart Limited'),
+    ('LAXMIDENTL', 544339,  'LAXMIDENTL', 'Laxmi Dental Limited'),
+    ('LAXMIINDIA', 544465,  'LAXMIINDIA', 'Laxmi India Finance Limited'),
+    ('M&M',        500520,  'M&M',        'Mahindra & Mahindra Limited'),
+    ('MOLDTKPAC',  533080,  'MOLDTKPAC',  'Mold-Tek Packaging Limited'),
+    ('MSPL',       532650,  'MSPL',       'MSP Steel & Power Limited'),
+    ('NEWJAISA',   None,    None,         'Newjaisa Technologies Limited'),
+    ('NORTHARC',   544260,  'NORTHARC',   'Northern Arc Capital Limited'),
+    ('OMAXE',      532880,  'OMAXE',      'Omaxe Limited'),
+    ('PSFL',       None,    None,         'Paramount Speciality Forgings Limited'),
+    ('PGEL',       533581,  'PGEL',       'PG Electroplast Limited'),
+    ('PRAJIND',    522205,  'PRAJIND',    'Praj Industries Limited'),
+    ('PPL',        542684,  'PPL',        'Prakash Pipes Limited'),
+    ('PRAMODINI',  None,    None,         'Pramodini Medicare Limited'),
+    ('QLINE',      None,    None,         'Q-Line Biotech Limited'),
+    (None,         544091,  'QLL',        'Qualitek Labs Ltd'),
+    ('RACE',       537785,  'RACE',       'Race Eco Chain Limited'),
+    ('RPOWER',     532939,  'RPOWER',     'Reliance Power Limited'),
+    ('RMC',        540358,  'RMC',        'RMC Switchgears Limited'),
+    ('SAHASRA',    None,    None,         'Sahasra Electronic Solutions Limited'),
+    ('SANSERA',    543358,  'SANSERA',    'Sansera Engineering Limited'),
+    ('SENORES',    544319,  'SENORES',    'Senores Pharmaceuticals Limited'),
+    ('SGFIN',      539199,  'SGFIN',      'SG Finserve Limited'),
+    ('SGMART',     512329,  'SGMART',     'SG Mart Limited'),
+    ('SHALBY',     540797,  'SHALBY',     'Shalby Limited'),
+    ('SBCL',       513097,  'SBCL',       'Shivalik Bimetal Controls Limited'),
+    ('SKYWAYS',    544890,  'SKYWAYS',    'Skyways Air Services Limited'),
+    ('SPIC',       590030,  'SPIC',       'Southern Petrochemicals Industries Corporation Limited'),
+    ('SUDEEPPHRM', 544619,  'SUDEEPPHRM', 'Sudeep Pharma Limited'),
+    ('SULA',       543711,  'SULA',       'Sula Vineyards Limited'),
+    ('SUNPHARMA',  524715,  'SUNPHARMA',  'Sun Pharmaceutical Industries Limited'),
+    ('TAC',        None,    None,         'TAC Infosec Limited'),
+    ('TATAELXSI',  500408,  'TATAELXSI',  'Tata Elxsi Limited'),
+    ('TDPOWERSYS', 533553,  'TDPOWERSYS', 'TD Power Systems Limited'),
+    ('TECHERA',    None,    None,         'TechEra Engineering (India) Limited'),
+    ('TECHNOCRAF', 544864,  'TECHNOCRAF', 'Technocraft Ventures Limited'),
+    ('TGL',        None,    None,         'Teerth Gopicon Limited'),
+    ('FEDERALBNK', 500469,  'FEDERALBNK', 'The Federal Bank Limited'),
+    ('TITAGARH',   532966,  'TITAGARH',   'Titagarh Rail Systems Limited'),
+    ('TRANSRAILL', 544317,  'TRANSRAILL', 'Transrail Lighting Limited'),
+    (None,         544531,  'TRUECOLORS', 'True Colors Ltd'),
+    ('UFO',        539141,  'UFO',        'UFO Moviez India Limited'),
+    ('UNIECOM',    544227,  'UNIECOM',    'Unicommerce Esolutions Limited'),
+    ('VIKRAN',     544496,  'VIKRAN',     'Vikran Engineering Limited'),
+    ('VPRPL',      543974,  'VPRPL',      'Vishnu Prakash R Punglia Limited'),
+    (None,         544219,  'VVIPIL',     'VVIP Infratech Ltd'),
+    (None,         539337,  'WAAREE',     'Waaree Technologies Ltd'),
+    ('YESBANK',    532648,  'YESBANK',    'Yes Bank Limited'),
+    ('ZENTEC',     533339,  'ZENTEC',     'Zen Technologies Limited'),
+]
+
+# Sheet key -> (source DataFrame exchange, human label) for the watchlist views.
+WATCHLIST_SHEETS = {
+    "watchlist_nse_bulk": ("nse", "NSE bulk"),
+    "watchlist_nse_block": ("nse", "NSE block"),
+    "watchlist_bse_bulk": ("bse", "BSE bulk"),
+    "watchlist_bse_block": ("bse", "BSE block"),
+}
+
+
+def _watchlist_lookups():
+    """Return (nse_symbols, bse_codes, bse_scrip_ids) as upper-cased sets.
+
+    Derived from STOCK_WATCHLIST on every call so edits to the list take
+    effect without any cache invalidation; the list is ~100 rows, so the cost
+    is irrelevant next to the network fetches.
+    """
+    symbols = {s.strip().upper() for s, _c, _i, _n in STOCK_WATCHLIST if s}
+    codes = {int(c) for _s, c, _i, _n in STOCK_WATCHLIST if c}
+    scrip_ids = {i.strip().upper() for _s, _c, i, _n in STOCK_WATCHLIST if i}
+    return symbols, codes, scrip_ids
+
+
+def _match_watchlist(df, exchange):
+    """Rows of `df` whose scrip is on STOCK_WATCHLIST.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        A raw (unfiltered) deals frame from either exchange.
+    exchange : {'nse', 'bse'}
+        Selects the matching keys. NSE deals carry a clean `symbol` column.
+        BSE deals are matched on the numeric scrip code first — the only key
+        the feed exposes that is stable — with the short scrip id as a
+        fallback for the HTML-scrape path, whose headers vary.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The matching rows, empty if none. Column names are left untouched.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    symbols, codes, scrip_ids = _watchlist_lookups()
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    if exchange == "nse":
+        col = cols.get("symbol")
+        if col is None:
+            return df.iloc[0:0]
+        return df[df[col].astype(str).str.strip().str.upper().isin(symbols)]
+
+    code_col = next((cols[k] for k in cols if "code" in k), None)
+    name_col = next((cols[k] for k in cols
+                     if "name" in k and "client" not in k), None)
+    mask = pd.Series(False, index=df.index)
+    if code_col is not None:
+        mask |= pd.to_numeric(df[code_col], errors="coerce").isin(codes)
+    if name_col is not None:
+        mask |= df[name_col].astype(str).str.strip().str.upper().isin(scrip_ids)
+    return df[mask]
+
+
+def _watchlist_sheet(df, exchange, label, pulled_str, date_range):
+    """Build one watchlist sheet, mirroring the investor sheets' conventions.
+
+    Returns either the matching deals or a single-row "Status" frame so the
+    sheet is never silently absent: the user must be able to tell "no deals in
+    my stocks today" apart from "the feed failed".
+    """
+    if df is None or df.empty:
+        return pd.DataFrame({"Status": [
+            f"ERROR: {label} deals fetch failed or returned empty. {pulled_str}."]})
+
+    hits = _match_watchlist(df, exchange)
+    if not hits.empty:
+        return hits
+
+    dr = date_range(df)
+    msg = (f"No deals in watchlist stocks. Total {label} deals fetched: "
+           f"{len(df)}. Watchlist size: {len(STOCK_WATCHLIST)} stocks.")
+    if dr:
+        msg += f" Data date: {dr}."
+    msg += f" {pulled_str}."
+    return pd.DataFrame({"Status": [msg]})
 
 
 class BSEScraper:
@@ -453,7 +668,16 @@ class BSEScraper:
             traceback.print_exc()
 
     def run(self):
-        """Main execution method"""
+        """Fetch every NSE/BSE bulk and block deal and emit eight Excel sheets.
+
+        Two independent filters are applied to the same four raw feeds:
+          * client name in `client_names_to_filter` -> nse_bulk / nse_block /
+            bse_bulk / bse_block
+          * scrip in the module-level STOCK_WATCHLIST -> the four
+            `watchlist_*` sheets
+        A filter that matches nothing still produces a one-row "Status" sheet
+        so an empty result is distinguishable from a failed fetch.
+        """
         # Download NSE bulk deals data for the latest day
         nse_bulk_deals_df = self.nse_largedeals(mode="bulk_deals")
 
@@ -463,14 +687,19 @@ class BSEScraper:
         # Sample list of superstar names to filter in bulk and block deals
         client_names_to_filter = [
 'AJAY KUMAR AGGARWAL',
+
 'AJAY UPADHYAYA',
 'UPADHYAYA AJAY',
 'UPADHYAYA AJAY SHIV NARAYAN',
+
 'AKASH BHANSHALI',
+
 'Ankit Vijay Kedia',
 'ANKUSH KEDIA',
+
 'Vijay Krishanlal Kedia',
 'Kedia Secuirities Private Limited',
+
 'ASHISH KACHOLIA',
 'ASHISH RAMESH KACHOLIA',
 'ASHISH RAMESHCHANDRA KACHOLIA',
@@ -484,7 +713,12 @@ class BSEScraper:
 'LUCKY INVESTMENT MANAGERS PRIVATE LIMITED',
 'R.B.A. FINANCE ## INVESTMENT CO.',
 'R.B.A.FINANCE & INVT. CO',
+'SURYA VANSHI COMMOTRADE PVT. LTD.',            # spacing/punctuation variant
+'BENGAL FINANCE & INVESTMENT PRIVATE LIMITED',   # name variant of Bengal Fin
+'BENGAL FINANCE & INVESTMENT PVT. LTD.',
+
 'Suresh Kumar Agarwal',
+
 'GOLDMAN SACHS (SINGAPORE) PTE',
 'GOLDMAN SACHS (SINGAPORE) PTE.- ODI',
 'GOLDMAN SACHS COLLECTIVE TRUST - EMERGING MARKETS EQUITY EX CHINA FUND',
@@ -503,7 +737,9 @@ class BSEScraper:
 'GOLDMAN SACHS INVESTMENTS MAURITIUS I LIMITED',
 'GOLDMAN SACHS TRUST II - GOLDMAN SACHS GQG PARTNERS INTERNATIONAL OPPORTUNITIES FUND',
 'GOLDMANSACHS FUNDS GOLDMANSACHS INDIA EQUITY PORTFOLIO',
+
 'INDIA EQUITY FUND 1',
+
 'MADHURI MADHUSUDAN KELA',
 'COHESION MK BEST IDEAS SUB-TRUST',
 'FOUNDERS COLLECTIVE FUND',
@@ -512,13 +748,19 @@ class BSEScraper:
 'SINGULARITY LARGE VALUE FUND III',
 'Chartered Finance & Leasing Limited',
 'Madhusudan Murlidhar Kela',
+'SINGULARITY LARGE VALUE FUND I',               # Fund I (II & III already listed)
+'SINGULARITY GROWTH OPPORTUNITIES FUND II',
+'CHARTERED FINANCE & LEASI NG LIMITED',          # typo in exchange data
+
 'LAROIA MONA',
 'MONA LAROIA',
+
 'BIJAL PRITESH VORA',
 'MALABAR INDIA FUND LIMITED',
 'MASSACHUSETTS INSTITUTE OF TECHNOLOGY',
 'MANISH GROVER', #Jeena Sikho promoter
 'ROHAN GUPTA', #SG Finserve promoter
+
 'NALANDA INDIA EQUITY FUND LIMITED',
 'NALANDA INDIA FUND LIMITED',
 
@@ -602,21 +844,19 @@ class BSEScraper:
 
 'RITU BAPNA',
 'SANDEEP SINGH',
+
 'Mukul Mahavir Agrawal',
 'SANSHI FUND-I',
 'PARAM CAPITAL',
 'Asha Mukul Agrawal',
+
 'SHALU  AGGARWAL',
 'VANAJA SUNDAR IYER',
 'VENKATA NAGARAJU PADALA',
 'VINOD  KUMAR',
+
 'Valuequest S C A L E Fund',
 'VQ FASTERCAP FUND',
-# ── New variations discovered from 1Y historical analysis (May 2026) ──
-'SINGULARITY LARGE VALUE FUND I',               # Fund I (II & III already listed)
-'SURYA VANSHI COMMOTRADE PVT. LTD.',            # spacing/punctuation variant
-'CHARTERED FINANCE & LEASI NG LIMITED',          # typo in exchange data
-'BENGAL FINANCE & INVESTMENT PRIVATE LIMITED',   # name variant of Bengal Fin
 'VALUEQUEST INVESTMENT ADVISORS PVT LTD',        # Valuequest entity
         ]
 
@@ -666,6 +906,14 @@ class BSEScraper:
         dataframes = {"nse_bulk": filtered_nse_bulk_df,
                       "nse_block": filtered_nse_block_df}
 
+        # Same feeds, filtered by scrip instead of by client name.
+        watchlist = {
+            "watchlist_nse_bulk": _watchlist_sheet(
+                nse_bulk_deals_df, "nse", "NSE bulk", pulled_str, _date_range),
+            "watchlist_nse_block": _watchlist_sheet(
+                nse_block_deals_df, "nse", "NSE block", pulled_str, _date_range),
+        }
+
         # Fetch BSE BULK DEALS via API
         bulk_name = 'bse_bulk'
         try:
@@ -689,6 +937,9 @@ class BSEScraper:
         else:
             dataframes[bulk_name] = pd.DataFrame({"Status": [f"ERROR: BSE Bulk deals API failed or returned no data. {pulled_str}."]})
             print(f"⚠️  No data fetched for {bulk_name}")
+
+        watchlist["watchlist_bse_bulk"] = _watchlist_sheet(
+            bulk_df, "bse", "BSE bulk", pulled_str, _date_range)
 
         time.sleep(1)
 
@@ -715,6 +966,15 @@ class BSEScraper:
         else:
             dataframes[block_name] = pd.DataFrame({"Status": [f"ERROR: BSE Block deals API failed or returned no data. {pulled_str}."]})
             print(f"⚠️  No data fetched for {block_name}")
+
+        watchlist["watchlist_bse_block"] = _watchlist_sheet(
+            block_df, "bse", "BSE block", pulled_str, _date_range)
+
+        # Watchlist sheets go last so the investor sheets stay where they are.
+        dataframes.update(watchlist)
+        hits = sum(len(v) for k, v in watchlist.items()
+                   if "Status" not in v.columns)
+        print(f"\n✓ Watchlist ({len(STOCK_WATCHLIST)} stocks): {hits} deal(s) matched")
 
         # Save to Excel
         if dataframes:

@@ -7,7 +7,10 @@ the Nifty 50 benchmark.  Sectors rotate clockwise through four
 quadrants: Leading → Weakening → Lagging → Improving.
 
 Features:
-- 6 timeframes (3-day, 7-day, 12-day, weekly, monthly, quarterly)
+- 6 timeframes (7-day, 12-day, 2-week, weekly, monthly, quarterly).
+  Weekly is the primary sector-selection timeframe and is selected on
+  page load; the daily-based frames are for entry timing only and the
+  3-day frame was removed as too noisy for rotation analysis.
 - JdK RS-Ratio and RS-Momentum computation
 - Constituent drill-down: click any custom sector dot to see per-stock
   mini-RRG with independent timeframe selector and stock checkboxes
@@ -73,13 +76,22 @@ ALL_SECTORS.update(SECTOR_ETFS)
 
 # Timeframe settings: (resample_rule, sma_period, tail_length)
 TIMEFRAMES = {
-    "3 Day":     (None,     3,  8),
-    "7 Day":     (None,     7, 12),
-    "12 Day":    (None,    12, 18),
-    "Weekly":    ("W-FRI", 10, 12),
-    "Monthly":   ("ME",     4,  6),
-    "Quarterly": ("QE",     2,  4),
+    "7 Day":     (None,      7, 12),   # stock-level timing only
+    "12 Day":    (None,     12, 18),   # short-term sector confirmation
+    "2 Week":    ("2W-FRI",  5, 10),   # swing-trading bridge
+    "Weekly":    ("W-FRI",  10, 12),   # PRIMARY — sector selection
+    "Monthly":   ("ME",      4,  6),   # structural confirmation
+    "Quarterly": ("QE",      3,  4),   # secular trends
 }
+
+# Timeframe the chart opens on. Weekly is the primary decision frame, so it
+# should not require a click to reach.
+DEFAULT_TIMEFRAME = "Weekly"
+
+# Quarterly SMA=3 needs >=9 quarter-end bars for a full tail, so 1Y is not
+# enough. Must be a key of data_provider._PERIOD_DAYS — unmapped values there
+# fall back to 366 days silently.
+HISTORY_PERIOD = "5y"
 
 COLORS = [
     "#2196F3", "#FF5722", "#4CAF50", "#9C27B0", "#FF9800",
@@ -92,22 +104,27 @@ COLORS = [
 # ─── Data Fetching ───────────────────────────────────────────────────────────
 
 def fetch_all_prices():
-    """Download 1Y daily close for benchmark + all sector indices/ETFs."""
+    """Download HISTORY_PERIOD daily close for benchmark + all sector indices/ETFs.
+
+    The window is sized by the slowest timeframe: Quarterly (SMA=3, tail=4)
+    needs at least 8 quarter-end bars to draw a full tail.
+    """
     tickers = {BENCHMARK_NAME: BENCHMARK_TICKER}
     tickers.update(ALL_SECTORS)
 
     ticker_list = list(tickers.values())
     name_by_ticker = {v: k for k, v in tickers.items()}
 
-    print("  Downloading 1Y daily data for %d tickers ..." % len(ticker_list))
+    print("  Downloading %s daily data for %d tickers ..." % (
+        HISTORY_PERIOD.upper(), len(ticker_list)))
     try:
         import data_provider as dp
-        raw = dp.download(ticker_list, period="1y", progress=False)
+        raw = dp.download(ticker_list, period=HISTORY_PERIOD, progress=False)
     except Exception as e:
         print("  data_provider failed (%s), falling back to yfinance ..." % e)
         if not _HAS_YFINANCE:
             raise RuntimeError("yfinance is required for RRG chart")
-        raw = yf.download(ticker_list, period="1y", progress=False)
+        raw = yf.download(ticker_list, period=HISTORY_PERIOD, progress=False)
 
     if raw is None or raw.empty:
         print("  ERROR: no data returned")
@@ -608,14 +625,73 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,san
  <details style="margin-top:12px;padding:8px 12px;background:#fafafa;border:1px solid #e0e0e0;border-radius:6px">
   <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#555">Timeframe Reference</summary>
   <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:12px">
-   <tr style="background:#e3f2fd"><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Timeframe</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">SMA</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">Tail</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Data Used</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Meaning</th></tr>
-   <tr><td style="padding:4px 8px;border:1px solid #ddd">3 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">3</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">8</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 8 daily points</td></tr>
-   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">7 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">7</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 12 daily points</td></tr>
-   <tr><td style="padding:4px 8px;border:1px solid #ddd">12 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">18</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Last 18 daily points</td></tr>
-   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Weekly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">10</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled W-FRI</td><td style="padding:4px 8px;border:1px solid #ddd">Last 12 weeks (~3 months)</td></tr>
-   <tr><td style="padding:4px 8px;border:1px solid #ddd">Monthly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">6</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled month-end</td><td style="padding:4px 8px;border:1px solid #ddd">Last 6 months</td></tr>
-   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Quarterly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">2</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled quarter-end</td><td style="padding:4px 8px;border:1px solid #ddd">Last 4 quarters (~1 year)</td></tr>
+   <tr style="background:#e3f2fd"><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Timeframe</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">SMA</th><th style="padding:5px 8px;text-align:center;border:1px solid #ccc">Tail</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Data Used</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Purpose</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Meaning</th></tr>
+   <tr><td style="padding:4px 8px;border:1px solid #ddd">7 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">7</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Stock-level timing only</td><td style="padding:4px 8px;border:1px solid #ddd">Last 12 daily points</td></tr>
+   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">12 Day</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">12</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">18</td><td style="padding:4px 8px;border:1px solid #ddd">Daily (raw)</td><td style="padding:4px 8px;border:1px solid #ddd">Short-term sector confirmation</td><td style="padding:4px 8px;border:1px solid #ddd">Last 18 daily points</td></tr>
+   <tr><td style="padding:4px 8px;border:1px solid #ddd">2 Week</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">5</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">10</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled bi-weekly</td><td style="padding:4px 8px;border:1px solid #ddd">Swing trading bridge</td><td style="padding:4px 8px;border:1px solid #ddd">Last 10 bi-weekly points (~5 months)</td></tr>
+   <tr style="background:#fff8e1"><td style="padding:4px 8px;border:1px solid #ddd;font-weight:700">Weekly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd;font-weight:700">10</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd;font-weight:700">12</td><td style="padding:4px 8px;border:1px solid #ddd;font-weight:700">Resampled W-FRI</td><td style="padding:4px 8px;border:1px solid #ddd;font-weight:700">PRIMARY &mdash; sector selection</td><td style="padding:4px 8px;border:1px solid #ddd;font-weight:700">Last 12 weeks (~3 months)</td></tr>
+   <tr><td style="padding:4px 8px;border:1px solid #ddd">Monthly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">6</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled month-end</td><td style="padding:4px 8px;border:1px solid #ddd">Structural confirmation</td><td style="padding:4px 8px;border:1px solid #ddd">Last 6 months</td></tr>
+   <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Quarterly</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">3</td><td style="padding:4px 8px;text-align:center;border:1px solid #ddd">4</td><td style="padding:4px 8px;border:1px solid #ddd">Resampled quarter-end</td><td style="padding:4px 8px;border:1px solid #ddd">Secular trends</td><td style="padding:4px 8px;border:1px solid #ddd">Last 4 quarters (~1 year)</td></tr>
   </table>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:2px solid #e0e0e0;font-size:12.5px;line-height:1.55;color:#333">
+   <h3 style="margin:0 0 6px;font-size:14px;color:#1976D2">RRG Timeframe: What to Use and When</h3>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">The Default: <b>Weekly</b> (this is what you should start with)</h4>
+   <p style="margin:0">Julius de Kempenaer &mdash; the inventor of RRG &mdash; uses <b>weekly</b> as his primary
+   timeframe and explicitly advises <b>not to go beyond weekly</b> (monthly only in rare long-term
+   scenarios). Weekly is the industry standard because sector rotation doesn't happen in days &mdash;
+   it plays out over weeks to months. Most institutional portfolio managers and the standard
+   StockCharts/Bloomberg RRG implementations default to weekly.</p>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">The Full Picture</h4>
+   <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#e3f2fd"><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Timeframe</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">What It Shows</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Best For</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Tail Length</th></tr>
+    <tr><td style="padding:4px 8px;border:1px solid #ddd"><b>Daily</b></td><td style="padding:4px 8px;border:1px solid #ddd">Quick momentum shifts, noise-prone</td><td style="padding:4px 8px;border:1px solid #ddd">Swing traders fine-tuning entries/exits within a sector you've already identified on weekly</td><td style="padding:4px 8px;border:1px solid #ddd">~30 days of trail covers the same period as a 6-week weekly tail</td></tr>
+    <tr style="background:#fff8e1"><td style="padding:4px 8px;border:1px solid #ddd"><b>Weekly</b></td><td style="padding:4px 8px;border:1px solid #ddd">The real rotation &mdash; medium-term sector shifts</td><td style="padding:4px 8px;border:1px solid #ddd"><b>Primary analysis for everyone</b> &mdash; position traders, swing traders, portfolio managers</td><td style="padding:4px 8px;border:1px solid #ddd">6&ndash;12 week tail is the sweet spot</td></tr>
+    <tr><td style="padding:4px 8px;border:1px solid #ddd"><b>Monthly</b></td><td style="padding:4px 8px;border:1px solid #ddd">Structural, multi-quarter shifts</td><td style="padding:4px 8px;border:1px solid #ddd">Long-term asset allocators; Julius reviews monthly RRGs at the start of each new month</td><td style="padding:4px 8px;border:1px solid #ddd">Very slow; confirms secular trends</td></tr>
+   </table>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">How to Use Them Together (Multi-Timeframe Approach)</h4>
+   <p style="margin:0 0 4px">This is the correct workflow &mdash; not picking one timeframe, but layering:</p>
+   <ol style="margin:0;padding-left:20px">
+    <li><b>Monthly RRG</b> &mdash; Ask: "What is the big structural rotation?" A sector improving on monthly is in a multi-quarter uptrend. Check this once a month.</li>
+    <li><b>Weekly RRG</b> &mdash; Ask: "Which sectors are rotating NOW?" This is your primary decision timeframe. Sectors moving from Improving &rarr; Leading on weekly = actionable. Check this every weekend.</li>
+    <li><b>Daily RRG</b> &mdash; Ask: "Is this a pullback within the trend, or a reversal?" Use daily only AFTER weekly has told you which sector to focus on. It helps time entries.</li>
+   </ol>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">The Critical Insight Most People Miss</h4>
+   <p style="margin:0 0 6px"><b>A sector can be in different quadrants on different timeframes simultaneously</b>
+   &mdash; and that's not a contradiction, it's information:</p>
+   <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#e3f2fd"><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Weekly Quadrant</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Daily Quadrant</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">What It Means</th><th style="padding:5px 8px;text-align:left;border:1px solid #ccc">Action</th></tr>
+    <tr><td style="padding:4px 8px;border:1px solid #ddd">Leading</td><td style="padding:4px 8px;border:1px solid #ddd">Weakening</td><td style="padding:4px 8px;border:1px solid #ddd">Short-term pullback in a strong trend</td><td style="padding:4px 8px;border:1px solid #ddd"><b>Buy the dip</b> &mdash; best entry</td></tr>
+    <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Improving</td><td style="padding:4px 8px;border:1px solid #ddd">Leading</td><td style="padding:4px 8px;border:1px solid #ddd">Short-term strength confirming the weekly turn</td><td style="padding:4px 8px;border:1px solid #ddd"><b>Enter now</b> &mdash; momentum aligning</td></tr>
+    <tr><td style="padding:4px 8px;border:1px solid #ddd">Weakening</td><td style="padding:4px 8px;border:1px solid #ddd">Improving</td><td style="padding:4px 8px;border:1px solid #ddd">Dead cat bounce in a deteriorating trend</td><td style="padding:4px 8px;border:1px solid #ddd"><b>Avoid</b> &mdash; daily is misleading</td></tr>
+    <tr style="background:#f9f9f9"><td style="padding:4px 8px;border:1px solid #ddd">Lagging</td><td style="padding:4px 8px;border:1px solid #ddd">Lagging</td><td style="padding:4px 8px;border:1px solid #ddd">Both timeframes agree: weak</td><td style="padding:4px 8px;border:1px solid #ddd"><b>Stay away</b></td></tr>
+   </table>
+   <p style="margin:6px 0 0">The most powerful signal is when <b>weekly is in Improving and daily crosses into
+   Leading</b> &mdash; that's the weekly rotation being confirmed by short-term momentum acceleration.
+   That's your entry window.</p>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">What Julius de Kempenaer's Actual Workflow Looks Like</h4>
+   <ol style="margin:0;padding-left:20px">
+    <li>Start with <b>weekly RRG</b> for sector selection</li>
+    <li>Identify sectors in the <b>Improving quadrant</b> (not Leading &mdash; by the time it's Leading, early gains are gone)</li>
+    <li>Drill into those sectors and scan for individual stocks with rising RS and MACD crossover signals</li>
+    <li>Use <b>daily RRG</b> to time the actual entry within the selected sector</li>
+   </ol>
+
+   <h4 style="margin:12px 0 4px;font-size:13px">The Hierarchy in Practice</h4>
+   <pre style="margin:0;padding:10px 12px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;font-size:12px;line-height:1.4;overflow-x:auto">
+Quarterly + Monthly  &rarr;  "What's the big structural theme?"  (check once/month)
+        &darr;
+    Weekly (10,12)   &rarr;  "Which sectors are rotating NOW?"   (check every Sunday)
+        &darr;
+  2-Week / 12-Day    &rarr;  "Confirm the rotation is real"      (check mid-week)
+        &darr;
+     7-Day           &rarr;  "Time my entry on specific stocks"  (check daily)</pre>
+  </div>
  </details>
 </div>
 
@@ -653,7 +729,7 @@ var D=__FIG_DATA__,
     T=__TIMEFRAMES__,
     C=__COLORS__,
     CONST=__CONSTITUENTS__,
-    N=D.length,aT=T[0],sel=new Set();
+    N=D.length,aT=(T.indexOf(__DEFAULT_TF__)>=0?__DEFAULT_TF__:T[0]),sel=new Set();
 
 Plotly.newPlot('rrg-chart',D,L,{responsive:true,displayModeBar:true});
 
@@ -661,7 +737,7 @@ Plotly.newPlot('rrg-chart',D,L,{responsive:true,displayModeBar:true});
 var tD=document.getElementById('tf-btns');
 T.forEach(function(tf,i){
  var b=document.createElement('button');
- b.className='tb'+(i===0?' on':'');b.textContent=tf;
+ b.className='tb'+(tf===aT?' on':'');b.textContent=tf;
  b.onclick=function(){aT=tf;
   document.querySelectorAll('.tb').forEach(function(x){x.classList.remove('on')});
   b.classList.add('on');upd()};
@@ -946,6 +1022,7 @@ def save_chart_html(fig, trace_meta, sorted_sectors, constituents_data, output_p
     html = html.replace("__TRACE_META__", json.dumps(trace_meta))
     html = html.replace("__SECTORS__", json.dumps(sorted_sectors))
     html = html.replace("__TIMEFRAMES__", json.dumps(timeframe_names))
+    html = html.replace("__DEFAULT_TF__", json.dumps(DEFAULT_TIMEFRAME))
     html = html.replace("__COLORS__", json.dumps(color_map))
     html = html.replace("__CONSTITUENTS__", json.dumps(constituents_data))
 

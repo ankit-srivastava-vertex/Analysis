@@ -11,14 +11,19 @@ one email with the workbook + interactive HTML charts attached.
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 8 scenarios in order:
+2. Run 9 scenarios in order:
 
    a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
                                                           filtered to a hardcoded
-                                                          "superstar" client list.
+                                                          "superstar" client list and,
+                                                          separately, to a hardcoded
+                                                          stock watchlist. Each filter
+                                                          yields ONE merged sheet with a
+                                                          leading "Source" column:
+                                                          "BulkBlock" and "Watchlist".
                                                           Standalone Excel emission is
                                                           SUPPRESSED via a _CapturingScraper
-                                                          subclass. Sheets prefixed "BB ".
+                                                          subclass.
    b. sector_index      → custom_sector_index.run()     — Custom equal-weighted sector
                                                           indices (Sector Idx Summary +
                                                           Sector Idx Values).
@@ -26,36 +31,45 @@ WORKFLOW
                                                           (FII Flow Summary + FII Daily Data).
    d. fii_sector_flows  → fii_sector_flows.run()        — Fortnightly FII sector-wise flows
                                                           (FII Sector Net Flows + Detail).
-   e. sector_momentum   → sector_momentum.run()         — Mansfield RS per sector
-                                                          (RS Ranking + RS History).
-   f. nse_sector_rs     → nse_ready_sectors.run()       — Mansfield RS on the official
+   e. sector_momentum   → sector_momentum.run()         — Comparative RS per custom sector
+                                                          (RS History; its ranking is
+                                                          folded into "Sector RS Ranking").
+   f. nse_sector_rs     → nse_ready_sectors.run()       — Comparative RS on the official
                                                           NSE sector indices (30 indices)
-                                                          vs Nifty 500 + MidSmall 400
-                                                          (NSE Sector RS Ranking + History).
-   g. rrg               → rrg_chart.run()               — Relative Rotation Graph for 8
-                                                          timeframes (RRG 3 Day … Quarterly).
-   h. ipo_anchor        → ipo_anchor_tracker.run()       — Last-15-month IPOs (NSE + NSE SME)
-                                                          with listing-day +/- and watchlist
-                                                          anchor matches (sheets prefixed
-                                                          "IPO Anchor"). Also writes a
-                                                          standalone TradingView watchlist
-                                                          file ipo_anchor_report.txt.
+                                                          (NSE Sector RS History; its
+                                                          ranking is folded into
+                                                          "Sector RS Ranking").
+                                                          Both rankings carry RS vs Nifty
+                                                          500 for the last 5 weekly
+                                                          snapshots (RS Week 0 = current).
+   g. rrg               → rrg_chart.run()               — Relative Rotation Graph for 6
+                                                          timeframes (RRG 7 Day … Quarterly).
+   h. sector_breadth    → sector_breadth.run()          — Sector-level market breadth from
+                                                          the NIFTY 500 grouped by NSE
+                                                          Industry. Chart-only ("Breadth"
+                                                          tab); emits no Excel sheets.
+   i. stage_analysis    → stage_analysis.run()          — Weinstein 30-week stage analysis
+                                                          of the NIFTY 500 and its NSE
+                                                          Industry composites (Stage
+                                                          Sectors + Stage Stocks + Stage
+                                                          Transitions) plus the "Stage
+                                                          Analysis" chart tab.
 
    Each scenario is wrapped in try/except so a single failure does not
    abort the pipeline; failures are collected in `errors` and reported
    in the email body + summary.
 
-   NOTE: multi_pct_down is now integrated directly into
-   breakout_scanner_angel.py (runs inline as Universe 1). Run that
-   script separately for the combined breakout output.
+   NOTE: the breakout scanner (breakout_scanner_angel.py) is not part of
+   this pipeline. Run that script separately for the breakout output.
 
 3. Merge every scenario's sheets into one Excel workbook
    (market_analysis_report.xlsx). Sub-module standalone Excel files are
    removed after their data is captured, so only the unified workbook
    remains on disk.
 
-4. Collect all HTML chart files (6 charts: sector_index, fii_flows,
-   fii_sector_flows, sector_momentum, nse_sector_rs, rrg).
+4. Collect all HTML chart files (8 charts: sector_index, fii_flows,
+   fii_sector_flows, sector_momentum, nse_sector_rs, rrg, sector_breadth,
+   stage_analysis).
 
 5. Send consolidated email with the unified Excel + HTML charts
    attached (unless --no-email).
@@ -71,12 +85,12 @@ external APIs directly.
 
 OUTPUT
 ------
-- market_analysis_report.xlsx    — Unified workbook, typically ~19 sheets:
+- market_analysis_report.xlsx    — Unified workbook, typically ~22 sheets:
                                     4 BB (bulk/block) + 2 sector_index +
                                     2 fii_flows + 2 fii_sector_flows +
                                     2 sector_momentum + 1 nse_sector_rs +
-                                    8 RRG timeframes.
-- *_chart.html                   — 6 interactive Plotly charts.
+                                    6 RRG timeframes + 3 stage_analysis.
+- *_chart.html                   — 8 interactive Plotly charts.
 
 USAGE
 -----
@@ -86,7 +100,7 @@ USAGE
 
 Available scenario names for --skip:
     bulk_block, sector_index, fii_flows, fii_sector_flows,
-    sector_momentum, nse_sector_rs, rrg, ipo_anchor
+    sector_momentum, nse_sector_rs, rrg, sector_breadth, stage_analysis
 
 DEPENDENCIES
 ------------
@@ -108,16 +122,53 @@ TIMESTAMP = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 # Scenario names for --skip (order = sheet order in unified Excel)
 ALL_SCENARIOS = ["bulk_block", "sector_index",
                  "fii_flows", "fii_sector_flows",
-                 "sector_momentum", "nse_sector_rs", "rrg", "ipo_anchor"]
+                 "sector_momentum", "nse_sector_rs", "rrg",
+                 "sector_breadth", "stage_analysis"]
 
 
 # ─── Scenario runners ──────────────────────────────────────
 
+def _merge_deal_sheets(captured, source_map):
+    """Fold per-exchange deal frames into one, tagged by a ``Source`` column.
+
+    `source_map` maps a raw BulkBlock sheet key to the label written into
+    ``Source``; it is iterated (rather than `captured`) so row order is
+    deterministic regardless of scrape order. NSE and BSE carry different
+    headers, so the concat is an outer join and unmatched columns come
+    through blank. Returns None when no source frame was captured.
+    """
+    parts = []
+    for raw_name, label in source_map.items():
+        if raw_name not in captured:
+            continue
+        df = captured[raw_name]
+        if df is None or (hasattr(df, "empty") and df.empty):
+            df = pd.DataFrame({"Status": ["No matching deals"]})
+        part = df.copy()
+        part.insert(0, "Source", label)
+        parts.append(part)
+
+    if not parts:
+        return None
+
+    merged = pd.concat(parts, ignore_index=True, sort=False)
+    # "Status" is the placeholder each source writes when it has no hits;
+    # park it last so real deal columns stay on the left.
+    cols = [c for c in merged.columns if c != "Status"]
+    if "Status" in merged.columns:
+        cols.append("Status")
+    return merged[cols]
+
+
 def run_bulk_block():
-    """Scrape NSE+BSE bulk/block deals filtered for superstar names.
-    Returns sheets dict + None (no chart).
+    """Scrape NSE+BSE bulk/block deals, filtered by superstar name and by the
+    hardcoded stock watchlist. Returns sheets dict + None (no chart).
     Captures the scraped DataFrames in-memory; suppresses BulkBlock's
     own standalone Excel file so we only emit the unified workbook.
+
+    Each filter collapses its four per-exchange views into ONE sheet with a
+    leading ``Source`` column: ``BulkBlock`` for the superstar-name filter
+    and ``Watchlist`` for the scrip filter.
     """
     from BulkBlock import BSEScraper
     captured = {}
@@ -132,19 +183,30 @@ def run_bulk_block():
     scraper = _CapturingScraper()
     scraper.run()
 
-    # Sheet names use the raw deal type without prefix.
-    sheets = {}
-    name_map = {
+    # Raw BulkBlock keys -> the label written into the merged "Source" column.
+    # NOTE: BulkBlock emits the BSE frames under the lowercase keys
+    # "bse_bulk"/"bse_block" (not "BSE Bulk Deals"), which is why those two
+    # sheets previously leaked into the workbook under their raw names.
+    deal_map = {
         "nse_bulk": "NSE Bulk",
         "nse_block": "NSE Block",
-        "BSE Bulk Deals": "BSE Bulk",
-        "BSE Block Deals": "BSE Block",
+        "bse_bulk": "BSE Bulk",
+        "bse_block": "BSE Block",
     }
-    for raw_name, df in captured.items():
-        clean = name_map.get(raw_name, str(raw_name))
-        if df is None or (hasattr(df, "empty") and df.empty):
-            df = pd.DataFrame({"Note": ["No matching deals"]})
-        sheets[clean[:31]] = df
+    watchlist_map = {
+        "watchlist_nse_bulk": "NSE Bulk",
+        "watchlist_nse_block": "NSE Block",
+        "watchlist_bse_bulk": "BSE Bulk",
+        "watchlist_bse_block": "BSE Block",
+    }
+
+    sheets = {}
+    for sheet_name, source_map in (("BulkBlock", deal_map),
+                                   ("Watchlist", watchlist_map)):
+        merged = _merge_deal_sheets(captured, source_map)
+        if merged is not None:
+            sheets[sheet_name] = merged
+
     return sheets, None
 
 
@@ -160,9 +222,14 @@ def run_sector_index():
 
     sheets = {}
     sheets["Sector Idx Summary"] = summary_df
-    idx_df = pd.DataFrame(all_indices)
+    # all_indices maps each sector to an OHLC frame; the workbook carries the
+    # closing level per sector side by side, and the candles separately.
+    idx_df = pd.DataFrame({name: frame["Close"] for name, frame in all_indices.items()})
     idx_df.index.name = "Date"
     sheets["Sector Idx Values"] = idx_df
+    ohlc = pd.concat(all_indices, names=["Index"])
+    ohlc.index.names = ["Index", "Date"]
+    sheets["Sector Idx OHLC"] = ohlc.reset_index()
 
     # Clean up individual Excel (data goes into unified Excel)
     if os.path.exists(excel_path):
@@ -241,8 +308,102 @@ def run_fii_sector_flows():
     return sheets, chart_path
 
 
+# Number of weekly RS snapshots shown on the "Sector RS Ranking" sheet.
+# Week 0 is the current week; week N is N calendar weeks back.
+WEEKLY_RS_WEEKS = 5
+
+
+def _weekly_rs_labels(weeks=WEEKLY_RS_WEEKS):
+    """Column headers for the weekly RS snapshots, newest first."""
+    return ["RS Week %d" % w for w in range(weeks)]
+
+
+def add_weekly_rs(ranking_df, all_rs, weeks=WEEKLY_RS_WEEKS, key="Sector"):
+    """Replace the single RS column with `weeks` weekly RS-vs-Nifty-500 snapshots.
+
+    `all_rs` is the producer's {name: comparative RS Series} dict, already
+    computed against the PRIMARY benchmark (Nifty 500), so no re-fetch is
+    needed. Week 0 anchors on the newest session present across all series;
+    week N steps back N calendar weeks and takes the last session at or
+    before that date, so holidays never shift a column onto a wrong week.
+    Values are rebased to 0 = neutral, matching the producers'
+    ``rs.iloc[-1] - 100`` convention.
+
+    The MidSmall-400 column is dropped: only the Nifty 500 benchmark is
+    wanted on the merged sheet.
+    """
+    labels = _weekly_rs_labels(weeks)
+    series = {k: v.sort_index() for k, v in (all_rs or {}).items()
+              if v is not None and not v.empty}
+    if ranking_df is None or ranking_df.empty or not series:
+        return ranking_df
+
+    anchor = max(s.index[-1] for s in series.values())
+    table = {}
+    for name, s in series.items():
+        row = {}
+        for w, label in enumerate(labels):
+            val = s.asof(anchor - pd.Timedelta(weeks=w))
+            row[label] = None if pd.isna(val) else round(float(val) - 100, 1)
+        table[name] = row
+
+    df = ranking_df.copy()
+    for label in labels:
+        df[label] = df[key].map(
+            lambda name, lbl=label: table.get(name, {}).get(lbl))
+
+    df = df.drop(columns=[c for c in ("RS vs Nifty 500", "RS vs MidSmall 400")
+                          if c in df.columns])
+
+    # Sector / its descriptor first, then the weekly RS block, then the rest.
+    front = [key] + [c for c in ("Description", "Index") if c in df.columns]
+    rest = [c for c in df.columns if c not in front and c not in labels]
+    df = df[front + labels + rest]
+    return df.sort_values(labels[0], ascending=False, na_position="last")
+
+
+# Ranking sheets folded into the single "Sector RS Ranking" sheet, in order,
+# each tagged with its label in a leading "Source" column.
+RS_RANKING_SOURCES = (
+    ("RS Ranking", "Custom Sector"),
+    ("NSE Sector RS Ranking", "NSE Official"),
+)
+
+
+def merge_rs_rankings(all_sheets):
+    """Fold the custom-sector and official-index RS tables into one sheet.
+
+    Pops the two source sheets and writes ``Sector RS Ranking`` in their
+    place. The two frames carry different descriptor columns ("Description"
+    vs "Index"), so the concat is an outer join and unmatched columns come
+    through blank; both descriptors are pulled to the left so the weekly RS
+    block still reads left-to-right. Mutates and returns `all_sheets`.
+    """
+    parts = []
+    for name, label in RS_RANKING_SOURCES:
+        df = all_sheets.pop(name, None)
+        if df is None or (hasattr(df, "empty") and df.empty):
+            continue
+        part = df.copy()
+        part.insert(0, "Source", label)
+        parts.append(part)
+
+    if parts:
+        merged = pd.concat(parts, ignore_index=True, sort=False)
+        front = [c for c in ("Source", "Sector", "Description", "Index")
+                 if c in merged.columns]
+        rest = [c for c in merged.columns if c not in front]
+        all_sheets["Sector RS Ranking"] = merged[front + rest]
+    return all_sheets
+
+
 def run_sector_momentum():
-    """Run Sector Momentum & RS Analyzer. Returns sheets dict + chart path."""
+    """Run Sector Momentum & RS Analyzer. Returns sheets dict + chart path.
+
+    The ranking is emitted under the interim key "RS Ranking" and carries
+    `WEEKLY_RS_WEEKS` weekly RS-vs-Nifty-500 columns; `merge_rs_rankings()`
+    later folds it into the unified "Sector RS Ranking" sheet.
+    """
     from sector_momentum import run as sm_run
     prefix = os.path.join(SCRIPT_DIR, "sector_momentum")
     result = sm_run(output_prefix=prefix)
@@ -252,7 +413,7 @@ def run_sector_momentum():
     all_rs, all_indices, ranking_df, fig, excel_path, html_path = result
 
     sheets = {}
-    sheets["RS Ranking"] = ranking_df
+    sheets["RS Ranking"] = add_weekly_rs(ranking_df, all_rs)
 
     rs_df = pd.DataFrame(all_rs)
     rs_df.index.name = "Date"
@@ -266,8 +427,12 @@ def run_sector_momentum():
 
 def run_nse_sector_rs():
     """Run NSE Sector RS Analyzer (official indices). Returns sheets dict
-    + chart path. Uses distinct sheet names ('NSE Sector RS ...') to avoid
-    colliding with sector_momentum's 'RS Ranking'/'RS History'.
+    + chart path. Uses distinct interim sheet names ('NSE Sector RS ...') to
+    avoid colliding with sector_momentum's 'RS Ranking'/'RS History'.
+
+    The ranking carries `WEEKLY_RS_WEEKS` weekly RS-vs-Nifty-500 columns and
+    is folded into the unified "Sector RS Ranking" sheet by
+    `merge_rs_rankings()`.
     """
     from nse_ready_sectors import run as nse_run
     prefix = os.path.join(SCRIPT_DIR, "nse_sector_rs")
@@ -278,7 +443,7 @@ def run_nse_sector_rs():
     all_rs, all_indices, ranking_df, fig, excel_path, html_path = result
 
     sheets = {}
-    sheets["NSE Sector RS Ranking"] = ranking_df
+    sheets["NSE Sector RS Ranking"] = add_weekly_rs(ranking_df, all_rs)
 
     rs_df = pd.DataFrame(all_rs)
     rs_df.index.name = "Date"
@@ -326,23 +491,28 @@ def run_rrg():
     return sheets, html_path
 
 
-def run_ipo_anchor():
-    """Run IPO Anchor Tracker. Returns sheets dict + None (no chart).
-    Sheets: 'IPOs' (last-15-month listings + watchlist anchor matches) and
-    'Notes' (methodology). The TradingView .txt watchlist is written by
-    the underlying module to ipo_anchor_report.txt and is NOT merged into
-    the unified workbook (kept as a standalone file for upload).
+def run_sector_breadth():
+    """Run sector-level market breadth. Returns empty sheets + chart path.
+
+    Chart-only by design (no Excel output requested), so the sheets dict is
+    always empty and only the HTML feeds the "Breadth" tab.
     """
-    from ipo_anchor_tracker import run as ipo_run
-    result = ipo_run()
-    sheets_in = result.get("sheets", {})
-    # Prefix sheets so they group together in the unified workbook.
-    sheets = {}
-    if "IPOs" in sheets_in:
-        sheets["IPO Anchor List"] = sheets_in["IPOs"]
-    if "Notes" in sheets_in:
-        sheets["IPO Anchor Notes"] = sheets_in["Notes"]
-    return sheets, None
+    from sector_breadth import run as breadth_run
+    prefix = os.path.join(SCRIPT_DIR, "sector_breadth")
+    _df, html_path = breadth_run(output_prefix=prefix)
+    return {}, html_path
+
+
+def run_stage_analysis():
+    """Run Weinstein stage analysis. Returns sheets dict + chart path.
+
+    The standalone workbook is suppressed (write_excel=False) because the
+    three sheets go straight into the unified workbook.
+    """
+    from stage_analysis import run as stage_run
+    prefix = os.path.join(SCRIPT_DIR, "stage_analysis")
+    sheets, html_path = stage_run(output_prefix=prefix, write_excel=False)
+    return sheets, html_path
 
 
 # ─── Unified Excel builder ──────────────────────────────────────────────────
@@ -366,7 +536,6 @@ EXCLUDED_SHEETS = {
     "RRG Weekly",
     "RRG Monthly",
     "RRG Quarterly",
-    "IPO Anchor Notes",
 }
 
 
@@ -412,10 +581,12 @@ def build_combined_chart(chart_files):
     combined_path = os.path.join(SCRIPT_DIR, "market_charts.html")
 
     label_map = {
-        "sector_momentum_chart.html": "Sector Momentum",
+        "sector_momentum_chart.html": "Sector Momentum RS",
         "nse_sector_rs_chart.html": "NSE Sector RS",
         "custom_sector_index_chart.html": "Custom Sector Index",
         "rrg_chart.html": "RRG",
+        "sector_breadth.html": "Breadth",
+        "stage_analysis.html": "Stage Analysis",
         "fii_flows_chart.html": "FII Flows",
         "fii_sector_flows_chart.html": "FII Sector Flows",
     }
@@ -511,7 +682,7 @@ def main():
     # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
     if "bulk_block" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/8: Bulk & Block Deals (NSE + BSE)")
+        print("  SCENARIO 1/9: Bulk & Block Deals (NSE + BSE)")
         print("=" * 70)
         try:
             sheets, chart = run_bulk_block()
@@ -527,7 +698,7 @@ def main():
     # ── 2. Custom Sector Index ─────────────────────────────────
     if "sector_index" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 2/8: Custom Sector Index")
+        print("  SCENARIO 2/9: Custom Sector Index")
         print("=" * 70)
         try:
             sheets, chart = run_sector_index()
@@ -543,7 +714,7 @@ def main():
     # ── 3. FII Equity Flows ────────────────────────────────────
     if "fii_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 3/8: FII Equity Cash Market Flows")
+        print("  SCENARIO 3/9: FII Equity Cash Market Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_flows()
@@ -559,7 +730,7 @@ def main():
     # ── 4. FII Sector-wise Flows ─────────────────────────────────
     if "fii_sector_flows" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 4/8: FII Sector-wise Flows")
+        print("  SCENARIO 4/9: FII Sector-wise Flows")
         print("=" * 70)
         try:
             sheets, chart = run_fii_sector_flows()
@@ -575,7 +746,7 @@ def main():
     # ── 5. Sector Momentum ─────────────────────────────────────
     if "sector_momentum" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 5/8: Sector Momentum & Relative Strength")
+        print("  SCENARIO 5/9: Sector Momentum & Relative Strength")
         print("=" * 70)
         try:
             sheets, chart = run_sector_momentum()
@@ -591,7 +762,7 @@ def main():
     # ── 6. NSE Sector RS (Official Indices) ────────────────────
     if "nse_sector_rs" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 6/8: NSE Sector Relative Strength (Official Indices)")
+        print("  SCENARIO 6/9: NSE Sector Relative Strength (Official Indices)")
         print("=" * 70)
         try:
             sheets, chart = run_nse_sector_rs()
@@ -607,7 +778,7 @@ def main():
     # ── 7. RRG Chart ────────────────────────────────────────────
     if "rrg" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 7/8: Relative Rotation Graph")
+        print("  SCENARIO 7/9: Relative Rotation Graph")
         print("=" * 70)
         try:
             sheets, chart = run_rrg()
@@ -620,22 +791,37 @@ def main():
             print("  ✗ RRG Chart FAILED: %s" % e)
             traceback.print_exc()
 
-    # ── 8. IPO Anchor Tracker ──────────────────────────────────
-    if "ipo_anchor" not in skip:
+    # ── 8. Sector Market Breadth ────────────────────────────────
+    if "sector_breadth" not in skip:
         print("\n" + "=" * 70)
-        print("  SCENARIO 8/8: IPO Anchor Tracker")
+        print("  SCENARIO 8/9: Sector Market Breadth")
         print("=" * 70)
         try:
-            sheets, chart = run_ipo_anchor()
+            sheets, chart = run_sector_breadth()
             unified_sheets.update(sheets)
             if chart:
                 chart_files.append(chart)
-            print("  ✓ IPO Anchor Tracker complete")
+            print("  ✓ Sector Breadth complete")
         except Exception as e:
-            errors.append("ipo_anchor: %s" % e)
-            print("  ✗ IPO Anchor Tracker FAILED: %s" % e)
+            errors.append("sector_breadth: %s" % e)
+            print("  ✗ Sector Breadth FAILED: %s" % e)
             traceback.print_exc()
 
+    # ── 9. Weinstein Stage Analysis ─────────────────────────────
+    if "stage_analysis" not in skip:
+        print("\n" + "=" * 70)
+        print("  SCENARIO 9/9: Weinstein Stage Analysis")
+        print("=" * 70)
+        try:
+            sheets, chart = run_stage_analysis()
+            unified_sheets.update(sheets)
+            if chart:
+                chart_files.append(chart)
+            print("  ✓ Stage Analysis complete (%d sheets)" % len(sheets))
+        except Exception as e:
+            errors.append("stage_analysis: %s" % e)
+            print("  ✗ Stage Analysis FAILED: %s" % e)
+            traceback.print_exc()
 
     # ── Build Unified Excel ───────────────────────────────────────────
     print("\n" + "=" * 70)
@@ -646,6 +832,7 @@ def main():
         SCRIPT_DIR, "market_analysis_report.xlsx")
 
     if unified_sheets:
+        merge_rs_rankings(unified_sheets)
         build_unified_excel(unified_sheets, unified_excel_path)
     else:
         unified_excel_path = None
@@ -654,7 +841,7 @@ def main():
     # ── Build Combined Chart ─────────────────────────────────────────
     combined_chart_path = build_combined_chart(chart_files)
 
-    # ── 8. Send Email ────────────────────────────────────────────────────
+    # ── Send Email ───────────────────────────────────────────────────────
     if not args.no_email:
         print("\n" + "=" * 70)
         print("  SENDING EMAIL")

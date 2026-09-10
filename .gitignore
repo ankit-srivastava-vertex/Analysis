@@ -14,7 +14,6 @@ env/
 
 # Generated reports & charts (re-created on each run)
 market_analysis_report.xlsx
-pct_down_report.xlsx
 *_chart.html
 
 # Cache files (re-created by scripts)

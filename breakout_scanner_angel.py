@@ -2,28 +2,22 @@
 Breakout Scanner v4.4 (Angel One edition) — Pre-Breakout Setup Detector
 ========================================================================
 
-Dual-universe breakout scanner that identifies stocks forming horizontal
-resistance bases and approaching breakout levels. Runs the full pipeline
-end-to-end: universe generation → OHLCV download → pattern detection →
-scoring → Excel + chart output.
+Breakout scanner that identifies stocks forming horizontal resistance bases
+and approaching breakout levels. Runs the full pipeline end-to-end:
+universe generation → OHLCV download → pattern detection → scoring →
+Excel + chart output.
 
-ARCHITECTURE (v4.4) 
+ARCHITECTURE (v4.4)
 -------------------
-Two independent universes are scanned in sequence:
+A single universe is scanned:
 
-  Universe 1 — Multi Pct-Down (MPD):
-    Calls multi_pct_down.run() INLINE (no separate Excel file needed).
-    Finds NSE / NSE-SME / BSE-SME stocks 2-21% off highs with RS > NIFTY500,
-    above 200-DMA, forming higher lows, in the 350-34000 Cr mcap band (NSE).
-    The raw MPD output is preserved as Sheet 1 of the output workbook.
-
-  Universe 2 — Screener.in:
+  Universe — Screener.in:
     Logs into screener.in and fetches a saved screen URL
     (default: https://www.screener.in/screens/2877406/52w-15/).
     Resolves screener slugs to .NS/.BO tickers for Angel One.
-    Raw screener data is preserved as Sheet 2.
+    Raw screener data is preserved as Sheet 1.
 
-For each universe, the breakout scan detects:
+The breakout scan detects:
   - Horizontal resistance (fractal pivots clustered into bands)
   - Base quality (duration, range, higher lows)
   - Volume contraction (VCR, VDU)
@@ -46,15 +40,16 @@ SCORING (v4.3)
     - Base range ≤ 40%
     - RS rising over 50 sessions
 
-OUTPUT (7-sheet Excel)
+OUTPUT (4-sheet Excel)
 ----------------------
   breakout_watchlist.xlsx:
-    Sheet 1: "MPD Data"           — Raw multi_pct_down screener output (all universes merged)
-    Sheet 2: "Screener Data"      — Raw screener.in stock list
-    Sheet 3: "MPD Breakouts"      — Breakout candidates from MPD universe
-    Sheet 4: "Screener Breakouts" — Breakout candidates from screener universe
-    Sheet 5: "Common Breakout"    — Intersection of Sheets 3 & 4 (broke out in BOTH universes)
-    Sheet 6: "Combined Breakouts" — Union of Sheets 3 & 4 (every breakout; commons listed once)
+    Sheet 1: "Screener Data"      — Raw screener.in stock list
+    Sheet 2: "Screener Breakouts" — Breakout candidates from the screener universe
+    Sheet 3: "Energy Expansion"   — Observational volume/range tag
+    Sheet 4: "MinerviniTrend"     — Names passing all 8 Trend Template criteria.
+                                    Scored over a wide NSE+BSE universe built
+                                    from the ohlcv_cache + index_constituents,
+                                    independent of the screener universe.
 
   Logs:   Output/logs/logs_breakout_scanner_angel_v35_<timestamp>.txt
 
@@ -75,12 +70,10 @@ PREREQS
 
 USAGE
 -----
-  python3 breakout_scanner_angel.py                     # full dual-universe scan
-  python3 breakout_scanner_angel.py --skip-screener     # MPD universe only
-  python3 breakout_scanner_angel.py --skip-mpd          # screener universe only
-  python3 breakout_scanner_angel.py --max 50            # cap each universe to 50
+  python3 breakout_scanner_angel.py                     # full scan
+  python3 breakout_scanner_angel.py --max 50            # cap universe to 50
   python3 breakout_scanner_angel.py --high-conviction   # only HC picks in output
-  python3 breakout_scanner_angel.py --symbols-csv f.csv # custom single-universe mode
+  python3 breakout_scanner_angel.py --symbols-csv f.csv # custom universe mode
   python3 breakout_scanner_angel.py --min-score 70      # raise score threshold
 
 """
@@ -88,7 +81,10 @@ USAGE
 import os
 import sys
 import re
+import glob
+import json
 import math
+import hashlib
 import argparse
 import datetime
 import warnings
@@ -127,8 +123,7 @@ class _Tee:
     def close(self):
         self._file.close()
 
-# Universe source — multi_pct_down runs inline (no separate Excel needed)
-# Screener.in screen URL — second universe source
+# Screener.in screen URL — universe source
 SCREENER_URL_DEFAULT = "https://www.screener.in/screens/2877406/52w-15/"
 
 NIFTY500_BENCH = "^CRSLDX"  # Nifty 500 index (handled via Angel INDEX_OVERRIDES)
@@ -164,63 +159,20 @@ TRIGGER_MIN_SCORE = 65
 ENERGY_VCR_MAX = -0.20        # vcr_raw <= this => ATR expanded >=20% into pivot
 ENERGY_BASE_RANGE_MIN = 28.0  # base_range_pct floor, in percent
 
-
-# ─── Universe ────────────────────────────────────────────────────────────────
-
-def run_multi_pct_down_inline():
-    """Run multi_pct_down screener inline and return (tickers_list, all_sheets_dict).
-
-    Calls multi_pct_down.run() directly, captures the output Excel into
-    DataFrames, extracts 'Yahoo' column for the breakout universe, and
-    returns both the ticker list and the raw sheets dict (for the output
-    workbook).
-    """
-    from multi_pct_down import run as mpd_run
-    import tempfile
-
-    prefix = os.path.join(SCRIPT_DIR, f"_mpd_inline_{TIMESTAMP}")
-    out_xlsx = mpd_run(
-        out_dir=SCRIPT_DIR,
-        skip=set(),
-        min_pct=2.0,
-        max_pct=21.0,
-        max_symbols=0,
-        workers=4,
-        output_prefix=prefix,
-    )
-
-    all_sheets = {}
-    universe = set()
-    if out_xlsx and os.path.exists(out_xlsx):
-        try:
-            dfs = pd.read_excel(out_xlsx, sheet_name=None)
-            for name, df in dfs.items():
-                all_sheets[name] = df
-                if "Yahoo" in df.columns:
-                    tickers = (
-                        df["Yahoo"]
-                        .dropna()
-                        .astype(str)
-                        .str.strip()
-                    )
-                    universe |= set(tickers[tickers != ""])
-        finally:
-            try:
-                os.remove(out_xlsx)
-            except OSError:
-                pass
-
-    # Clean up TradingView .txt sidecar
-    txt_path = f"{prefix}.txt"
-    if os.path.exists(txt_path):
-        try:
-            os.remove(txt_path)
-        except OSError:
-            pass
-
-    tickers = sorted(universe)
-    print(f"  Multi Pct-Down universe: {len(tickers)} unique tickers")
-    return tickers, all_sheets
+# ─── Minervini Trend Template ────────────────────────────────────────────────
+MINERVINI_MIN_BARS       = 252   # a full year of sessions (52-week window)
+MINERVINI_MA200_TREND    = 21    # criterion 4: 200-DMA up over ~1 month
+MINERVINI_LOW_MIN_PCT    = 25.0  # criterion 6: >= 25% above the 52-week low
+MINERVINI_HIGH_MAX_PCT   = 25.0  # criterion 7: within 25% of the 52-week high
+MINERVINI_RS_MIN         = 70    # criterion 8: RS rating floor (1-99)
+MINERVINI_MAX_STALE_DAYS = 7     # drop names whose newest bar lags the universe
+MINERVINI_MIN_PRICE      = 10.0  # rupees; below this a scrip is untradable
+MINERVINI_MIN_TURNOVER   = 1e7   # median 20d traded value floor (₹1 crore)
+MINERVINI_TURNOVER_DAYS  = 20
+# "ideally" preferences — reported via the `ideal` column, never enforced
+MINERVINI_RS_IDEAL       = 80
+MINERVINI_LOW_IDEAL_PCT  = 100.0
+MINERVINI_HIGH_IDEAL_PCT = 15.0
 
 
 # ─── Screener.in universe fetch ──────────────────────────────────────────────
@@ -517,10 +469,12 @@ def linreg_slope(y: pd.Series) -> float:
 def rs_rising(df: pd.DataFrame, bench: pd.Series,
               lookback: int = RS_RISING_LOOKBACK) -> dict:
     """v4.0: True if the relative-strength line (stock_close / benchmark_close)
-    has a positive slope over the last `lookback` sessions. This is the
-    classic Mansfield/IBD RS line — independent of absolute RS magnitude;
+    has a positive slope over the last `lookback` sessions. This is the raw RS
+    line both Mansfield and IBD draw — independent of absolute RS magnitude;
     it captures whether the stock is OUT-PERFORMING the index right now,
-    regardless of the longer-term gap. Returns dict {pass, slope, lookback}.
+    regardless of the longer-term gap. Mansfield's own indicator (the same
+    ratio measured against its 52-week average) is scored separately in
+    `score_stock` block F. Returns dict {pass, slope, lookback}.
     """
     if bench is None or len(bench) < lookback or len(df) < lookback:
         return {"pass": False, "slope": 0.0, "lookback": lookback}
@@ -1045,6 +999,238 @@ def w_pattern(df: pd.DataFrame, base_start, R: float) -> bool:
     return False
 
 
+# ─── Minervini Trend Template ────────────────────────────────────
+
+def build_minervini_universe() -> list:
+    """Wide NSE+BSE universe for the Trend Template.
+
+    Union of two on-disk sources:
+      * every ticker in the ohlcv_cache, recovered from the cache filename
+        (``<safename>_<sha1[:8]>__1d.csv.gz``) and verified against the hash
+      * every constituent listed in index_constituents.json
+
+    Bare symbols are normalised to '.NS' and index symbols ('^...') dropped.
+    nse_ready_sectors.py is deliberately NOT a source: it carries sector *index*
+    closes only and has no stock-level constituents to contribute.
+    """
+    try:
+        import ohlcv_cache
+        cache_dir = ohlcv_cache.CACHE_DIR
+    except Exception:
+        cache_dir = os.path.join(SCRIPT_DIR, ".ohlcv_cache")
+
+    syms, n_cache = set(), 0
+    suffix = "__1d.csv.gz"
+    for path in glob.glob(os.path.join(cache_dir, "*" + suffix)):
+        base = os.path.basename(path)[:-len(suffix)]
+        if "_" not in base:
+            continue
+        name, digest = base.rsplit("_", 1)
+        if hashlib.sha1(name.encode("utf-8")).hexdigest()[:8] != digest:
+            continue                      # sanitised name collided — untrustworthy
+        if name.startswith("^"):
+            continue                      # benchmark/index series, not a stock
+        syms.add(name if "." in name else name + ".NS")
+        n_cache += 1
+
+    n_idx = 0
+    try:
+        with open(os.path.join(SCRIPT_DIR, "index_constituents.json")) as fh:
+            groups = json.load(fh)
+        for grp in groups.values():
+            for sym in grp.get("constituents", []):
+                sym = str(sym).strip()
+                if sym:
+                    syms.add(sym if "." in sym else sym + ".NS")
+                    n_idx += 1
+    except Exception as e:
+        print(f"  index_constituents.json unusable: {e}")
+
+    print(f"  Universe: {len(syms)} unique tickers "
+          f"({n_cache} from ohlcv_cache, {n_idx} from index_constituents)")
+    return sorted(syms)
+
+
+def drop_stale(ohlcv: dict, max_stale_days: int = MINERVINI_MAX_STALE_DAYS) -> tuple:
+    """Drop names whose newest bar lags the universe's newest session.
+
+    The cache holds delisted/suspended scrips whose last bar can be months old;
+    scoring those would report a 52-week range and MAs frozen at a stale date.
+    Returns (fresh_ohlcv, n_dropped).
+    """
+    if not ohlcv:
+        return {}, 0
+    newest = max(df.index.max() for df in ohlcv.values())
+    cutoff = newest - pd.Timedelta(days=max_stale_days)
+    fresh = {k: v for k, v in ohlcv.items() if v.index.max() >= cutoff}
+    return fresh, len(ohlcv) - len(fresh)
+
+
+def rs_ratings(ohlcv: dict) -> dict:
+    """IBD-style 1-99 relative-strength rating for every name in `ohlcv`.
+
+    Raw strength uses the classic IBD weighting that double-counts the most
+    recent quarter::
+
+        2*(P/P_63) + (P/P_126) + (P/P_189) + (P/P_252)
+
+    The raw values are then percentile-ranked onto a 1-99 scale. NOTE: the
+    ranking is relative to THIS scan's universe (the screener list), not the
+    whole market, so a 70 here means "top 30% of the names scanned today".
+    Names with less than a year of history are omitted (no rating).
+
+    Returns {ticker: rating}.
+    """
+    raw = {}
+    for sym, df in ohlcv.items():
+        c = df["Close"].dropna()
+        if len(c) < MINERVINI_MIN_BARS:
+            continue
+        p0 = float(c.iloc[-1])
+        legs = [float(c.iloc[-n]) for n in (63, 126, 189, 252)]
+        if p0 <= 0 or min(legs) <= 0:
+            continue
+        q1, q2, q3, q4 = legs
+        raw[sym] = 2.0 * (p0 / q1) + (p0 / q2) + (p0 / q3) + (p0 / q4)
+    if not raw:
+        return {}
+    ranked = pd.Series(raw).rank(pct=True) * 98.0 + 1.0
+    return {k: int(round(v)) for k, v in ranked.items()}
+
+
+def liquid_enough(df: pd.DataFrame) -> bool:
+    """Price and traded-value floor for the Trend Template.
+
+    The Template says nothing about liquidity, so without this a ₹0.91 scrip
+    with a rising 200-DMA qualifies as a "buy candidate" you could never fill.
+    """
+    c = df["Close"].dropna()
+    if c.empty or float(c.iloc[-1]) < MINERVINI_MIN_PRICE:
+        return False
+    tail = df.tail(MINERVINI_TURNOVER_DAYS)
+    turnover = (tail["Close"] * tail["Volume"]).median()
+    return bool(pd.notna(turnover) and turnover >= MINERVINI_MIN_TURNOVER)
+
+
+def _px(v: float) -> float:
+    """Round a price for display; sub-rupee scrips need more than 2 decimals or
+    their 50/150/200-DMAs collapse onto the same printed value."""
+    return round(float(v), 2 if abs(v) >= 10 else 4)
+
+
+def minervini_trend(df: pd.DataFrame, rs: Optional[float]) -> Optional[dict]:
+    """Evaluate Minervini's 8-point Trend Template for a single symbol.
+
+    All eight criteria are hard gates — failing even one disqualifies the
+    stock. The returned record carries the measured values, a `passed` flag
+    and the list of failed criteria (for the funnel report).
+
+    Returns None when there is less than a year of history, which would make
+    the 52-week range and the 200-DMA tests meaningless.
+    """
+    c = df["Close"].dropna()
+    if len(c) < MINERVINI_MIN_BARS:
+        return None
+
+    close = float(c.iloc[-1])
+    m50 = c.rolling(50).mean().iloc[-1]
+    m150 = c.rolling(150).mean().iloc[-1]
+    ma200 = c.rolling(200).mean().dropna()
+    if pd.isna(m50) or pd.isna(m150) or len(ma200) <= MINERVINI_MA200_TREND:
+        return None
+    m50, m150 = float(m50), float(m150)
+    m200 = float(ma200.iloc[-1])
+    m200_then = float(ma200.iloc[-1 - MINERVINI_MA200_TREND])
+
+    # Consecutive rising sessions in the 200-DMA. Bounded by how much of the
+    # 200-DMA we can actually see: with the default ~252-day lookback only
+    # ~55 sessions of it exist, so the "ideally 4-5 months" preference cannot
+    # be verified and is reported as a streak rather than gated on.
+    rising = 0
+    for delta in reversed(ma200.diff().dropna().tolist()):
+        if delta > 0:
+            rising += 1
+        else:
+            break
+
+    win = df.tail(MINERVINI_MIN_BARS)
+    lo52 = float(win["Low"].min())
+    hi52 = float(win["High"].max())
+    if lo52 <= 0 or hi52 <= 0:
+        return None
+    above_low = (close / lo52 - 1.0) * 100.0
+    below_high = (1.0 - close / hi52) * 100.0
+    rs_val = float("nan") if rs is None or pd.isna(rs) else float(rs)
+
+    checks = {
+        "1_price_above_ma150": close > m150,
+        "2_price_above_ma200": close > m200,
+        "3_ma150_above_ma200": m150 > m200,
+        "4_ma200_rising_1m":   m200 > m200_then,
+        "5_price_above_ma50":  close > m50,
+        "6_above_52w_low":     above_low >= MINERVINI_LOW_MIN_PCT,
+        "7_near_52w_high":     below_high <= MINERVINI_HIGH_MAX_PCT,
+        "8_rs_rating":         (not pd.isna(rs_val)) and rs_val >= MINERVINI_RS_MIN,
+    }
+    fails = [name for name, ok in checks.items() if not ok]
+    ideal = (not fails
+             and rs_val >= MINERVINI_RS_IDEAL
+             and above_low >= MINERVINI_LOW_IDEAL_PCT
+             and below_high <= MINERVINI_HIGH_IDEAL_PCT)
+
+    return {
+        "close": _px(close),
+        "rs_rating": None if pd.isna(rs_val) else int(rs_val),
+        "pct_above_52w_low": round(above_low, 1),
+        "pct_below_52w_high": round(below_high, 1),
+        "ma50": _px(m50),
+        "ma150": _px(m150),
+        "ma200": _px(m200),
+        "ma200_rising_days": rising,
+        "low_52w": _px(lo52),
+        "high_52w": _px(hi52),
+        "ideal": ideal,
+        "passed": not fails,
+        "fails": fails,
+    }
+
+
+def scan_minervini(ohlcv: dict) -> tuple:
+    """Run the Trend Template across an entire fetched universe.
+
+    Evaluates every ticker in `ohlcv` (not just the breakout candidates) — the
+    candles are already downloaded, so this costs no extra API calls.
+
+    The price/turnover floor is applied BEFORE the RS percentile is computed, so
+    illiquid scrips (whose percentage moves are erratic) cannot distort the
+    ranking of the tradable names.
+
+    Returns (rows, fail_counts, skipped, illiquid) where `rows` holds only the
+    names that passed all eight criteria, `fail_counts` maps each criterion to
+    how many names it eliminated, `skipped` counts names with less than a year
+    of history and `illiquid` counts names cut by the liquidity floor.
+    """
+    tradable = {s: df for s, df in ohlcv.items() if liquid_enough(df)}
+    illiquid = len(ohlcv) - len(tradable)
+    ratings = rs_ratings(tradable)
+    rows, fail_counts, skipped = [], {}, 0
+    for sym in sorted(tradable):
+        rec = minervini_trend(tradable[sym], ratings.get(sym))
+        if rec is None:
+            skipped += 1
+            continue
+        if rec["passed"]:
+            row = {"symbol": sym}
+            row.update({k: v for k, v in rec.items()
+                        if k not in ("passed", "fails")})
+            rows.append(row)
+        else:
+            for name in rec["fails"]:
+                fail_counts[name] = fail_counts.get(name, 0) + 1
+    rows.sort(key=lambda r: (-(r["rs_rating"] or 0), r["symbol"]))
+    return rows, fail_counts, skipped, illiquid
+
+
 # ─── Scan driver ─────────────────────────────────────────────────
 
 def scan(symbols: list, ohlcv: dict, bench: pd.Series,
@@ -1206,16 +1392,19 @@ def main():
                    help="only output HC picks (v3.3 calibrated rule)")
     p.add_argument("--symbols-csv", type=str, default="",
                    help="path to CSV with a 'ticker' column to use as universe "
-                        "(overrides default dual-universe mode)")
+                        "(overrides the default screener universe)")
     p.add_argument("--screener-url", type=str, default=SCREENER_URL_DEFAULT,
-                   help="screener.in screen URL for second universe "
+                   help="screener.in screen URL for the universe "
                         f"(default: {SCREENER_URL_DEFAULT})")
-    p.add_argument("--skip-mpd", action="store_true",
-                   help="skip multi_pct_down universe (run screener only)")
-    p.add_argument("--skip-screener", action="store_true",
-                   help="skip screener.in universe (run MPD only)")
     p.add_argument("--out-tag", type=str, default="",
                    help="suffix appended to output Excel filenames")
+    p.add_argument("--minervini-universe", choices=("cache", "screener"),
+                   default="cache",
+                   help="universe for the MinerviniTrend sheet: 'cache' = full "
+                        "NSE+BSE ohlcv_cache + index_constituents (slow, "
+                        "correct), 'screener' = reuse the screener universe")
+    p.add_argument("--skip-minervini", action="store_true",
+                   help="skip the MinerviniTrend sheet (keeps runs fast)")
     args = p.parse_args()
     strict = not args.no_strict
 
@@ -1232,8 +1421,7 @@ def main():
     print(f"  Mode  : {'STRICT (v3.3 hard gates ON)' if strict else 'DIAGNOSTIC (gates OFF)'}")
     if args.high_conviction:
         print("  Filter: HIGH-CONVICTION only (v3.3 rule)")
-    print(f"  Universes: MPD={'ON' if not args.skip_mpd else 'OFF'}"
-          f" | Screener={'ON' if not args.skip_screener else 'OFF'}")
+    print("  Universe : Screener.in")
     print("=" * 70)
 
     effective_min_score = 0.0 if args.high_conviction else args.min_score
@@ -1258,63 +1446,71 @@ def main():
         print("\nDONE.")
         return
 
-    # ── Dual-universe mode (default) ──
-    # Fetch benchmark once (shared by both scans)
+    # ── Screener universe mode (default) ──
+    # Fetch benchmark once
     bench = fetch_benchmark(args.lookback)
 
-    mpd_sheets = {}   # raw multi_pct_down data sheets
-    mpd_rows = []     # breakout results from MPD universe
     scr_raw_df = None # raw screener data
     scr_rows = []     # breakout results from screener universe
-    ohlcv_mpd = {}    # candles fetched for MPD universe (reused by scorecard)
-    ohlcv_scr = {}    # candles fetched for Screener universe (reused by scorecard)
+    ohlcv_scr = {}    # candles fetched for the Screener universe
 
-    # ── Universe 1: Multi Pct-Down ──
-    if not args.skip_mpd:
-        print("\n" + "=" * 70)
-        print("  UNIVERSE 1: Multi Pct-Down Screener")
-        print("=" * 70)
-        mpd_tickers, mpd_sheets = run_multi_pct_down_inline()
+    # ── Universe: Screener.in ──
+    print("\n" + "=" * 70)
+    print("  UNIVERSE: Screener.in")
+    print("=" * 70)
+    try:
+        scr_tickers = fetch_screener_universe(args.screener_url)
+        # Save the raw screener reference DataFrame
+        out_ref = os.path.join(OUTPUT_DIR, "screener_data.xlsx")
+        if os.path.exists(out_ref):
+            scr_raw_df = pd.read_excel(out_ref)
         if args.max > 0:
-            mpd_tickers = mpd_tickers[:args.max]
-            print(f"  Universe capped to {len(mpd_tickers)}")
-        if mpd_tickers:
-            ohlcv_mpd = fetch_ohlcv(mpd_tickers, args.lookback)
-            print("\n  Scanning MPD universe ...")
-            mpd_rows, mpd_drops = scan(list(ohlcv_mpd.keys()), ohlcv_mpd,
+            scr_tickers = scr_tickers[:args.max]
+            print(f"  Universe capped to {len(scr_tickers)}")
+        if scr_tickers:
+            ohlcv_scr = fetch_ohlcv(scr_tickers, args.lookback)
+            print("\n  Scanning Screener universe ...")
+            scr_rows, scr_drops = scan(list(ohlcv_scr.keys()), ohlcv_scr,
                                        bench, effective_min_score, strict=strict)
-            _print_scan_stats(mpd_rows, mpd_drops, effective_min_score)
+            _print_scan_stats(scr_rows, scr_drops, effective_min_score)
         else:
-            print("  No tickers from Multi Pct-Down — skipping scan.")
+            print("  No tickers from Screener.in — skipping scan.")
+    except Exception as e:
+        print(f"  Screener universe FAILED: {e}")
+        import traceback
+        traceback.print_exc()
 
-    # ── Universe 2: Screener.in ──
-    if not args.skip_screener:
+    # ── Minervini Trend Template over the whole fetched universe ──
+    mt_rows, mt_fails, mt_skipped, mt_illiquid = [], {}, 0, 0
+    if not args.skip_minervini:
         print("\n" + "=" * 70)
-        print("  UNIVERSE 2: Screener.in")
+        print("  MINERVINI TREND TEMPLATE")
         print("=" * 70)
-        try:
-            scr_tickers = fetch_screener_universe(args.screener_url)
-            # Save the raw screener reference DataFrame
-            out_ref = os.path.join(OUTPUT_DIR, "screener_data.xlsx")
-            if os.path.exists(out_ref):
-                scr_raw_df = pd.read_excel(out_ref)
+        if args.minervini_universe == "screener":
+            mt_ohlcv = dict(ohlcv_scr)
+            print(f"  Universe: screener list ({len(mt_ohlcv)} tickers)")
+        else:
+            mt_universe = build_minervini_universe()
             if args.max > 0:
-                scr_tickers = scr_tickers[:args.max]
-                print(f"  Universe capped to {len(scr_tickers)}")
-            if scr_tickers:
-                ohlcv_scr = fetch_ohlcv(scr_tickers, args.lookback)
-                print("\n  Scanning Screener universe ...")
-                scr_rows, scr_drops = scan(list(ohlcv_scr.keys()), ohlcv_scr,
-                                           bench, effective_min_score, strict=strict)
-                _print_scan_stats(scr_rows, scr_drops, effective_min_score)
-            else:
-                print("  No tickers from Screener.in — skipping scan.")
-        except Exception as e:
-            print(f"  Screener universe FAILED: {e}")
-            import traceback
-            traceback.print_exc()
+                mt_universe = mt_universe[:args.max]
+                print(f"  Universe capped to {len(mt_universe)}")
+            mt_ohlcv = fetch_ohlcv(mt_universe, args.lookback)
+        mt_ohlcv, mt_stale = drop_stale(mt_ohlcv)
+        if mt_stale:
+            print(f"  Dropped {mt_stale} stale names "
+                  f"(newest bar > {MINERVINI_MAX_STALE_DAYS}d behind the universe)")
+        if mt_ohlcv:
+            mt_rows, mt_fails, mt_skipped, mt_illiquid = scan_minervini(mt_ohlcv)
+            print(f"  Dropped {mt_illiquid} illiquid names "
+                  f"(< ₹{MINERVINI_MIN_PRICE:.0f} or median {MINERVINI_TURNOVER_DAYS}d "
+                  f"turnover < ₹{MINERVINI_MIN_TURNOVER / 1e7:.0f}cr)")
+            print(f"  Evaluated {len(mt_ohlcv) - mt_illiquid - mt_skipped} names "
+                  f"({mt_skipped} skipped: < 1 year of history)")
+            for name in sorted(mt_fails):
+                print(f"    failed {name}: {mt_fails[name]}")
+            print(f"  Passed all 8 criteria: {len(mt_rows)}")
 
-    # ── Build unified 7-sheet Excel ──
+    # ── Build unified 4-sheet Excel ──
     print("\n" + "=" * 70)
     print("  BUILDING COMBINED OUTPUT")
     print("=" * 70)
@@ -1325,39 +1521,14 @@ def main():
                                  f"breakout_watchlist_{args.out_tag}.xlsx")
 
     with pd.ExcelWriter(excel_out, engine="openpyxl") as w:
-        # Sheet 1: MPD raw data (all universes combined)
-        if mpd_sheets:
-            combined_mpd = pd.concat(
-                [df for df in mpd_sheets.values()
-                 if df is not None and not df.empty
-                 and "Note" not in df.columns],
-                ignore_index=True)
-            if not combined_mpd.empty:
-                combined_mpd.to_excel(w, sheet_name="MPD Data", index=False)
-            else:
-                pd.DataFrame({"Note": ["No MPD data"]}).to_excel(
-                    w, sheet_name="MPD Data", index=False)
-        else:
-            pd.DataFrame({"Note": ["MPD skipped"]}).to_excel(
-                w, sheet_name="MPD Data", index=False)
-
-        # Sheet 2: Screener raw data
+        # Sheet 1: Screener raw data
         if scr_raw_df is not None and not scr_raw_df.empty:
             scr_raw_df.to_excel(w, sheet_name="Screener Data", index=False)
         else:
             pd.DataFrame({"Note": ["No Screener data"]}).to_excel(
                 w, sheet_name="Screener Data", index=False)
 
-        # Sheet 3: Breakout results from MPD universe
-        if mpd_rows:
-            mpd_df = pd.DataFrame(mpd_rows).sort_values(
-                ["high_conviction", "score"], ascending=[False, False])
-            mpd_df.to_excel(w, sheet_name="MPD Breakouts", index=False)
-        else:
-            pd.DataFrame({"Note": ["No MPD breakout candidates"]}).to_excel(
-                w, sheet_name="MPD Breakouts", index=False)
-
-        # Sheet 4: Breakout results from Screener universe
+        # Sheet 2: Breakout results from Screener universe
         if scr_rows:
             scr_df = pd.DataFrame(scr_rows).sort_values(
                 ["high_conviction", "score"], ascending=[False, False])
@@ -1366,39 +1537,8 @@ def main():
             pd.DataFrame({"Note": ["No Screener breakout candidates"]}).to_excel(
                 w, sheet_name="Screener Breakouts", index=False)
 
-        # Sheet 5: Common Breakout (intersection of the MPD Breakouts and
-        # Screener Breakouts sheets — symbols that broke out in BOTH universes)
-        mpd_bo_df = pd.DataFrame(mpd_rows) if mpd_rows else pd.DataFrame()
-        scr_bo_df = pd.DataFrame(scr_rows) if scr_rows else pd.DataFrame()
-        combined_bo_syms = set()
-        if (not mpd_bo_df.empty and not scr_bo_df.empty
-                and "symbol" in mpd_bo_df.columns
-                and "symbol" in scr_bo_df.columns):
-            mpd_bo_syms = set(mpd_bo_df["symbol"].astype(str).str.strip())
-            scr_bo_syms = set(scr_bo_df["symbol"].astype(str).str.strip())
-            combined_bo_syms = mpd_bo_syms & scr_bo_syms
-        if combined_bo_syms:
-            common_bo_df = mpd_bo_df[
-                mpd_bo_df["symbol"].astype(str).str.strip().isin(combined_bo_syms)
-            ].drop_duplicates(subset=["symbol"]).sort_values(
-                ["high_conviction", "score"], ascending=[False, False])
-            common_bo_df.to_excel(
-                w, sheet_name="Common Breakout", index=False)
-        else:
-            pd.DataFrame(
-                {"Note": ["No symbols broke out in both universes"]}).to_excel(
-                w, sheet_name="Common Breakout", index=False)
-
-        # Sheet 6: Combined Breakouts (UNION of the MPD Breakouts and Screener
-        # Breakouts sheets — every breakout from either universe, with common
-        # names listed exactly once so no stock is missed). For a stock that
-        # broke out in both, the higher-scoring row is kept.
-        all_bo_df = (
-            pd.concat([d for d in (mpd_bo_df, scr_bo_df) if not d.empty],
-                      ignore_index=True)
-            if (not mpd_bo_df.empty or not scr_bo_df.empty)
-            else pd.DataFrame())
-        n_combined_all = 0
+        # Sheet 3: Energy Expansion — observational tag, not gated on anything.
+        all_bo_df = pd.DataFrame(scr_rows) if scr_rows else pd.DataFrame()
         if not all_bo_df.empty and "symbol" in all_bo_df.columns:
             all_bo_df["symbol"] = all_bo_df["symbol"].astype(str).str.strip()
             sort_cols = [c for c in ("high_conviction", "score")
@@ -1406,16 +1546,7 @@ def main():
             if sort_cols:
                 all_bo_df = all_bo_df.sort_values(
                     sort_cols, ascending=[False] * len(sort_cols))
-            combined_all_df = all_bo_df.drop_duplicates(subset=["symbol"])
-            combined_all_df.to_excel(
-                w, sheet_name="Combined Breakouts", index=False)
-            n_combined_all = len(combined_all_df)
-        else:
-            pd.DataFrame(
-                {"Note": ["No breakout candidates in either universe"]}).to_excel(
-                w, sheet_name="Combined Breakouts", index=False)
 
-        # Sheet 7: Energy Expansion — observational tag, not gated on anything.
         n_energy = 0
         ee_df = (all_bo_df[all_bo_df.get("energy_expansion") == True]  # noqa: E712
                  .drop_duplicates(subset=["symbol"])
@@ -1437,30 +1568,34 @@ def main():
                 f"base_range_pct >= {ENERGY_BASE_RANGE_MIN}"]}).to_excel(
                 w, sheet_name="Energy Expansion", index=False)
 
-    n_combined = len(combined_bo_syms) if 'combined_bo_syms' in dir() else 0
-    n_combined_all = n_combined_all if 'n_combined_all' in dir() else 0
+        # Sheet 4: Minervini Trend Template — all 8 criteria, eliminative.
+        if mt_rows:
+            pd.DataFrame(mt_rows).to_excel(
+                w, sheet_name="MinerviniTrend", index=False)
+        else:
+            pd.DataFrame({"Note": [
+                "No stocks passed all 8 Trend Template criteria"]}).to_excel(
+                w, sheet_name="MinerviniTrend", index=False)
+
     print(f"  Excel written: {excel_out}")
-    print(f"    Sheet 1: MPD Data ({len(mpd_sheets)} source sheets merged)")
-    print(f"    Sheet 2: Screener Data")
-    print(f"    Sheet 3: MPD Breakouts ({len(mpd_rows)} candidates)")
-    print(f"    Sheet 4: Screener Breakouts ({len(scr_rows)} candidates)")
-    print(f"    Sheet 5: Common Breakout ({n_combined} stocks in both)")
-    print(f"    Sheet 6: Combined Breakouts ({n_combined_all} stocks, union)")
-    print(f"    Sheet 7: Energy Expansion ({n_energy} tagged, observational)")
+    print(f"    Sheet 1: Screener Data")
+    print(f"    Sheet 2: Screener Breakouts ({len(scr_rows)} candidates)")
+    print(f"    Sheet 3: Energy Expansion ({n_energy} tagged, observational)")
+    print(f"    Sheet 4: MinerviniTrend ({len(mt_rows)} passed all 8 criteria)")
 
     # ── TradingView TXT files ──
     tv_dir = os.path.dirname(excel_out)
     tag = f"_{args.out_tag}" if args.out_tag else ""
 
-    # 1. Combined breakouts (MPD + Screener, deduplicated)
-    bo_syms = sorted({r["symbol"] for r in mpd_rows + scr_rows})
+    # 1. All breakout candidates (deduplicated)
+    bo_syms = sorted({r["symbol"] for r in scr_rows})
     _write_tv_file(os.path.join(tv_dir, f"tv_breakouts_combined{tag}.txt"), bo_syms)
 
     print(f"  TradingView files written:")
     print(f"    tv_breakouts_combined{tag}.txt  ({len(bo_syms)} symbols)")
 
-    # Print combined top 10
-    all_rows = mpd_rows + scr_rows
+    # Print top 10
+    all_rows = list(scr_rows)
     if all_rows:
         all_sorted = sorted(all_rows, key=lambda r: (
             not r.get("high_conviction"), -r["score"]))
@@ -1471,25 +1606,7 @@ def main():
         top = pd.DataFrame(all_sorted[:10])[cols]
         print(top.to_string(index=False))
     else:
-        print("\n  No breakout candidates found in either universe.")
-
-    # ── Scorecard (Valuation × Momentum × Stage) — attached post-process ──
-    # Reuses the already-downloaded candles + benchmark (no extra Angel calls)
-    # and appends a "Scorecard" sheet + HTML to the breakout workbook.
-    try:
-        import breakout_scanner_scorecard as scorecard
-        scorecard.run(
-            excel_out,
-            mpd_rows=mpd_rows,
-            scr_rows=scr_rows,
-            ohlcv={**ohlcv_mpd, **ohlcv_scr},
-            bench=bench,
-            out_tag=args.out_tag,
-        )
-    except Exception as e:
-        print(f"  Scorecard step FAILED: {e}")
-        import traceback
-        traceback.print_exc()
+        print("\n  No breakout candidates found.")
 
     print("\nDONE.")
 

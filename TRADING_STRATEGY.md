@@ -22,7 +22,7 @@ This framework combines **institutional flow tracking**, **sector momentum rotat
 |------|------|---------|-----------|
 | Custom Sector Indices | `custom_sector_index.py` | Equal-weight indices for 5 sectors (Energy, Transmission, Defence, IT Services, Pharma) | Weekly |
 | FII/DII F&O Tracker | `fii_dii_flows.py` | Historical OI positions + daily cash market flows | Daily |
-| Sector Momentum RS | `sector_momentum.py` | Mansfield Relative Strength vs Nifty 50 | Weekly |
+| Sector Momentum RS | `sector_momentum.py` | Comparative Relative Strength vs Nifty 50 (window-start baseline — not Mansfield) | Weekly |
 | Bulk/Block Deals | `bulk_block_deals.py` | Superstar investor deal surveillance | Daily |
 | SAST Tracker | `sast_tracker.py` | Takeover Reg 29 filings by watchlist names | Daily |
 

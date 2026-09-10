@@ -4,20 +4,35 @@ Sector Momentum & Relative Strength Analyzer
 
 SUMMARY
 -------
-Computes Mansfield Relative Strength (RS) of each custom sector index
+Computes comparative Relative Strength (RS) of each custom sector index
 versus the Nifty 500 benchmark.  A secondary RS is also computed versus
 the Nifty MidSmall 400 benchmark.  Ranks sectors by current RS and trend.
 
-  RS > 0  = sector outperforming Nifty 500
-  RS < 0  = sector underperforming Nifty 500
+  RS > 0  = sector has outperformed Nifty 500 since the window start
+  RS < 0  = sector has underperformed Nifty 500 since the window start
   Rising RS = sector gaining momentum relative to market
+
+NOT MANSFIELD RS — READ THIS BEFORE ACTING ON THE LEVEL
+-------------------------------------------------------
+This is start-normalised *comparative* RS: the baseline is the first bar of
+the loaded window, so the level answers "how far ahead of the benchmark is
+this sector since <START_DATE>?" and every level shifts if the window moves.
+A sector that raced ahead six months ago and has gone sideways since still
+prints a large positive RS — it looks like a leader when it is dead money.
+
+Mansfield RS is a different formula: ``(ratio / 52w SMA of ratio - 1) * 100``
+on weekly bars, where zero means "in line with the benchmark over the past
+year" regardless of window start. That lives in ``stage_analysis.mansfield_rs``
+and is the one to use for go/no-go entry gates. Use *this* module to rank
+sectors against each other over a chosen window.
 
 WORKFLOW
 --------
 1. Load custom sector definitions from index_constituents.json.
 2. Fetch Nifty 500 (^CRSLDX) and Nifty MidSmall 400 (^NSEMS400) benchmarks (Angel One primary, yfinance fallback).
 3. Build each custom sector index using custom_sector_index.py (equal-weighted).
-4. Compute RS = (sector / benchmark) × 100 for each trading day.
+4. Compute RS = (sector_norm / benchmark_norm) × 100 for each trading day,
+   both series rebased to 100 on the first common date.
 5. Calculate RS stats — current level, 20-day trend (rising / falling).
 6. Rank all sectors by current RS.
 7. Create multi-line Plotly chart with RS history + range slider.
@@ -133,10 +148,16 @@ def fetch_benchmark(ticker, name, start_date, end_date):
 # ─── RS Computation ──────────────────────────────────────────────────────────
 
 def compute_rs(sector_series, benchmark_series):
-    """Compute Mansfield Relative Strength.
+    """Comparative Relative Strength, start-normalised.
 
-    Both series are normalised to 100 at start.
-    RS = (sector_norm / bench_norm) * 100
+    Both series are rebased to 100 on the first common date.
+    RS = (sector_norm / bench_norm) * 100; charts plot ``RS - 100`` so 0 is
+    neutral. The reading is cumulative out/under-performance *since that
+    first date*, so it is only comparable across sectors sharing the window,
+    and every level changes if the window start moves.
+
+    This is NOT Mansfield RS — there is no rolling baseline and no fixed zero.
+    See ``stage_analysis.mansfield_rs`` for that.
     """
     common = sector_series.index.intersection(benchmark_series.index)
     if len(common) < 2:
@@ -149,6 +170,27 @@ def compute_rs(sector_series, benchmark_series):
     return rs
 
 
+# Trend look-backs reported on the RS ranking sheet, shortest first. The pair
+# is the point: 10D agreeing with 20D is confirmation, 10D disagreeing is an
+# early warning that the 20-day reading is stale.
+TREND_WINDOWS = (10, 20)
+
+
+def rs_trend_label(rs, days):
+    """Arrow-tagged change in RS over the last `days` sessions.
+
+    Because the RS baseline cancels in a subtraction, this delta is comparable
+    across sectors even though the RS *level* is not.
+
+    Falls back to the whole series when it is shorter than the window, so a
+    freshly started sector still reports a direction instead of a blank — read
+    those as provisional.
+    """
+    lookback = min(days, len(rs))
+    delta = rs.iloc[-1] - rs.iloc[-lookback]
+    return "\u2191 %.1f" % delta if delta > 0 else "\u2193 %.1f" % abs(delta)
+
+
 # ─── Charts ──────────────────────────────────────────────────────────────────
 
 def create_rs_chart(all_rs, all_indices, benchmark_name="Nifty 500"):
@@ -159,7 +201,7 @@ def create_rs_chart(all_rs, all_indices, benchmark_name="Nifty 500"):
         shared_xaxes=True,
         vertical_spacing=0.30,
         subplot_titles=(
-            "Relative Strength (> 0 = Outperforming %s)<br><sup>Sector vs %s — rising line means sector gaining strength relative to benchmark, even if both are falling</sup>" % (benchmark_name, benchmark_name),
+            "Relative Strength (> 0 = Outperforming %s since the window start)<br><sup>Comparative RS, not Mansfield — the baseline is the first bar on the chart, so read the slope as much as the level</sup>" % benchmark_name,
             "Sector Index — %% Change from Base<br><sup>Absolute gain/loss of each sector index from starting value — independent of %s performance</sup>" % benchmark_name,
         ),
         row_heights=[0.50, 0.50],
@@ -274,6 +316,12 @@ def create_individual_dual_chart(all_rs_primary, all_rs_secondary,
 
     One subplot per sector with two RS lines (rebased so 0 = neutral):
     blue = vs primary benchmark, orange = vs secondary benchmark.
+
+    Geometry is derived from pixels, not from a fixed ``vertical_spacing``
+    fraction. Plotly measures that spacing as a share of the whole plotting
+    area, so a constant 0.07 eats 91% of a 14-row grid and squashes every
+    panel to a hairline; here the gap is pinned at ``ROW_GAP_PX`` and the
+    figure height grows with the row count instead.
     """
     import math
 
@@ -282,10 +330,16 @@ def create_individual_dual_chart(all_rs_primary, all_rs_secondary,
     cols = 3
     rows = max(1, math.ceil(n / cols))
 
+    PANEL_H_PX = 230     # plot height of one row
+    ROW_GAP_PX = 62      # white space between rows (holds the subplot title)
+    MARGIN_T_PX = 100
+    MARGIN_B_PX = 60
+    plot_h = rows * PANEL_H_PX + (rows - 1) * ROW_GAP_PX
+
     fig = make_subplots(
         rows=rows, cols=cols,
         subplot_titles=sectors,
-        vertical_spacing=0.07,
+        vertical_spacing=(ROW_GAP_PX / plot_h) if rows > 1 else 0.0,
         horizontal_spacing=0.06,
     )
 
@@ -321,18 +375,36 @@ def create_individual_dual_chart(all_rs_primary, all_rs_secondary,
         fig.add_hline(y=0, line_dash="dash", line_color="gray",
                       line_width=1, row=r, col=c)
 
+    # Every panel gets the same window so the grid can be read across rows;
+    # a sector with a short history then shows as a short line on a full axis
+    # instead of a panel with its own private, misleading date range.
+    bounds = [s.index for s in list(all_rs_primary.values())
+              + list(all_rs_secondary.values()) if s is not None and not s.empty]
+    if bounds:
+        x_lo = min(ix.min() for ix in bounds)
+        x_hi = max(ix.max() for ix in bounds)
+        fig.update_xaxes(range=[x_lo, x_hi])
+
+    fig.update_xaxes(tickfont=dict(size=9), nticks=4, tickangle=0,
+                     tickformat="%b %y", showgrid=True, gridcolor="#eeeeee")
+    fig.update_yaxes(tickfont=dict(size=9), nticks=6,
+                     showgrid=True, gridcolor="#eeeeee")
+    fig.update_annotations(font=dict(size=12))
+
     fig.update_layout(
         title=dict(
             text="Sector Relative Strength — %s vs %s (per sector)" % (
                 primary_name, secondary_name),
-            font=dict(size=20), y=0.99, yanchor="top",
+            font=dict(size=20), x=0.5, xanchor="center",
+            y=1.0, yanchor="top", pad=dict(t=14),
         ),
         template="plotly_white",
-        height=max(450, rows * 260),
+        height=plot_h + MARGIN_T_PX + MARGIN_B_PX,
         hovermode="closest",
-        legend=dict(orientation="h", yanchor="bottom", y=1.015,
+        legend=dict(orientation="h", yanchor="top",
+                    y=1 + (MARGIN_T_PX - 46) / plot_h,
                     xanchor="center", x=0.5, font=dict(size=12)),
-        margin=dict(t=120, r=40, b=60),
+        margin=dict(t=MARGIN_T_PX, r=40, b=MARGIN_B_PX, l=60),
     )
     return fig
 
@@ -474,11 +546,14 @@ def run(constituents_file=None, output_prefix=None):
 
     for index_name, info in index_defs.items():
         constituents = info["constituents"]
-        index_series, prices_df, failed = build_sector_index(
+        # build_sector_index now returns index OHLC plus a data-repair audit;
+        # relative strength only needs the closing level.
+        index_df, prices_df, failed, repairs = build_sector_index(
             index_name, constituents, start_dt, end_dt,
         )
-        if index_series.empty:
+        if index_df.empty:
             continue
+        index_series = index_df["Close"].rename(index_name)
 
         all_indices[index_name] = index_series
 
@@ -495,9 +570,7 @@ def run(constituents_file=None, output_prefix=None):
 
         # Stats (vs primary)
         current_rs = rs.iloc[-1] - 100  # rebased to 0
-        lookback = min(20, len(rs))
-        rs_trend = rs.iloc[-1] - rs.iloc[-lookback]
-        trend_str = "\u2191 %.1f" % rs_trend if rs_trend > 0 else "\u2193 %.1f" % abs(rs_trend)
+        trends = {"%dD Trend" % d: rs_trend_label(rs, d) for d in TREND_WINDOWS}
 
         current_rs2 = (rs2.iloc[-1] - 100) if not rs2.empty else None
 
@@ -509,7 +582,7 @@ def run(constituents_file=None, output_prefix=None):
             "Description": info.get("description", ""),
             "RS vs Nifty 500": round(current_rs, 1),
             "RS vs MidSmall 400": round(current_rs2, 1) if current_rs2 is not None else None,
-            "20D Trend": trend_str,
+            **trends,
             "RS Status": "Outperforming" if current_rs >= 0 else "Underperforming",
             "Index Value": round(current_val, 2),
             "Change %": round(change_pct, 2),
@@ -530,9 +603,9 @@ def run(constituents_file=None, output_prefix=None):
     print("=" * 60)
     for _, row in ranking_df.iterrows():
         star = "\u2605" if row["RS vs Nifty 500"] >= 0 else " "
-        print("  %s %-15s RS=%+-6.1f %-8s [%s]" % (
+        print("  %s %-15s RS=%+-6.1f %-8s %-8s [%s]" % (
             star, row["Sector"], row["RS vs Nifty 500"],
-            row["20D Trend"], row["RS Status"]))
+            row["10D Trend"], row["20D Trend"], row["RS Status"]))
 
     # Output files
     if output_prefix is None:

@@ -599,6 +599,28 @@ def _empty_df():
     return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 
 
+# Angel caps the span of a single getCandleData call per interval; asking for
+# more silently returns a truncated window, so longer ranges are chunked.
+_MAX_DAYS_PER_REQ = {
+    "ONE_MINUTE": 30,
+    "FIVE_MINUTE": 100,
+    "TEN_MINUTE": 100,
+    "FIFTEEN_MINUTE": 200,
+    "THIRTY_MINUTE": 200,
+    "ONE_HOUR": 400,
+    "ONE_DAY": 2000,
+}
+_MAX_CHUNKS = 12  # bounds a pathological request (e.g. 10y of 5-minute bars)
+
+
+def _as_date(d) -> datetime.date:
+    if isinstance(d, datetime.datetime):
+        return d.date()
+    if isinstance(d, datetime.date):
+        return d
+    return pd.Timestamp(d).date()
+
+
 _INTERVAL_MAP = {
     "1d":  "ONE_DAY",
     "1h":  "ONE_HOUR",
@@ -655,12 +677,44 @@ def _angel_download_raw(ticker: str,
 
     Returns DataFrame indexed by Timestamp with columns
     ['Open','High','Low','Close','Volume']. Empty on failure.
-    Note: Angel daily candles cap at 2 000 days per request.
+    Ranges longer than Angel's per-interval cap are fetched newest-first in
+    chunks and stitched, so multi-year history is not silently truncated.
     """
     interval_const = _INTERVAL_MAP.get(interval)
     if interval_const is None:
         raise NotImplementedError("interval=%r not supported" % interval)
-    end = end or datetime.date.today()
+    start_d = _as_date(start)
+    end_d = _as_date(end or datetime.date.today())
+    cap = _MAX_DAYS_PER_REQ.get(interval_const, 2000)
+
+    if (end_d - start_d).days + 1 <= cap:
+        return _angel_fetch_window(ticker, start_d, end_d, interval_const, retries)
+
+    frames = []
+    win_end = end_d
+    for _ in range(_MAX_CHUNKS):
+        win_start = max(start_d, win_end - datetime.timedelta(days=cap - 1))
+        df = _angel_fetch_window(ticker, win_start, win_end, interval_const, retries)
+        if df is not None and not df.empty:
+            frames.append(df)
+        elif frames:
+            break  # walked past the start of available history
+        if win_start <= start_d:
+            break
+        win_end = win_start - datetime.timedelta(days=1)
+
+    if not frames:
+        return _empty_df()
+    out = pd.concat(frames).sort_index()
+    return out[~out.index.duplicated(keep="last")]
+
+
+def _angel_fetch_window(ticker: str,
+                        start,
+                        end,
+                        interval_const: str,
+                        retries: int = 2) -> pd.DataFrame:
+    """One getCandleData call for a window already within Angel's span cap."""
     fromdate = _to_date_str(start)
     todate = _to_date_str(end).replace("09:15", "15:30")
 

@@ -62,7 +62,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         ORCHESTRATORS                                    │
-│  run_all.py (8 market scenarios)   portfolio/portfolio_run_all.py (9)   │
+│  run_all.py (7 market scenarios)   portfolio/portfolio_run_all.py (9)   │
 └────────────┬───────────────────────────────────────┬────────────────────┘
              │                                       │
      ┌───────▼───────┐                     ┌────────▼────────┐
@@ -74,7 +74,6 @@ python3 portfolio/portfolio_run_all.py --no-email
      │  sector_mom    │                     │ corr_clusters   │
      │  nse_ready_sec │                     │ pledge_promoter │
      │  rrg_chart     │                     │ mf_overlap      │
-     │  ipo_anchor    │                     │ events_calendar │
      └───────┬───────┘                     │ events_calendar │
              │                              │ premarket_dash  │
              │                              └────────┬────────┘
@@ -95,7 +94,7 @@ python3 portfolio/portfolio_run_all.py --no-email
 | Subsystem | Entry point | Cadence |
 |---|---|---|
 | **Daily market sweep** (8 scenarios) | `run_all.py` | Mon–Fri 18:00 IST (launchd) |
-| **Breakout scanner** (+ attached scorecard) | `breakout_scanner_angel.py` | On demand |
+| **Breakout scanner** | `breakout_scanner_angel.py` | On demand |
 | **Single-stock deep PDF** | `forensic_accounting.py` | On demand |
 | **Portfolio analysis** (9 scenarios) | `portfolio/portfolio_run_all.py` | On demand |
 
@@ -114,23 +113,16 @@ Analysis/
 ├── custom_sector_index.py        # Equal-weighted sector indices (scenario 2)
 ├── fii_flows.py                  # FII daily equity cash flows (scenario 3)
 ├── fii_sector_flows.py           # FII fortnightly sector flows (scenario 4)
-├── sector_momentum.py            # Mansfield RS per sector (scenario 5)
-├── nse_ready_sectors.py          # Mansfield RS on official NSE sector indices, self-contained provider (scenario 6)
+├── sector_momentum.py            # Comparative RS per sector (scenario 5)
+├── nse_ready_sectors.py          # Comparative RS on official NSE sector indices, self-contained provider (scenario 6)
 ├── rrg_chart.py                  # Relative Rotation Graph (scenario 7)
-├── ipo_anchor_tracker.py         # IPO anchor investor tracking (scenario 8)
 │
-├── breakout_scanner_angel.py     # Pre-breakout scanner (standalone, includes multi_pct_down)
-├── breakout_scanner_scorecard.py # Scorecard (Valuation×Momentum×Stage) — attached post-process to the scanner
-├── multi_pct_down.py             # Pct-down screener (runs via breakout_scanner_angel)
+├── breakout_scanner_angel.py     # Pre-breakout scanner (standalone)
 ├── fno_max_oi.py                 # F&O Max OI strike scanner (standalone)
 ├── india_macro.py                # India macro dashboard (standalone)
 ├── forensic_accounting.py        # Single-stock forensic PDF report (standalone)
 ├── ipo_listing_gainers.py        # IPO >=50% gainers + FULL anchor-investor lists (standalone)
-├── breakout_review.py            # Walk-forward validation of breakout picks (standalone)
 ├── breakout_deep_analysis.py     # Rule-mining on review data → elite-subset filters (standalone)
-├── breakout_scorecard_review.py  # Walk-forward validator for scorecard CompositeScore (standalone)
-├── universe_review.py            # Does the scanner add value over the raw universe? (standalone)
-├── universe_mining.py            # Mines the raw universe for an elite tradeable subset (standalone)
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
@@ -392,15 +384,12 @@ deleted after capture — only the unified workbook survives.
 | 5 | `sector_momentum` | `sector_momentum.py` | 2 sheets + chart |
 | 6 | `nse_sector_rs` | `nse_ready_sectors.py` | 1 sheet + chart |
 | 7 | `rrg` | `rrg_chart.py` | 8 sheets + chart |
-| 8 | `ipo_anchor` | `ipo_anchor_tracker.py` | IPO Anchor sheets + `.txt` |
 
 ### Runs INDIRECTLY (called by another script, never scheduled alone)
 
 | Module | Called by | Note |
 |---|---|---|
 | `fii_stake_tracker.py` | `BulkBlock.py` | Runs inside scenario 1. Standalone use is quarterly/manual. |
-| `multi_pct_down.py` | `breakout_scanner_angel.py` | Runs inline as Universe 1. Also runnable alone. |
-| `breakout_scanner_scorecard.py` | `breakout_scanner_angel.py` | Attached post-process; reuses the scanner's candles. Has its own CLI for re-scoring an existing workbook. |
 
 ### Does NOT run via `run_all.py` — manual invocation only
 
@@ -411,11 +400,7 @@ deleted after capture — only the unified workbook survives.
 | `fno_max_oi.py` | Expiry-cycle specific | Weekly/monthly |
 | `india_macro.py` | Monthly data cadence, not daily | Monthly |
 | `forensic_accounting.py` | Single-stock, argument-driven | On demand |
-| `breakout_review.py` | Needs matured weeks | Review day |
 | `breakout_deep_analysis.py` | Consumes review output | Review day |
-| `breakout_scorecard_review.py` | Needs matured snapshots | Review day |
-| `universe_review.py` | Needs matured weeks | Review day |
-| `universe_mining.py` | Consumes universe_review output | Review day |
 | `portfolio/portfolio_run_all.py` | Separate 9-scenario orchestrator | On demand |
 | `tradingcharts/`, `screener/` | Long-lived web servers | Always-on / on demand |
 
@@ -426,8 +411,8 @@ deleted after capture — only the unified workbook survives.
 entry point worth invoking — importing them is the only intended use.
 
 > **`india_macro` naming trap:** older comments call it "Scenario 8". It is
-> **not** in `run_all.py` and never has been — `ipo_anchor` is scenario 8. Run
-> `india_macro.py` yourself.
+> **not** in `run_all.py` and never has been — the pipeline ends at scenario 7
+> (`rrg`). Run `india_macro.py` yourself.
 
 ---
 
@@ -438,7 +423,7 @@ The command-centre script that runs all market analysis scenarios in sequence.
 ### Usage
 
 ```bash
-python3 run_all.py                           # run all 8 scenarios + send email
+python3 run_all.py                           # run all 7 scenarios + send email
 python3 run_all.py --no-email                # run all, skip email
 python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 ```
@@ -452,7 +437,7 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 
 ### Available Scenario Names (for `--skip`)
 
-`bulk_block`, `sector_index`, `fii_flows`, `fii_sector_flows`, `sector_momentum`, `nse_sector_rs`, `rrg`, `ipo_anchor`
+`bulk_block`, `sector_index`, `fii_flows`, `fii_sector_flows`, `sector_momentum`, `nse_sector_rs`, `rrg`
 
 ### Execution Order
 
@@ -462,10 +447,9 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 | 2 | `sector_index` | `custom_sector_index.py` | Custom equal-weighted sector indices (chart only) |
 | 3 | `fii_flows` | `fii_flows.py` | Daily FII equity cash flows (chart only) |
 | 4 | `fii_sector_flows` | `fii_sector_flows.py` | Fortnightly FII sector-wise flows (chart only) |
-| 5 | `sector_momentum` | `sector_momentum.py` | Mansfield RS on custom baskets (chart + "RS Ranking" sheet) |
-| 6 | `nse_sector_rs` | `nse_ready_sectors.py` | Mansfield RS on official NSE sector indices (chart + "NSE Sector RS Ranking" sheet) |
+| 5 | `sector_momentum` | `sector_momentum.py` | Comparative RS on custom baskets (chart + "RS Ranking" sheet) |
+| 6 | `nse_sector_rs` | `nse_ready_sectors.py` | Comparative RS on official NSE sector indices (chart + "NSE Sector RS Ranking" sheet) |
 | 7 | `rrg` | `rrg_chart.py` | Relative Rotation Graph (chart only) |
-| 8 | `ipo_anchor` | `ipo_anchor_tracker.py` | IPO anchor investor matching ("IPO Anchor List" sheet) |
 
 ### Output
 
@@ -478,12 +462,10 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
   - `RS Ranking`, `RS History` — from sector_momentum
   - `NSE Sector RS Ranking` — from nse_ready_sectors
   - `RRG 3 Day` … `RRG Quarterly` — 8 timeframe sheets from rrg_chart
-  - `IPO Anchor ...` — recent IPOs with watchlist anchor matches
 - 6 interactive Plotly HTML charts: `custom_sector_index_chart.html`,
   `fii_flows_chart.html`, `fii_sector_flows_chart.html`,
   `sector_momentum_chart.html`, `nse_sector_rs_chart.html`, `rrg_chart.html`
 - `market_charts.html` — combined tabbed HTML embedding all 6 charts in iframes
-- `ipo_anchor_report.txt` — TradingView watchlist from the ipo_anchor scenario
 - Email with the workbook + charts attached (unless `--no-email`)
 
 > **`BULK_BLOCK_Deals_<timestamp>.xlsx` is NOT produced by `run_all.py`.** That
@@ -494,7 +476,7 @@ python3 run_all.py --skip bulk_block rrg     # skip specific scenarios
 
 ### Notes
 
-- `multi_pct_down` and `breakout_scanner_angel` are **not** part of run_all.py — run independently.
+- `breakout_scanner_angel.py` is **not** part of run_all.py — run independently.
 - `india_macro.py` runs independently (Scenario 8 in concept but separate invocation).
 - `forensic_accounting.py` is always standalone.
 - Each scenario is wrapped in try/except — a single failure does not abort the pipeline.
@@ -535,11 +517,9 @@ python3 BulkBlock.py --dry-run    # scrape only, no file written
 
 ### breakout_scanner_angel.py — Pre-Breakout Screener
 
-**Purpose:** Dual-universe scanner that identifies stocks approaching fractal pivot resistance with volume compression (VCP/W-pattern/cup-handle), scored by Mansfield Relative Strength vs Nifty 500.
+**Purpose:** Scanner that identifies stocks approaching fractal pivot resistance with volume compression (VCP/W-pattern/cup-handle), scored by Mansfield Relative Strength vs Nifty 500.
 
-**Universes:**
-1. **MPD Universe** — Stocks from `multi_pct_down.py` output (2-21% off 52W highs, above 200-DMA, RS > benchmark)
-2. **Screener.in Universe** — Custom Screener.in query URL (configurable)
+**Universe:** Screener.in — a saved Screener.in query URL (configurable via `--screener-url`).
 
 **Key Features:**
 - Fractal pivot resistance detection (5-bar pivots)
@@ -551,20 +531,72 @@ python3 BulkBlock.py --dry-run    # scrape only, no file written
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--max` | `0` (no cap) | Max symbols per universe |
+| `--max` | `0` (no cap) | Max symbols in the universe |
 | `--min-score` | `50` (`WATCHLIST_MIN_SCORE`) | Minimum breakout score to include |
 | `--lookback` | `252` (`LOOKBACK_DAYS`) | Trading days of history considered (~1 year) |
 | `--high-conviction` | off | Only show high-conviction setups |
-| `--skip-mpd` | off | Skip MPD universe |
-| `--skip-screener` | off | Skip Screener.in universe |
 | `--screener-url` | built-in | Custom Screener.in query URL |
-| `--symbols-csv` | `""` | CSV file with symbols to scan (bypass both universes) |
+| `--symbols-csv` | `""` | CSV file with symbols to scan (bypasses the screener universe) |
 | `--out-tag` | `""` | Custom suffix for output files |
+| `--minervini-universe` | `cache` | Universe for Sheet 4: `cache` (full NSE+BSE cache + index constituents) or `screener` (reuse the screener list) |
+| `--skip-minervini` | off | Skip Sheet 4 entirely — keeps the run fast |
 | `--no-strict` | off | Disable hard gate filtering |
 
 **Output:**
-- `breakout_watchlist.xlsx` (6 sheets: MPD Data, Screener Data, MPD Breakouts, Screener Breakouts, Combined, Parameters)
-- 4 TradingView watchlist `.txt` files: `tv_breakouts_combined.txt`, `tv_common.txt`, `tv_unique_mpd.txt`, `tv_unique_screener.txt`
+- `breakout_watchlist.xlsx` (4 sheets: Screener Data, Screener Breakouts, Energy Expansion, MinerviniTrend)
+- TradingView watchlist file: `tv_breakouts_combined.txt`
+
+**Sheet 4 — MinerviniTrend (Trend Template):** an independent screen run over a
+**wide NSE+BSE universe**, completely decoupled from the screener list. A stock
+is listed only if it passes **all eight** criteria:
+
+| # | Criterion |
+|---|-----------|
+| 1 | Price above the 150-day MA |
+| 2 | Price above the 200-day MA |
+| 3 | 150-day MA above the 200-day MA |
+| 4 | 200-day MA higher than it was ~1 month (21 sessions) ago |
+| 5 | Price above the 50-day MA |
+| 6 | Price ≥ 25% above the 52-week low |
+| 7 | Price within 25% of the 52-week high |
+| 8 | RS rating ≥ 70 |
+
+*Universe* (`--minervini-universe cache`, the default) is the union of every
+ticker in the on-disk `.ohlcv_cache` (recovered from the cache filename and
+verified against its embedded sha1) and every constituent in
+`index_constituents.json` — ~3,400 names (~2,820 NSE + ~575 BSE). Bare symbols
+are normalised to `.NS`; `^` index series are dropped. Bars are refreshed
+incrementally through `ohlcv_cache`, so only missing tail bars hit the API.
+
+Names whose newest bar lags the universe's latest session by more than
+`MINERVINI_MAX_STALE_DAYS` (7) are dropped — the cache retains delisted and
+suspended scrips whose MAs and 52-week range would otherwise be frozen at a
+stale date. Names with under a year of history are skipped outright.
+
+**Liquidity floor.** The Trend Template says nothing about tradability, so a
+sub-rupee scrip with a rising 200-DMA would otherwise qualify as a "buy
+candidate" you could never fill. Names are dropped unless they close at
+≥ `MINERVINI_MIN_PRICE` (₹10) **and** their median `MINERVINI_TURNOVER_DAYS`
+(20) day traded value is ≥ `MINERVINI_MIN_TURNOVER` (₹1 crore). This filter runs
+*before* the RS percentile is computed, so erratic illiquid movers cannot
+distort the ranking of the tradable names.
+
+The `ideal` column flags names that also clear the stricter preferences
+(RS ≥ 80, ≥ 100% above the 52-week low, within 15% of the 52-week high).
+`ma200_rising_days` reports the 200-DMA's consecutive up-day streak.
+
+> **Note:** `nse_ready_sectors.py` is **not** a universe source. It holds Nifty
+> *sector index* closes only and carries no stock-level constituents, so it has
+> no stocks to contribute to this screen.
+
+Two caveats worth knowing:
+- **RS rating is a percentile across the scanned universe.** It is the IBD
+  weighting `2·(P/P₆₃) + P/P₁₂₆ + P/P₁₈₉ + P/P₂₅₂` ranked onto a 1–99 scale. With
+  the default wide universe this is a genuine broad-market ranking; with
+  `--minervini-universe screener` it is ranked against a pre-filtered strong
+  list and is far less meaningful.
+- A full run refreshes ~3,400 tickers against a 3 req/sec API cap, so expect
+  roughly 20+ minutes. Use `--skip-minervini` for a fast breakout-only run.
 
 **Usage:**
 ```bash
@@ -572,81 +604,6 @@ python3 breakout_scanner_angel.py
 python3 breakout_scanner_angel.py --high-conviction --min-score 60
 python3 breakout_scanner_angel.py --max 300 --lookback 252
 python3 breakout_scanner_angel.py --symbols-csv my_list.csv --no-strict
-python3 breakout_scanner_angel.py --skip-screener --out-tag mpd_only
-```
-
----
-
-### breakout_scanner_scorecard.py — Valuation × Momentum × Stage Scorecard
-
-**Purpose:** Post-processing engine **attached to** `breakout_scanner_angel.py`.
-After the breakout workbook is written, the scanner calls `scorecard.run(...)`,
-passing the breakout rows plus the **already-downloaded** OHLCV candles and the
-Nifty 500 benchmark (no candles are re-fetched — the Angel One quota is
-preserved). Every broken-out name is scored on three orthogonal axes and reduced
-to one label + one `CompositeScore` for at-a-glance triage.
-
-**Three axes + gate:**
-- **Valuation** — how cheap the base is
-- **Momentum** — how strong the move is
-- **Stage** — where in the Weinstein cycle (genuine Stage-2 vs dead-cat bounce)
-- **Quality gate** — pledge / forensic landmines (Tickertape screener + a deep
-  forensic pass on a small Stage-2-cheap shortlist)
-
-**Output:** appends a `Scorecard` sheet to `breakout_watchlist.xlsx` and writes
-`breakout_watchlist_scorecard.html`; persists a dated row per name to
-`data/scorecard_snapshots.csv` (feeds `breakout_scorecard_review.py`).
-
-**CLI Options** (for re-scoring an existing workbook without re-running the scan):
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--workbook` | **required** | Path to an existing `breakout_watchlist.xlsx` |
-| `--lookback` | `400` | Days of history to pull for scoring |
-| `--no-forensic` | off | Skip the deep forensic pass on the Stage-2-cheap shortlist |
-
-**Usage:**
-```bash
-# Normal path — nothing to do; the scanner invokes it automatically.
-# Manual re-score of an existing workbook:
-python3 breakout_scanner_scorecard.py --workbook Output/breakout_watchlist.xlsx
-python3 breakout_scanner_scorecard.py --workbook Output/breakout_watchlist.xlsx --no-forensic
-```
-
----
-
-### multi_pct_down.py — Multi-Universe % Off Highs Screener
-
-**Purpose:** Three-universe screener (NSE, NSE-SME, BSE-SME) finding stocks 2-21% off their 52-week highs with relative strength > Nifty 500, above 200-DMA, and making higher lows.
-
-**Filters Applied:**
-- Distance from 52W high: 2% to 21% (configurable)
-- Above 200-DMA
-- Relative Strength > Nifty 500 (^CRSLDX) over same period
-- Higher lows pattern (last 3+ swing lows ascending)
-- Market cap band filtering (configurable)
-
-**CLI Options:**
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--min` | `2.0` | Minimum % off high |
-| `--max` | `21.0` | Maximum % off high |
-| `--skip` | `[]` | Skip universes (space-separated: `nse`, `nse-sme`, `bse-sme`) |
-| `--workers` | `4` | Parallel download threads |
-| `--max-symbols` | `0` (all) | Limit symbols per universe |
-| `--out` | script dir | Output **directory** |
-| `-o`, `--output-prefix` | — | Output filename prefix |
-
-**Output:**
-- `multi_pct_down.xlsx` (one sheet per universe + combined)
-- `multi_pct_down.txt` (TradingView watchlist)
-
-**Usage:**
-```bash
-python3 multi_pct_down.py
-python3 multi_pct_down.py --min 5 --max 15 --skip bse-sme
-python3 multi_pct_down.py --workers 8 --max-symbols 200
 ```
 
 ---
@@ -707,9 +664,11 @@ python3 custom_sector_index.py -c my_sectors.json -o custom
 
 ---
 
-### sector_momentum.py — Sector Mansfield RS Rankings
+### sector_momentum.py — Sector Comparative RS Rankings
 
-**Purpose:** Computes Mansfield Relative Strength for each custom sector index vs Nifty 50 (NIFTYBEES proxy). Ranks sectors by momentum and produces a multi-line RS time-series chart.
+**Purpose:** Computes comparative Relative Strength for each custom sector index vs Nifty 50 (NIFTYBEES proxy). Ranks sectors by momentum and produces a multi-line RS time-series chart.
+
+> **Not Mansfield RS.** Both series are rebased to 100 on the first bar of the loaded window, so RS is cumulative out/under-performance *since that date* and every level shifts if the window moves. Use it to rank sectors against each other over a chosen window. For a window-independent, zero-anchored entry gate (`ratio / 52-week SMA of ratio − 1`) use `stage_analysis.mansfield_rs`.
 
 **Benchmark:** Nifty 50 (correct for sector-level comparison)
 
@@ -745,38 +704,6 @@ python3 custom_sector_index.py -c my_sectors.json -o custom
 
 > The chart is built as `prefix + ".html"`, so the default is `rrg_chart.html`.
 > A stale `rrg_chart_chart.html` in `Output/` is from an older prefix.
-
----
-
-### ipo_anchor_tracker.py — IPO Anchor Investor Tracker
-
-**Purpose:** Fetches the last 15 months of IPOs from NSE, computes listing returns, and cross-references anchor investor allocations from chittorgarh.com against a ~85 name watchlist of quality anchors.
-
-**CLI Options:**
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--months` | `14` | Months of IPO history to pull |
-| `--limit` | `0` (all) | Debug: first N IPOs only |
-| `--no-anchors` | off | Skip anchor scraping (listing returns only) |
-| `--out` | built-in | Output path |
-
-**Output:**
-- `.xlsx` with IPO details + anchor matches
-- TradingView watchlist `.txt` for IPOs held by quality anchors
-- "IPO Anchor List" sheet appended to BulkBlock Excel by run_all.py
-
-**Usage:**
-```bash
-python3 ipo_anchor_tracker.py                  # 14 months, with anchors
-python3 ipo_anchor_tracker.py --months 24     # wider history
-python3 ipo_anchor_tracker.py --no-anchors    # fast, listing returns only
-```
-
-> **Not the same as `ipo_listing_gainers.py`.** This one matches IPOs against a
-> *watchlist* of ~85 known-quality anchors and runs inside `run_all.py`.
-> `ipo_listing_gainers.py` extracts the **complete** anchor list from official
-> filings and is standalone. See below.
 
 ---
 
@@ -1003,43 +930,6 @@ python3 -c "from forensic_accounting import run; run('RELIANCE')"
 
 ---
 
-### breakout_review.py — Walk-Forward Validation
-
-**Purpose:** Reviews weekly breakout scanner snapshots to evaluate prediction accuracy. Compares breakout candidates against actual post-scan price action.
-
-**Classification of Outcomes:**
-- `TRUE_BREAKOUT` — Closed above R for ≥2 sessions with volume confirmation
-- `BREAKOUT_LOW_VOL` — Closed above R for ≥2 sessions, no volume spike
-- `ATTEMPTED` — Touched/crossed R at least once
-- `HOLDING` — Positive since scan but hasn't reached R
-- `FALSE_SIGNAL` — Never reached R, negative since scan
-- `NO_DATA` — Could not fetch price data
-
-**Folder Structure:**
-```
-Output/Week1/breakout_watchlist.xlsx
-Output/Week2/breakout_watchlist.xlsx
-...
-Output/review_YYYYMMDD_HHMMSS.xlsx    (review output)
-Output/review_cumulative.csv           (running accuracy stats)
-```
-
-**CLI Options:**
-
-| Flag | Effect |
-|------|--------|
-| (no args) | Review all available weeks |
-| `--weeks 1 2` | Review specific weeks only |
-| `--full` | Also check for missed breakouts in full universe |
-
-**Usage:**
-```bash
-python3 breakout_review.py
-python3 breakout_review.py --weeks 1 2 --full
-```
-
----
-
 ### breakout_deep_analysis.py — Breakout Rule Mining
 
 **Purpose:** Evidence-based pattern mining on the accumulated walk-forward
@@ -1048,8 +938,9 @@ maximise the probability of a real, tradeable breakout — the highest-convictio
 "elite" subset of scanner candidates. Analysis-only; does **not** modify the
 scanner.
 
-**Input:** `Output/review_*.xlsx` (sheet `All Results`, produced by
-`breakout_review.py`).
+**Input:** `Output/review_*.xlsx` (sheet `All Results`). The script that
+produced these files has been retired, so this now runs against the archived
+review workbooks already in `Output/`.
 
 **Outcome targets per candidate:**
 - `true_bo` — status == `TRUE_BREAKOUT`
@@ -1063,82 +954,6 @@ Gain-magnitude stats run on "mature" candidates only (≥ 15 sessions since scan
 ```bash
 python3 breakout_deep_analysis.py                # latest review file
 python3 breakout_deep_analysis.py <review.xlsx>  # specific file
-```
-
----
-
-### breakout_scorecard_review.py — Scorecard Walk-Forward Validator
-
-**Purpose:** The feedback loop for the **scorecard** (mirrors what
-`breakout_review.py` does for raw breakout signals). It checks whether a high
-`CompositeScore` actually leads to better forward returns than a low one —
-the evidence required before any composite re-weighting. Changes **no** scoring
-logic; it only measures.
-
-**Method:**
-1. Loads dated snapshots from `data/scorecard_snapshots.csv` (written by the scorecard).
-2. Keeps names old enough to have matured (`>= --min-days`).
-3. Re-fetches post-snapshot OHLCV via Angel One (same downloader as the scanner / review).
-4. Computes forward returns (1w / 4w / 12w), max-gain and max-drawdown from each snapshot's date.
-5. Reports whether `CompositeScore` / `Verdict` / each axis ranked the winners.
-
-**Outcome targets:** `tradeable = max_gain_pct >= --tradeable` (default 15%);
-`dud = max_gain < 5% AND end_ret < 0`.
-
-**Output:** `Output/scorecard_review_YYYYMMDD_HHMMSS.xlsx` + console summary.
-
-**Usage:**
-```bash
-python3 breakout_scorecard_review.py                 # matured >= 7d
-python3 breakout_scorecard_review.py --min-days 30   # only >= 30d matured
-python3 breakout_scorecard_review.py --tradeable 15  # win bar = +15% max gain
-```
-
----
-
-### universe_review.py — Does the Scanner Add Value?
-
-**Purpose:** Head-to-head validation — does the breakout scanner actually **add
-value** over the raw filtered universe it selects from? For every matured week it
-takes the two RAW universe sheets (`MPD Data`, `Screener Data`) and the two
-breakout sheets from `breakout_watchlist.xlsx`, then measures the realised
-outcome of every stock on the same yardstick (`tradeable = max_gain >= 15%`,
-`big_win >= 25%`, `dud < 5%` & red). For each universe it compares three cohorts:
-**ALL universe** vs **BREAKOUT (scanner-flagged)** vs **REJECTED**.
-
-Imports shared helpers from `breakout_review.py`. Run alongside
-`breakout_review.py` + `breakout_deep_analysis.py` on a review day.
-
-**Output:** `Output/universe_review_YYYYMMDD.xlsx`.
-
-**Usage:**
-```bash
-python3 universe_review.py                 # all matured weeks
-python3 universe_review.py --weeks 1 2 3   # specific weeks
-python3 universe_review.py --min-days 15   # maturity gate (default 15)
-```
-
----
-
-### universe_mining.py — Elite Raw-Universe Subset Miner
-
-**Purpose:** Follow-up to `universe_review.py`. Mines the RAW universe
-(`MPD Data` / `Screener Data`) for a cheap, **scanner-independent** feature
-subset with a `>= 50%` tradeable rate — i.e. can a strong pool be pulled
-straight from the raw universe, bypassing the breakout-timing penalty?
-Runs univariate threshold sweeps then AND-combinations to surface the highest
-tradeable% subset with adequate coverage. Does **not** touch the scanner.
-
-Imports helpers from `breakout_review.py` **and** `universe_review.py`
-(`_scan_close_from_ohlcv`, `_outcome`, `UNIVERSES`).
-
-**Output:** `Output/universe_mining_YYYYMMDD.xlsx`.
-
-**Usage:**
-```bash
-python3 universe_mining.py                        # all matured weeks
-python3 universe_mining.py --weeks 1 2 3
-python3 universe_mining.py --min-days 15 --min-cover 40
 ```
 
 ---
@@ -1236,7 +1051,7 @@ Daily technical health check for every owned position.
 - Last close vs 50/100/200-DMA (above/below + % distance)
 - Distance from 52-week high (drawdown)
 - 3-month and 6-month price return
-- Mansfield RS vs Nifty 500 (^CRSLDX) — 3 months
+- Relative Strength vs Nifty 500 (^CRSLDX) — 3 months (ratio now / ratio 3M ago × 100)
 - Volume spike (today vol / 50-day avg)
 - Down-day on volume flag
 
@@ -1721,7 +1536,6 @@ data goes into `market_analysis_report.xlsx` and only the charts survive.
 | `sector_momentum.py` | `sector_momentum.xlsx` | `sector_momentum_chart.html` |
 | `nse_ready_sectors.py` | `nse_sector_rs.xlsx` | `nse_sector_rs_chart.html` |
 | `rrg_chart.py` | `rrg_chart.xlsx` | `rrg_chart.html` |
-| `ipo_anchor_tracker.py` | `ipo_anchor_tracker.xlsx` | — (+ `ipo_anchor_report.txt`) |
 | `fii_stake_tracker.py` | `fii_stake_tracker.xlsx` | — |
 
 All of the above take `-o PREFIX` / `--output PREFIX`, which changes the stem of
@@ -1735,31 +1549,22 @@ both the `.xlsx` and the `_chart.html`.
 
 | Producer | Output | Location | Lifecycle |
 |---|---|---|---|
-| `breakout_scanner_angel.py` | `breakout_watchlist.xlsx` (6 sheets) | root | Overwritten |
+| `breakout_scanner_angel.py` | `breakout_watchlist.xlsx` (4 sheets) | root | Overwritten |
 | `breakout_scanner_angel.py` | `breakout_watchlist_<tag>.xlsx` (with `--out-tag`) | root | One per tag |
 | `breakout_scanner_angel.py` | `screener_data.xlsx` | `Output/` | Overwritten |
-| `breakout_scanner_angel.py` | `tv_breakouts_combined.txt`, `tv_common.txt`, `tv_unique_mpd.txt`, `tv_unique_screener.txt` | root | Overwritten |
+| `breakout_scanner_angel.py` | `tv_breakouts_combined.txt` | root | Overwritten |
 | `breakout_scanner_angel.py` | `logs_breakout_scanner_angel_v35_<timestamp>.txt` | root | Timestamped |
-| `breakout_scanner_scorecard.py` | `Scorecard` sheet appended to `breakout_watchlist.xlsx` | root | Overwritten |
-| `breakout_scanner_scorecard.py` | `breakout_watchlist_scorecard.html` | root | Overwritten |
-| `breakout_scanner_scorecard.py` | `data/scorecard_snapshots.csv` | `data/` | **Append-only** |
-| `multi_pct_down.py` | `multi_pct_down.xlsx` (sheet per universe) | root | Overwritten |
-| `multi_pct_down.py` | `multi_pct_down.txt` (TradingView) | root | Overwritten |
 
 ### Review family
 
 | Producer | Output | Lifecycle |
 |---|---|---|
-| `breakout_review.py` | `Output/review_<YYYYMMDD_HHMMSS>.xlsx` | Timestamped |
-| `breakout_review.py` | `Output/review_cumulative.csv` | **Append-only** |
 | `breakout_deep_analysis.py` | Console report only — reads `Output/review_*.xlsx` | No file |
-| `breakout_scorecard_review.py` | `Output/scorecard_review_<timestamp>.xlsx` | Timestamped |
-| `universe_review.py` | `Output/universe_review_<YYYYMMDD>.xlsx` | One per day |
-| `universe_mining.py` | `Output/universe_mining_<YYYYMMDD>.xlsx` | One per day |
 
-**Input contract:** the review family reads weekly snapshots from
-`Output/Week<N>-<DDMon>/breakout_watchlist.xlsx`. Copy the scanner's workbook
-into a new `Week<N>` folder each week, or the reviewers find nothing to review.
+**Input contract:** `breakout_deep_analysis.py` reads archived review workbooks
+from `Output/review_*.xlsx`. The scripts that generated those workbooks and the
+weekly `Output/Week<N>-<DDMon>/` snapshots have been retired, so it now runs
+only against the files already on disk.
 
 ### Standalone analysis
 
@@ -1830,12 +1635,9 @@ Analysis/
 ├── sector_momentum_chart.html
 ├── nse_sector_rs_chart.html
 ├── rrg_chart.html
-├── breakout_watchlist.xlsx                ← scanner (+ Scorecard sheet)
-├── breakout_watchlist_scorecard.html
-├── multi_pct_down.{xlsx,txt}
+├── breakout_watchlist.xlsx                ← scanner
 ├── tv_*.txt                               ← TradingView watchlists
 ├── ipo_listing_gainers.{csv,xlsx}         ← IPO gainers + anchor lists
-├── ipo_anchor_report.txt
 ├── india_macro_data.xlsx
 ├── india_macro_dashboard.html
 ├── fno_<month>.xlsx
@@ -1844,11 +1646,7 @@ Analysis/
 │
 ├── Output/
 │   ├── screener_data.xlsx
-│   ├── review_<ts>.xlsx  /  review_cumulative.csv
-│   ├── scorecard_review_<ts>.xlsx
-│   ├── universe_review_<date>.xlsx
-│   ├── universe_mining_<date>.xlsx
-│   └── Week<N>-<DDMon>/breakout_watchlist.xlsx   ← weekly snapshots (review INPUT)
+│   └── review_<ts>.xlsx  /  review_cumulative.csv     ← archived review data
 │
 ├── portfolio/
 │   ├── portfolio_report.xlsx              ← unified portfolio report
@@ -1879,17 +1677,12 @@ run_all.py
  ├── fii_flows.py
  ├── fii_sector_flows.py
  ├── sector_momentum.py ──→ data_provider → angel_client
- ├── rrg_chart.py ──→ data_provider → angel_client
- └── ipo_anchor_tracker.py
+ └── rrg_chart.py ──→ data_provider → angel_client
 
-breakout_scanner_angel.py
- ├── multi_pct_down.py ──→ data_provider → angel_client
- └── breakout_scanner_scorecard.py (attached post-process; reuses scanner candles)
-      └── data/scorecard_snapshots.csv ──→ breakout_scorecard_review.py
+breakout_scanner_angel.py ──→ data_provider → angel_client
 
-Review family (manual, run on a "let's review" day):
- breakout_review.py ──→ breakout_deep_analysis.py
-                   └──→ universe_review.py ──→ universe_mining.py
+Analysis (manual):
+ breakout_deep_analysis.py ──→ reads archived Output/review_*.xlsx
 
 portfolio/portfolio_run_all.py
  ├── holdings_loader.py (shared by all below)
@@ -1927,7 +1720,7 @@ All data flows through public/free sources. No paid market-data feeds.
 | **Angel One WebSocket** | `tradingcharts/app.py` (live ticks) | `.env`: `ANGEL_*` |
 | **jugaad-data** (NSE scrape) | `data_provider.py` (fallback) | None |
 | **yfinance** | `data_provider.py` (final fallback), indices | None |
-| **NSE archives CSV** | `multi_pct_down.py` (universe seed, F&O list) | None |
+| **NSE archives CSV** | `breakout_scanner_angel.py` (F&O list) | None |
 | **NSE API** (large-deal snapshot) | `BulkBlock.py` | Cookie-managed session |
 | **BSE JSON API** | `BulkBlock.py` (primary BSE) | None |
 | **BSE HTML scrape** | `BulkBlock.py` (fallback) | None |
@@ -1936,7 +1729,6 @@ All data flows through public/free sources. No paid market-data feeds.
 | **NSE BhavCopy (F&O)** | `fno_max_oi.py` (default EOD source) | None |
 | **Tickertape Screener API** | `fii_stake_tracker.py`, `pledge_promoter.py` | None |
 | **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py`, `screener/app.py` | `.env`: `SCREENER_*` |
-| **chittorgarh.com** | `ipo_anchor_tracker.py` (anchor tables) | None |
 | **ETMoney** | `mf_overlap.py` (MF scheme lists) | None |
 | **RBI / AMFI / CEA / PPAC / NSDL / CDSL** | `india_macro.py` (28 indicators) | None |
 | **NSE corporate APIs** | `events_calendar.py`, `forensic_accounting.py` | None |
@@ -1952,7 +1744,6 @@ Different scripts use different benchmarks depending on the analysis level:
 | `sector_momentum.py` | Nifty 50 | Correct for sector-level RS |
 | `rrg_chart.py` | Nifty 50 | Correct for sector rotation |
 | `breakout_scanner_angel.py` | Nifty 500 (^CRSLDX) | Individual stock RS — broader universe |
-| `multi_pct_down.py` | Nifty 500 (^CRSLDX) | Individual stock RS |
 | `position_health.py` | Nifty 500 (^CRSLDX) | Individual stock RS for owned names |
 
 ---
@@ -1996,11 +1787,11 @@ cd /Users/ankit.srivastava/Documents/Analysis && source .venv/bin/activate
 ### Orchestrators
 
 ```bash
-python3 run_all.py                                  # 8 scenarios + email
-python3 run_all.py --no-email                       # 8 scenarios, no email
+python3 run_all.py                                  # 7 scenarios + email
+python3 run_all.py --no-email                       # 7 scenarios, no email
 python3 run_all.py --skip bulk_block rrg            # skip named scenarios
 # scenario names: bulk_block sector_index fii_flows fii_sector_flows
-#                 sector_momentum nse_sector_rs rrg ipo_anchor
+#                 sector_momentum nse_sector_rs rrg
 
 python3 portfolio/portfolio_run_all.py              # 9 scenarios + email
 python3 portfolio/portfolio_run_all.py --no-email   # 9 scenarios, no email
@@ -2016,7 +1807,6 @@ python3 fii_sector_flows.py     [-o PREFIX]
 python3 sector_momentum.py      [-c FILE] [-o PREFIX]
 python3 nse_ready_sectors.py    [-o PREFIX]
 python3 rrg_chart.py            [-o PREFIX]
-python3 ipo_anchor_tracker.py   [--months 14] [--limit 0] [--no-anchors] [--out PATH]
 python3 fii_stake_tracker.py    [-o PREFIX]            # default prefix: fii_stake_tracker
 ```
 
@@ -2026,23 +1816,13 @@ python3 fii_stake_tracker.py    [-o PREFIX]            # default prefix: fii_sta
 python3 breakout_scanner_angel.py \
     [--max 0] [--min-score 50] [--lookback 252] [--no-strict] \
     [--high-conviction] [--symbols-csv FILE] [--screener-url URL] \
-    [--skip-mpd] [--skip-screener] [--out-tag TAG]
-
-python3 breakout_scanner_scorecard.py --workbook PATH [--lookback 400] [--no-forensic]
-
-python3 multi_pct_down.py \
-    [--min 2.0] [--max 21.0] [--skip nse nse-sme bse-sme] \
-    [--workers 4] [--max-symbols 0] [--out DIR] [-o PREFIX]
+    [--out-tag TAG]
 ```
 
-### Review family (run on a "let's review" day, in this order)
+### Analysis
 
 ```bash
-python3 breakout_review.py           [--weeks 1 2] [--full]
 python3 breakout_deep_analysis.py    [REVIEW_XLSX]
-python3 universe_review.py           [--weeks 1 2 3] [--min-days 15]
-python3 universe_mining.py           [--weeks 1 2 3] [--min-days 15] [--min-cover 30]
-python3 breakout_scorecard_review.py [--min-days 7] [--tradeable 15.0]
 ```
 
 ### Standalone analysis

@@ -4,7 +4,7 @@ NSE Ready-Made Sector Relative Strength Analyzer (Official Indices)
 
 SUMMARY
 -------
-Computes Mansfield Relative Strength for the *ready-made* NSE sectoral
+Computes comparative Relative Strength for the *ready-made* NSE sectoral
 index family (Nifty Auto, Bank, IT, Power, Capital Goods, Telecom,
 Hospitals, Insurance, NBFC, … 30 sectors) versus two benchmarks —
 Nifty 500 (primary) and Nifty MidSmall 400 (secondary).  Unlike
@@ -32,12 +32,15 @@ PRICE PROVIDER (bundled)
    series is reused without any network call if its most recent date is
    within CACHE_FRESH_DAYS of the requested end date.
 
-RELATIVE STRENGTH (Mansfield)
------------------------------
-  RS > 0  = sector index outperforming the benchmark
-  RS < 0  = sector index underperforming the benchmark
+RELATIVE STRENGTH (comparative, NOT Mansfield)
+----------------------------------------------
+  RS > 0  = sector index has outperformed the benchmark since the start
+  RS < 0  = sector index has underperformed the benchmark since the start
   Both sector and benchmark are normalised to 100 at the common start
   date; RS = (sector_norm / bench_norm) * 100, then rebased so 0 = neutral.
+  Shares ``sector_momentum.compute_rs``, so the baseline is the first bar of
+  the loaded window (START_DATE) and every level moves if that moves. For a
+  window-independent, zero-anchored gate use ``stage_analysis.mansfield_rs``.
 
 WORKFLOW
 --------
@@ -94,7 +97,8 @@ import requests
 
 from sector_momentum import (
     compute_rs, create_rs_chart, create_individual_dual_chart,
-    save_combined_chart_html, save_to_excel, BASE_VALUE,
+    save_combined_chart_html, save_to_excel, rs_trend_label, TREND_WINDOWS,
+    BASE_VALUE,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -495,10 +499,7 @@ def run(output_prefix=None):
             all_rs2[disp] = rs2
 
         current_rs = rs.iloc[-1] - 100
-        lookback = min(20, len(rs))
-        rs_trend = rs.iloc[-1] - rs.iloc[-lookback]
-        trend_str = ("\u2191 %.1f" % rs_trend if rs_trend > 0
-                     else "\u2193 %.1f" % abs(rs_trend))
+        trends = {"%dD Trend" % d: rs_trend_label(rs, d) for d in TREND_WINDOWS}
         current_rs2 = (rs2.iloc[-1] - 100) if not rs2.empty else None
         current_val = rebased.iloc[-1]
         change_pct = ((current_val / BASE_VALUE) - 1) * 100
@@ -509,7 +510,7 @@ def run(output_prefix=None):
             "RS vs Nifty 500": round(current_rs, 1),
             "RS vs MidSmall 400": (round(current_rs2, 1)
                                    if current_rs2 is not None else None),
-            "20D Trend": trend_str,
+            **trends,
             "RS Status": "Outperforming" if current_rs >= 0 else "Underperforming",
             "Index Value": round(current_val, 2),
             "Change %": round(change_pct, 2),
@@ -527,9 +528,9 @@ def run(output_prefix=None):
     print("=" * 60)
     for _, row in ranking_df.iterrows():
         star = "\u2605" if row["RS vs Nifty 500"] >= 0 else " "
-        print("  %s %-28s RS=%+-6.1f %-8s [%s]" % (
+        print("  %s %-28s RS=%+-6.1f %-8s %-8s [%s]" % (
             star, row["Sector"], row["RS vs Nifty 500"],
-            row["20D Trend"], row["RS Status"]))
+            row["10D Trend"], row["20D Trend"], row["RS Status"]))
 
     if output_prefix is None:
         output_prefix = os.path.join(SCRIPT_DIR, "nse_sector_rs")

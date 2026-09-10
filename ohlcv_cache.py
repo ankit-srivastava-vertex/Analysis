@@ -20,9 +20,10 @@ Correctness guards
   1. closed-sessions-only : today's in-progress bar (before market close) is
      served live to the caller but NEVER written to disk, so a partial bar can
      never be persisted.
-  2. overlap-overwrite    : every run re-fetches the last OVERLAP_DAYS calendar
-     days and merges with keep="last", so provisional bars get finalized and
-     split/adjustment restatements overwrite stale values.
+  2. overlap-overwrite    : the last OVERLAP_DAYS calendar days are re-fetched
+     and merged with keep="last", so provisional bars get finalized and
+     split/adjustment restatements overwrite stale values. See the tail-refresh
+     note below for how often that sweep runs.
   3. repair-or-rebuild    : on load, individually bad rows (NaN OHLC, High<Low,
      negative volume, dup/unsorted index, unparseable dates) are dropped and the
      rest kept; only a structurally unusable / unreadable file is discarded and
@@ -30,6 +31,31 @@ Correctness guards
      truth, so a corrupt entry is always safe to repair or throw away.
   + atomic writes         : write to a temp file then os.replace(), so a crash
      mid-write leaves either the old file or the new one — never a half file.
+
+Head watermark (schema v3)
+  A symbol listed after the caller's requested start can never satisfy the
+  coverage test on its own first bar, so without help every consumer re-fetches
+  its entire window on every run, forever — the newest listings are the most
+  expensive rows in the cache. Each entry therefore records the earliest start
+  that was actually asked for and answered (`head`) and when (`probed`); while
+  that is fresh, the requested start is clamped to the frame's first bar and the
+  head fetch is skipped. Nothing in a single response distinguishes "genuinely
+  young" from "truncated under load", so the watermark expires after
+  HEAD_REPROBE_DAYS and a fetch that returns nothing never sets it.
+
+Tail refresh (schema v4)
+  The overlap sweep of guard 2 is what keeps restatements correct, but it also
+  means every symbol costs a network round trip on its first touch in a process
+  even when the cache already holds the newest closed bar. For a universe of
+  ~1000 symbols that alone saturates the vendor's rate limit. Each entry
+  therefore records the date its overlap was last re-fetched (`refreshed`), and
+  the sweep is skipped when it already ran today AND the cache already covers
+  every closed session the caller asked for. The second half of that test is
+  what keeps a later run on the same day correct: once a new session closes,
+  cmax falls behind the cutoff and the sweep runs again. The cost is that a
+  restatement published between two runs on the same day is picked up the next
+  day rather than immediately; set ANGEL_CACHE_TAIL_REFRESH_DAILY=0 to restore
+  the per-run sweep.
 
 The cache never masks a hard failure with an exception: any internal error in
 `get()` is caught by the caller (angel_client) which falls back to a direct
@@ -55,10 +81,14 @@ _COLS = ["Open", "High", "Low", "Close", "Volume"]
 
 # On-disk format version. Files are stored as gzipped CSV (a universal,
 # interpreter-/pandas-version-independent format) with this schema tag on the
-# first line. A file whose tag is missing or different is treated as
+# first line. A file whose tag is missing or unreadable is treated as
 # incompatible and rebuilt — so upgrading pandas/Python can never leave the
 # cache in a state where one interpreter silently can't read another's files.
-_SCHEMA_VERSION = 2
+# v3 adds the head watermark and v4 the tail-refresh date; the row format is
+# unchanged across all of them, so older files are read in place (watermarks
+# unknown) and upgraded on their next write rather than invalidating the cache.
+_SCHEMA_VERSION = 4
+_READABLE_SCHEMAS = (2, 3, 4)
 _SCHEMA_TAG = "# ohlcv_cache schema=%d" % _SCHEMA_VERSION
 
 # India market close ~15:30 IST; use a small buffer so the settled EOD bar is
@@ -71,6 +101,16 @@ OVERLAP_DAYS = int(os.environ.get("ANGEL_CACHE_OVERLAP_DAYS", "7"))
 # Within one process, treat a symbol refreshed this recently as fresh (skip the
 # network). Bounds staleness for long-running servers (e.g. tradingcharts).
 _L1_TTL_SEC = float(os.environ.get("ANGEL_CACHE_L1_TTL", "300"))
+# A head watermark can be wrong if the vendor truncated a response under load
+# rather than genuinely having no older bars, and nothing in a single response
+# distinguishes those. Re-probing on this cadence bounds how long such a
+# mistake can persist while still skipping the head fetch on most runs.
+HEAD_REPROBE_DAYS = int(os.environ.get("ANGEL_CACHE_HEAD_REPROBE_DAYS", "7"))
+# Run the OVERLAP_DAYS sweep once per calendar day instead of once per process.
+# Set to 0/false to re-fetch the overlap on every run (stricter, much slower).
+TAIL_REFRESH_DAILY = os.environ.get(
+    "ANGEL_CACHE_TAIL_REFRESH_DAILY", "1").strip().lower() \
+    not in ("0", "false", "no", "off", "")
 
 
 def enabled() -> bool:
@@ -82,6 +122,7 @@ def enabled() -> bool:
 # ─────────────────────────── in-memory (L1) state ──────────────────────────
 _l1: dict = {}         # (ticker, interval) -> full-history DataFrame (may incl live bar)
 _l1_time: dict = {}    # (ticker, interval) -> epoch of last refresh
+_l1_marks: dict = {}   # (ticker, interval) -> (head, probed, refreshed) dates
 _locks: dict = {}      # (ticker, interval) -> Lock (serialize per-symbol work)
 _locks_guard = threading.Lock()
 
@@ -198,36 +239,69 @@ def _discard(path):
         pass
 
 
+def _parse_header(line):
+    """Parse the schema tag line into (version, head, probed, refreshed).
+
+    Returns all-None if the line is not one of ours. The watermarks are None for
+    files written by an older schema, which simply means "unknown" — the caller
+    then re-probes rather than trusting a value it does not have.
+    """
+    if not line.startswith("# ohlcv_cache schema="):
+        return None, None, None, None
+    ver, head, probed, refreshed = None, None, None, None
+    for tok in line.strip().split():
+        if "=" not in tok:
+            continue
+        k, v = tok.split("=", 1)
+        try:
+            if k == "schema":
+                ver = int(v)
+            elif k == "head":
+                head = datetime.date.fromisoformat(v)
+            elif k == "probed":
+                probed = datetime.date.fromisoformat(v)
+            elif k == "refreshed":
+                refreshed = datetime.date.fromisoformat(v)
+        except Exception:
+            if k == "schema":
+                return None, None, None, None   # unusable version → rebuild
+            head, probed, refreshed = None, None, None   # bad mark → re-probe
+    return ver, head, probed, refreshed
+
+
+def _header_line(head, probed, refreshed) -> str:
+    tag = _SCHEMA_TAG
+    if head is not None and probed is not None:
+        tag += " head=%s probed=%s" % (head.isoformat(), probed.isoformat())
+    if refreshed is not None:
+        tag += " refreshed=%s" % refreshed.isoformat()
+    return tag
+
+
 def _load_l2(ticker, interval):
+    """Return (DataFrame, head, probed, refreshed), or all-None to rebuild."""
     path = _cache_file(ticker, interval)
     if not os.path.exists(path):
-        return None
+        return None, None, None, None
     try:
         with gzip.open(path, "rt", newline="") as gz:
             first = gz.readline()
-            if not first.startswith("# ohlcv_cache schema="):
-                _discard(path)          # not our format → rebuild
-                return None
-            try:
-                ver = int(first.strip().rsplit("=", 1)[1])
-            except Exception:
-                _discard(path)
-                return None
-            if ver != _SCHEMA_VERSION:
-                _discard(path)          # older/newer schema → rebuild
-                return None
+            ver, head, probed, refreshed = _parse_header(first)
+            if ver is None or ver not in _READABLE_SCHEMAS:
+                _discard(path)          # not our format / unknown schema
+                return None, None, None, None
             df = pd.read_csv(gz, index_col=0, parse_dates=[0])
     except Exception:
         _discard(path)                  # unreadable / truncated → rebuild
-        return None
+        return None, None, None, None
     repaired = _repair(df)              # drop any bad rows instead of nuking all
     if repaired is None:
         _discard(path)                  # structurally unusable → rebuild
-        return None
-    return repaired
+        return None, None, None, None
+    return repaired, head, probed, refreshed
 
 
-def _atomic_write(df, ticker, interval):
+def _atomic_write(df, ticker, interval, head=None, probed=None, refreshed=None):
     try:
         clean = _repair(df)
         if clean is None:
@@ -238,7 +312,7 @@ def _atomic_write(df, ticker, interval):
         os.close(fd)
         try:
             with gzip.open(tmp, "wt", newline="") as gz:
-                gz.write(_SCHEMA_TAG + "\n")
+                gz.write(_header_line(head, probed, refreshed) + "\n")
                 clean.to_csv(gz)        # index (Date) + OHLCV columns
             os.replace(tmp, path)       # atomic on POSIX
         finally:
@@ -265,6 +339,38 @@ def _covers(df, start_ts, end_ts) -> bool:
     return df.index.min() <= start_ts and df.index.max() >= end_ts
 
 
+def _clamp_start(df, start_ts, head, probed, start_d, today):
+    """Requested start, raised to the frame's first bar when the head watermark
+    proves no older bars exist.
+
+    Without this a symbol listed after `start_d` never satisfies `_covers`, so
+    every caller re-fetches its whole window on every run forever. The clamp
+    only applies while the watermark is fresh, so a watermark recorded from a
+    truncated vendor response self-corrects at the next re-probe.
+    """
+    if head is None or probed is None or df is None or df.empty:
+        return start_ts
+    if head > start_d:
+        return start_ts                 # watermark covers a later start only
+    if (today - probed).days >= HEAD_REPROBE_DAYS:
+        return start_ts                 # stale → re-probe the head
+    return max(start_ts, df.index.min())
+
+
+def _tail_is_fresh(cmax, refreshed, end_d, cutoff_d, today) -> bool:
+    """True when the trailing overlap sweep can be skipped for this call.
+
+    Both halves matter. `refreshed == today` means the restatement sweep has
+    already run once today, and `cmax >= min(end_d, cutoff_d)` means the cache
+    already holds every closed session the caller asked for — so a second run
+    after a new session closes still fetches, because cmax has fallen behind
+    the cutoff by then.
+    """
+    if not TAIL_REFRESH_DAILY or refreshed is None or refreshed != today:
+        return False
+    return cmax >= min(end_d, cutoff_d)
+
+
 def _slice(df, start_ts, end_ts):
     try:
         out = df.loc[start_ts:end_ts]
@@ -279,6 +385,14 @@ def get(ticker: str, start, end, interval: str,
     """Return daily OHLCV for `ticker` over [start, end], using the L1/L2 cache
     and calling `fetch_fn(from_date, to_date)` only for the missing/overlap span.
 
+    A request that starts before the symbol's listing date is satisfied from
+    cache alone once the head watermark has been recorded, instead of re-fetching
+    the full window every run (see the head-watermark note in the module
+    docstring). The trailing overlap sweep is likewise skipped once it has run
+    today and the cache already covers every closed session asked for (see the
+    tail-refresh note). The returned frame is always sliced to the caller's
+    [start, end], so a clamped start never changes what the caller sees.
+
     `fetch_fn` must return a yfinance-shaped DataFrame (same as angel_download):
     DatetimeIndex + columns [Open, High, Low, Close, Volume].
     """
@@ -286,22 +400,26 @@ def get(ticker: str, start, end, interval: str,
     end_d = _as_date(end)
     start_ts = pd.Timestamp(start_d)
     end_ts = pd.Timestamp(end_d)
-    cutoff_ts = pd.Timestamp(_persist_cutoff())
+    cutoff_d = _persist_cutoff()
+    cutoff_ts = pd.Timestamp(cutoff_d)
 
     key = (ticker, interval)
     with _lock_for(key):
         now = time.time()
+        today = datetime.date.today()
 
         # ---- L1 fast path (in-memory dedupe within the process) ----
         cached = _l1.get(key)
-        if (cached is not None
-                and (now - _l1_time.get(key, 0.0)) < _L1_TTL_SEC
-                and _covers(cached, start_ts, min(end_ts, cutoff_ts))):
-            return _slice(cached, start_ts, end_ts)
+        head, probed, refreshed = _l1_marks.get(key, (None, None, None))
+        if cached is not None and (now - _l1_time.get(key, 0.0)) < _L1_TTL_SEC:
+            eff_ts = _clamp_start(cached, start_ts, head, probed, start_d, today)
+            if _covers(cached, eff_ts, min(end_ts, cutoff_ts)):
+                return _slice(cached, start_ts, end_ts)
 
         # ---- L2 load (validate-or-rebuild) ----
         if cached is None:
-            cached = _load_l2(ticker, interval)
+            cached, head, probed, refreshed = _load_l2(ticker, interval)
+        marks_before = (head, probed, refreshed)
 
         # ---- decide the minimal fetch window ----
         if cached is None or cached.empty:
@@ -309,9 +427,13 @@ def get(ticker: str, start, end, interval: str,
         else:
             cmin = cached.index.min().date()
             cmax = cached.index.max().date()
-            need_head = start_d < cmin                         # want older history
+            eff_start_d = _clamp_start(
+                cached, start_ts, head, probed, start_d, today).date()
+            need_head = eff_start_d < cmin                     # want older history
             refresh_from = cmax - datetime.timedelta(days=OVERLAP_DAYS)
             need_tail = end_d >= refresh_from                  # want recent/overlap
+            if need_tail and _tail_is_fresh(cmax, refreshed, end_d, cutoff_d, today):
+                need_tail = False                              # swept already today
             if need_head and need_tail:
                 fetches = [(start_d, end_d)]
             elif need_head:
@@ -322,6 +444,8 @@ def get(ticker: str, start, end, interval: str,
                 fetches = []                                   # fully covered → 0 calls
 
         merged = cached
+        asked_head = any(fs <= start_d for fs, fe in fetches)
+        asked_tail = any(fe >= end_d for fs, fe in fetches)
         for fs, fe in fetches:
             if fs > fe:
                 continue
@@ -331,17 +455,33 @@ def get(ticker: str, start, end, interval: str,
                 fresh = None
             if fresh is not None and not fresh.empty:
                 merged = _merge(merged, fresh)
+            else:
+                # Inconclusive: trust no watermark this call rather than record
+                # one that would suppress future fetches.
+                asked_head = asked_tail = False
 
         # Clean any individually-bad rows the vendor returned (repair, not reject).
         merged = _repair(merged)
         if merged is None or merged.empty:
             return _empty()
 
+        # A completed fetch from `start_d` that returned data proves the vendor
+        # has nothing older, so record it and stop re-asking until the re-probe.
+        if asked_head:
+            head = start_d if head is None else min(head, start_d)
+            probed = today
+        if asked_tail:
+            refreshed = today
+
         # ---- persist closed sessions only (atomic; repairs internally) ----
-        to_store = merged[merged.index <= cutoff_ts]
-        _atomic_write(to_store, ticker, interval)
+        # Skip the rewrite when nothing changed: re-gzipping every symbol on a
+        # fully-cached run costs more than the fetches it replaced.
+        if fetches or (head, probed, refreshed) != marks_before:
+            to_store = merged[merged.index <= cutoff_ts]
+            _atomic_write(to_store, ticker, interval, head, probed, refreshed)
 
         # L1 keeps the full merged frame (incl. any live bar) for in-run reuse.
         _l1[key] = merged
         _l1_time[key] = now
+        _l1_marks[key] = (head, probed, refreshed)
         return _slice(merged, start_ts, end_ts)

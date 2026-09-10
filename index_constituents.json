@@ -28,11 +28,10 @@
             "EXATO"
         ]
     },
-    "BFSI": {
+    "NBFC": {
         "description": "Financial Services",
         "constituents": [
             "AYE",
-            "FINBUD",
             "LAXMIINDIA",
             "NORTHARC",
             "CGCL",
@@ -41,7 +40,18 @@
             "SGFIN",
             "MUFIN",
             "ARMANFIN",
-            "PAISALO"
+            "PAISALO",
+            "LTF",
+            "SBICARD",
+            "HDBFS",
+            "SUNDARMFIN",
+            "M&MFIN",
+            "AIIL",
+            "POONAWALLA",
+            "MANAPPURAM",
+            "IIFL",
+            "FIVESTAR",
+            "MASFIN"
         ]
     },
     "Wires&Cables": {
@@ -56,7 +66,17 @@
             "SYSTEMATIC",
             "JDCABLES",
             "PRIMECAB",
-            "BHADORA"
+            "BHADORA",
+            "KEI",
+            "KSHINTL",
+            "LASERPOWER",
+            "LUMINO",
+            "QUADFUTURE",
+            "DPEL",
+            "CORDSCABLE",
+            "PLAZACABLE",
+            "DCG",
+            "MARCO"
         ]
     },
     "Forgings": {
@@ -67,7 +87,12 @@
             "BALUFORGE",
             "KALYANIFRG",
             "KVSCASTING",
-            "MMFORGINGS"
+            "MMFORGINGS",
+            "STEELCAS",
+            "NELCAST",
+            "SGIL",
+            "TIRUPATIFL",
+            "MUNISH"
         ]
     },
     "Pumps&Engines": {
@@ -84,17 +109,6 @@
             "ROTO"
         ]
     },
-    "Bearings": {
-        "description": "Bearings & Abrasives",
-        "constituents": [
-            "TIMKEN",
-            "CARBORUNIV",
-            "GRINDWELL",
-            "SKFINDIA",
-            "WENDT",
-            "SKP"
-        ]
-    },
     "OtherIndustrial": {
         "description": "Other Industrial & Engineering",
         "constituents": [
@@ -103,8 +117,6 @@
             "ESABINDIA",
             "KRN",
             "ADORWELD",
-            "SAHASRA",
-            "PTCIL",
             "AEROFLEX",
             "SHANTIGEAR",
             "ANUP",
@@ -113,7 +125,33 @@
             "KLBRENG-B",
             "PATILAUTOM",
             "CMRGREEN",
-            "PATELSAI"
+            "PATELSAI",
+            "GRAVITA",
+            "SUBROS",
+            "HARSHA",
+            "ADOR",
+            "DIFFNKG",
+            "MICEL",
+            "TANKUP",
+            "HTEL",
+            "MEGATHERM",
+            "JYOTICNC", 
+            "MACPOWER",
+            "AERON",
+            "TEMPSENS",
+            "DEEDEV",
+            "GMMPFAUDLR",
+            "OMNI",
+            "KENNAMET",
+            "TEGA",
+            "INDOMIM",
+            "EPACKPEB",
+            "PENIND",
+            "JNKINDIA",
+            "EIMCOELECO",
+            "ADISOFT",
+            "MAMATA",
+            "SUNITATOOL"
         ]
     },
     "Rail": {
@@ -124,7 +162,8 @@
             "CNCRD",
             "AIRFLOA",
             "JWL",
-            "TITAGARH"
+            "TITAGARH",
+            "E2ERAIL"
         ]
     },
     "Infra": {
@@ -136,7 +175,26 @@
             "JKIL",
             "INTERARCH",
             "CEMPRO",
-            "ANANTRAJ"
+            "ANANTRAJ",
+            "KPIL",
+            "IRB",
+            "KEC",
+            "AFCONS",
+            "POWERMECH",
+            "CEIGALL",
+            "ISGEC",
+            "PNCINFRA",
+            "PSPPROJECT",
+            "KNRCON",
+            "ASHOKA",
+            "HGINFRA",
+            "PATELENG",
+            "CAPACITE",
+            "BLKASHYAP",
+            "LIKHITHA",
+            "OMINFRAL",
+            "MARKOLINES",
+            "CHAVDA"
         ]
     },
     "MetalPipes": {
@@ -152,8 +210,17 @@
             "HITECH",
             "HARIOMPIPE",
             "SCODATUBES",
-            "JAYBEE",
-            "SHYAMMETL"
+            "SHYAMMETL",
+            "WELCORP",
+            "APLAPOLLO",
+            "BANSALWIRE",
+            "ELECTCAST",
+            "GOODLUCK",
+            "SURYAROSNI",
+            "KSL",
+            "WELSPLSOL",
+            "KIRLOSIND",
+            "VSSL"
         ]
     },
     "Ships": {
@@ -184,7 +251,14 @@
             "NIBE",
             "AZAD",
             "C2C",
-            "TECHERA"
+            "TECHERA",
+            "AEQUS",
+            "SIGMAADV",
+            "AXISCADES",
+            "ROSSTECH",
+            "IDEAFORGE",
+            "JAYKAY",
+            "SIKA"
         ]
     },
     "Electronics": {
@@ -192,38 +266,46 @@
         "constituents": [
             "KAYNES",
             "SYRMA",
-            "JYOTICNC",
             "CYIENTDLM",
             "CENTUM",
             "AIMTRON",
-            "MACPOWER",
             "AVALON",
             "EPACK",
             "PGEL",
             "MRTX",
-            "VOEPL"
+            "VOEPL",
+            "SAHASRA",
+            "VINYAS"
         ]
     },
-    "Electrical": {
+    "Electrical&Transmission": {
         "description": "Electrical Equipment & Systems",
         "constituents": [
             "HPL",
-            "THERMAX",
             "SCHNEIDER",
             "TDPOWERSYS",
-            "TRITURBINE",
-            "QPOWER",
             "SALZERELEC",
             "RMC",
             "PARTH",
             "TECHNOE",
             "ADVAIT",
-            "TRANSRAILL",
             "RISHABH",
             "KECL",
             "GENUSPOWER",
-            "LASERPOWER",
-            "SAAKSHI"
+            "SAAKSHI",
+            "SBCL",
+            "DHOOTTRANS",
+            "SUZLON",
+            "THERMAX",
+            "TRITURBINE",
+            "ATLANTAELE",
+            "INOXWIND",
+            "QPOWER",
+            "ELECON",
+            "SKIPPER",
+            "TRANSRAILL",
+            "GVPIL",
+            "MARINE"
         ]
     },
     "Renewable": {
@@ -242,7 +324,10 @@
             "WAAREERTL",
             "VIKRAMSOLR",
             "SAATVIKGL",
-            "RELTD"
+            "RELTD",
+            "GKENERGY",
+            "DIACABS",
+            "ALPEXSOLAR"
         ]
     },
     "Transformers": {
@@ -250,20 +335,19 @@
         "constituents": [
             "VOLTAMP",
             "TARIL",
-            "TRANSRAILL",
-            "SKIPPER",
             "DANISH",
             "SHILCTECH",
             "YASHHV",
-            "INDOTECH"
+            "INDOTECH",
+            "JAYBEE",
+            "VILAS",
+            "MEIL",
+            "SUPREMEPWR"
         ]
     },
     "Exchange&Brokers": {
         "description": "Exchanges, Brokers & Financial Services",
         "constituents": [
-            "GROWW",
-            "BSE",
-            "MCX",
             "ANGELONE",
             "CDSL",
             "CAMS",
@@ -274,7 +358,13 @@
             "SHAREINDIA",
             "GEOJITFSL",
             "5PAISA",
-            "ARSSBL"
+            "ARSSBL",
+            "IIFLCAPS",
+            "SMCGLOBAL",
+            "DOLATALGO",
+            "ARIHANTCAP",
+            "EMKAY",
+            "BIRLAMONEY"
         ]
     },
     "WealthManagement": {
@@ -288,36 +378,36 @@
             "MONARCH"
         ]
     },
-    "Healthcare": {
-        "description": "Healthcare & Hospitals",
+    "Hospitals": {
+        "description": "Hospitals & Healthcare",
         "constituents": [
             "ASTERDM",
             "NH",
             "MEDANTA",
             "KIMS",
-            "LALPATHLAB",
             "INDGN",
             "RAINBOW",
-            "VIJAYA",
             "PARKHOSPS",
             "JLHL",
             "YATHARTH",
             "DRAGARWQ",
-            "GAUDIUMIVF",
             "CHANDAN",
-            "LAXMIDENTL",
-            "OSELDEVICE",
-            "POLYMED",
-            "METROPOLIS",
-            "THYROCARE",
-            "QLINE",
-            "NEPHROPLUS"
+            "FORTIS",
+            "AGARWALEYE",
+            "HCG",
+            "KOVAI",
+            "ARTEMISMED",
+            "INDRAMEDCO",
+            "KMCSHIL",
+            "SHALBY",
+            "GKSL",
+            "GPTHEALTH",
+            "UNIHEALTH"
         ]
     },
     "Pharma": {
         "description": "Pharmaceuticals & Specialty Chemicals",
         "constituents": [
-            "LAURUSLABS",
             "EMCURE",
             "GLAND",
             "SAILIFE",
@@ -334,7 +424,6 @@
             "INNOVACAP",
             "SENORES",
             "NGLFINE",
-            "GLAND",
             "AJANTPHARM",
             "JBCHEPHARM",
             "ASTRAZEN",
@@ -344,25 +433,298 @@
             "MARKSANS",
             "SUPRIYA",
             "RPGLIFE",
-            "KPL"
+            "KPL",
+            "ABBOTINDIA",
+            "GLAXO",
+            "IPCALAB",
+            "WOCKPHARMA",
+            "PPLPHARMA",
+            "RUBICON",
+            "GRANULES",
+            "PFIZER",
+            "SHILPAMED",
+            "COHANCE",
+            "CORONA",
+            "AKUMS",
+            "PGHL",
+            "SANOFICONR",
+            "AARTIPHARM",
+            "BLISSGVS",
+            "STAR"
         ]
     },
     "Chemical": {
         "description": "Specialty Chemicals & Explosives",
         "constituents": [
+            "EPIGRAL",
+            "TANFACIND",
+            "TATVA",
+            "BEEZAASAN",
+            "SRF",
+            "DEEPAKFERT",
+            "TATACHEM",
+            "GNFC",
+            "GUJALKALI",
+            "GHCL",
+            "GRAUWEIL",
+            "TIRUMALCHM",
+            "IGPL",
+            "INDOBORAX",
+            "SRHHYPOLTD",
+            "SADHNANIQ",
+            "OCCLLTD",
+            "CHEMFAB"
+        ]
+    },
+    "PrivateBanks": {
+        "description": "Private Sector Bank",
+        "constituents": [
+            "FEDERALBNK",
+            "INDUSINDBK",
+            "IDFCFIRSTB",
+            "YESBANK",
+            "RBLBANK",
+            "KARURVYSYA",
+            "BANDHANBNK",
+            "CUB",
+            "J&KBANK",
+            "TMB",
+            "KTKBANK",
+            "SOUTHBANK",
+            "DCBBANK",
+            "CSBBANK",
+            "DHANBANK"
+        ]
+    },
+    "AssetManagement": {
+        "description": "Asset Management Company",
+        "constituents": [
+            "NAM-INDIA",
+            "ABSLAMC",
+            "UTIAMC",
+            "CRAMC",
+            "GAJA"
+        ]
+    },
+    "HousingFinance": {
+        "description": "Housing Finance Company",
+        "constituents": [
+            "PNBHOUSING",
+            "LICHSGFIN",
+            "AADHARHFC",
+            "SAMMAANCAP",
+            "HOMEFIRST",
+            "APTUS",
+            "CANFINHOME",
+            "AAVAS",
+            "INDIASHLTR",
+            "REPCOHOME",
+            "GICHSGFIN"
+        ]
+    },
+    "Microfinance": {
+        "description": "Microfinance Institutions",
+        "constituents": [
+            "CREDITACC",
+            "MUTHOOTMF",
+            "FUSION",
+            "SATIN",
+            "SPANDANA"
+        ]
+    },
+    "FintechCompanies": {
+        "description": "Financial Technology (Fintech)",
+        "constituents": [
+            "PINELABS",
+            "STYL",
+            "NPST",
+            "MOBIKWIK",
+            "FINBUD",
+            "SUVIDHAA"
+        ]
+    },
+    "MedicalEquipment": {
+        "description": "Healthcare Equipment & Supplies",
+        "constituents": [
+            "POLYMED",
+            "MOLBIO",
+            "TARSONS",
+            "QLINE",
+            "LAXMIDENTL",
+            "DENTALKART",
+            "OSELDEVICE",
+            "NURECA",
+            "AVIENCE"
+        ]
+    },
+    "HealthcareServiceProvider": {
+        "description": "Healthcare Service Provider",
+        "constituents": [
+            "LALPATHLAB",
+            "VIJAYA",
+            "METROPOLIS",
+            "THYROCARE",
+            "NEPHROPLUS",
+            "KRSNAA",
+            "SURAKSHA",
+            "3BBLACKBIO",
+            "ONEGLOBAL",
+            "GAUDIUMIVF",
+            "PRAMODINI"
+        ]
+    },
+    "Insurance": {
+        "description": "Insurance",
+        "constituents": [
+            "MFSL",
+            "STARHEALTH",
+            "GODIGIT",
+            "NIVABUPA",
+            "CANHLIFE",
+            "MEDIASSIST"
+        ]
+    },
+    "Tyres": {
+        "description": "Tyres & Rubber Products",
+        "constituents": [
+            "MRF",
+            "BALKRISIND",
+            "APOLLOTYRE",
+            "CEATLTD",
+            "JKTYRE",
+            "TVSSRICHAK",
+            "GOODYEAR"
+        ]
+    },
+    "AutoComponents": {
+        "description": "Auto Components & Equipments",
+        "constituents": [
+            "TIINDIA",
+            "SONACOMS",
+            "ENDURANCE",
+            "EXIDEIND",
+            "CRAFTSMAN",
+            "SUNDRMFAST",
+            "SANSERA",
+            "GABRIEL",
+            "BELRISE",
+            "SHRIPISTON",
+            "TENNIND",
+            "MINDACORP",
+            "ARE&M",
+            "CIEINDIA",
+            "JBMA",
+            "LUMAXTECH",
+            "ASKAUTOLTD",
+            "PRICOLLTD",
+            "SJS",
+            "SUPRAJIT",
+            "LUMAXIND",
+            "LGBBROSLTD",
+            "FIEMIND",
+            "JAMNAAUTO",
+            "ROLEXRINGS",
+            "WHEELS",
+            "UNIPARTS",
+            "SANDHAR",
+            "SUNCLAY",
+            "TIMKEN",
+            "CARBORUNIV",
+            "GRINDWELL",
+            "SKFINDIA",
+            "WENDT",
+            "SKP",
+            "SKFINDUS",
+            "NIBL",
+            "DYNAMATECH"
+        ]
+    },
+    "Explosives": {
+        "description": "Explosives",
+        "constituents": [
+            "SOLARINDS",
+            "PREMEXPLN",
+            "GOCLCORP"
+        ]
+    },
+    "IndustrialGases": {
+        "description": "Industrial Gases",
+        "constituents": [
+            "LINDEINDIA",
+            "ELLEN",
+            "STALLION"
+        ]
+    },
+    "SpecialityChemicals": {
+        "description": "Specialty Chemicals",
+        "constituents": [
+            "FLUOROCHEM",
             "NAVINFLUOR",
             "DEEPAKNTR",
             "AETHER",
+            "ATUL",
+            "AARTIIND",
+            "BASF",
             "FINEORG",
+            "ANURAS",
+            "VINATIORGA",
             "PRIVISCL",
-            "ACI",
-            "EPIGRAL",
-            "TANFACIND",
+            "JUBLINGREA",
+            "ELANTAS",
+            "ALKYLAMINE",
+            "CLEAN",
+            "BALAMINES",
+            "GALAXYSURF",
             "NEOGEN",
-            "TATVA",
-            "PREMEXPLN",
-            "BEEZAASAN",
-            "VINATIORGA"
+            "VISHNU",
+            "YASHO",
+            "SUDARSCHEM",
+            "LXCHEM"
+        ]
+    },
+    "Plastic": {
+        "description": "Plastic Products - Industrial",
+        "constituents": [
+            "SUPREMEIND",
+            "ASTRAL",
+            "GRWRHITECH",
+            "FINPIPE",
+            "TIMETECHNO",
+            "KINGFA",
+            "PRINCEPIPE",
+            "APOLLOPIPE",
+            "PPL"
+        ]
+    },
+    "Jewellery": {
+        "description": "Jewellery, Gems & Watches",
+        "constituents": [
+            "KALYANKJIL",
+            "LALITHAA",
+            "THANGAMAYL",
+            "BLUESTONE",
+            "PCJEWELLER",
+            "SKYGOLD",
+            "PNGJL",
+            "ETHOSLTD",
+            "SENCO",
+            "TBZ",
+            "SHANKESH",
+            "PRIORITY"
+        ]
+    },
+    "SmallFinanceBanks": {
+        "description": "Small Finance & Payments Banks",
+        "constituents": [
+            "AUBANK",
+            "UJJIVANSFB",
+            "EQUITASBNK",
+            "JSFB",
+            "UTKARSHBNK",
+            "ESAFSFB",
+            "SURYODAY",
+            "CAPITALSFB",
+            "FINOPB"
         ]
     }
 }
