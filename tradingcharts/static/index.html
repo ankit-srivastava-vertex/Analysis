@@ -753,6 +753,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    max-height: 60vh;
+    overflow-y: auto;
 }
 .indi-modal-body label {
     display: flex;
@@ -809,6 +811,29 @@ body {
 }
 .smartvpsg-panel .pos { color: #089981; }
 .smartvpsg-panel .neg { color: #f23645; }
+/* SimpleVol info panel */
+.simplevol-panel {
+    position: absolute;
+    left: 12px;
+    bottom: 21%;
+    z-index: 10;
+    pointer-events: none;
+    display: none;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--text-primary);
+}
+.simplevol-panel .sv-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 4px;
+    font-size: 10px;
+    font-weight: 500;
+}
+.simplevol-panel .sv-pill-green { background: rgba(8,153,129,0.25); color: #089981; }
+.simplevol-panel .sv-pill-red { background: rgba(242,54,69,0.25); color: #f23645; }
+.simplevol-panel .sv-pill-neutral { background: rgba(120,123,134,0.15); color: var(--text-secondary); }
 /* Institutional Accumulation data panel */
 .instaccum-panel {
     position: absolute;
@@ -1085,6 +1110,16 @@ body {
         <span class="indi-name">Ehlers Cycle</span>
         <span class="indi-hint">right-click: settings</span>
     </div>
+    <div class="indi-flyout-row" data-indi="stage">
+        <span class="indi-check"></span>
+        <span class="indi-name">Stage Analysis</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
+    <div class="indi-flyout-row" data-indi="simplevol">
+        <span class="indi-check"></span>
+        <span class="indi-name">SimpleVol</span>
+        <span class="indi-hint">right-click: settings</span>
+    </div>
 </div>
 
 <!-- Indicator Settings Modal -->
@@ -1140,9 +1175,36 @@ body {
             </label>
             <label>MA Period<input type="number" id="indi_rsMaPeriod" value="50" min="5" max="200"></label>
         </div>
+        <div class="indi-modal-body" id="indiModalStage" style="display:none">
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_stageMA" checked style="width:auto;margin:0"> Show 30-week MA (stage-coloured)</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_stageBg" checked style="width:auto;margin:0"> Tint price background by stage</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_stageBadge" checked style="width:auto;margin:0"> Show stage badge</label>
+            <label>Background Opacity<input type="number" id="indi_stageAlpha" value="0.07" step="0.01" min="0" max="0.4"></label>
+        </div>
         <div class="indi-modal-body" id="indiModalEhlers" style="display:none">
             <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_ehShowPeriod" checked style="width:auto;margin:0"> Show Dominant Cycle Period (bottom pane)</label>
             <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_ehShowSine" checked style="width:auto;margin:0"> Show SineWave (bottom pane)</label>
+        </div>
+        <div class="indi-modal-body" id="indiModalSimpleVol" style="display:none">
+            <label>Pocket Pivot Lookback<input type="number" id="indi_svPPLookback" value="10" min="3" max="50"></label>
+            <label>Volume Average Lookback<input type="number" id="indi_svVolAvg" value="50" min="5" max="200"></label>
+            <label>Relative Volume Lookback<input type="number" id="indi_svRVolLookback" value="20" min="5" max="100"></label>
+            <label>Up/Down Volume Lookback<input type="number" id="indi_svUDLookback" value="20" min="5" max="100"></label>
+            <label>Dry Volume Divisor (1/n)<input type="number" id="indi_svDryDiv" value="5" min="2" max="20"></label>
+            <label>Bull Snort Avg Lookback<input type="number" id="indi_svBsAvgLookback" value="50" min="5" max="200"></label>
+            <label>Power Volume Threshold<input type="number" id="indi_svPowerVolThresh" value="500000" min="1000" max="10000000" step="10000"></label>
+            <label>Turnover Threshold (Cr)<input type="number" id="indi_svTurnoverThresh" value="5" min="0.1" max="100" step="0.1"></label>
+            <label>RVol Threshold (%)<input type="number" id="indi_svRVolThresh" value="100" min="10" max="500" step="5"></label>
+            <label>1mL Threshold (L)<input type="number" id="indi_svOneMlThresh" value="0.5" min="0.01" max="10" step="0.01"></label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowDry" checked style="width:auto;margin:0"> Show Dry Volume</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowPower" style="width:auto;margin:0"> Show Power Volume</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowPowerDown" style="width:auto;margin:0"> Show Power Volume Down Days</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowBullSnort" style="width:auto;margin:0"> Show Bull Snort (3x avg, upper range close)</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowHV" checked style="width:auto;margin:0"> Show Highest Volumes (HVE/HVY/HVQ)</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svShowLV" checked style="width:auto;margin:0"> Show Lowest Volumes (LVY/LVQ)</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svColorHVUpOnly" checked style="width:auto;margin:0"> Color HV Only on Up Days</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svColorByPrevClose" style="width:auto;margin:0"> Color based on previous close</label>
+            <label style="display:flex;align-items:center;gap:8px;flex-direction:row"><input type="checkbox" id="indi_svPaintBars" style="width:auto;margin:0"> Paint Price Bars</label>
         </div>
         <div class="indi-modal-footer">
             <button class="indi-modal-apply" id="indiModalApply">Apply</button>
@@ -1262,6 +1324,9 @@ const VIEW_RANGES = [
     { value: 2555, label: '7Y' },
     { value: 3650, label: '10Y' },
 ];
+// Indicator periods count BARS, so a 200-bar MA needs history well before the
+// visible window. Fetched as warmup and trimmed from view, not shown.
+const INDICATOR_WARMUP_DAYS = { '30m': 30, '1h': 60, '1d': 300, '1w': 1450, '1mo': 6200 };
 let globalChartType = localStorage.getItem('globalChartType') || 'candles';
 let globalViewRange = parseInt(localStorage.getItem('globalViewRange') || '365');
 const TICK_POLL_INTERVAL = 1000;    // 1 Hz batched live-tick poll for all visible panes
@@ -1847,9 +1912,11 @@ function setChartCount(count) {
     const grid = document.getElementById('chartGrid');
     grid.setAttribute('data-count', count);
     
-    // Cleanup existing panes
+    // Cleanup existing panes. Disconnect before remove(): the observer fires on
+    // the next frame, by which point the chart would already be disposed.
     panes.forEach(p => {
         if (p.pollTimer) clearInterval(p.pollTimer);
+        if (p.resizeObserver) p.resizeObserver.disconnect();
         if (p.chart) p.chart.remove();
     });
     panes = [];
@@ -1995,6 +2062,7 @@ function createPane(container, idx, symbol, interval, skipInitialLoad) {
         chartType: globalChartType,
         pollTimer: null,
         lastLtp: null,
+        resizeObserver: null,
     };
     panes.push(pane);
     
@@ -2054,6 +2122,13 @@ function createPane(container, idx, symbol, interval, skipInitialLoad) {
                 if (lines && lines.length) {
                     if (ttHtml) ttHtml += '<br>';
                     ttHtml += lines.join('<br>');
+                }
+            }
+            if (pane._svClassMap) {
+                const svInfo = pane._svClassMap.get(param.time);
+                if (svInfo && svInfo.cls !== 'belowAvg') {
+                    if (ttHtml) ttHtml += '<br>';
+                    ttHtml += `<span style="color:${svInfo.color};font-weight:600">● ${svInfo.name}</span>`;
                 }
             }
             // Ehlers Cycle line hover info (only when crosshair is near a line)
@@ -2166,9 +2241,14 @@ function createPane(container, idx, symbol, interval, skipInitialLoad) {
         }
     }, { passive: false });
     
-    // Resize observer
-    const ro = new ResizeObserver(() => chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight }));
-    ro.observe(chartContainer);
+    // Kept on the pane so teardown can disconnect it: detaching the pane's DOM
+    // resizes the container to 0x0, which would otherwise fire this callback one
+    // last time against an already-removed chart ("Object is disposed").
+    pane.resizeObserver = new ResizeObserver(() => {
+        if (!pane.el.isConnected) return;
+        chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
+    });
+    pane.resizeObserver.observe(chartContainer);
 }
 
 // ─── Symbol Input ─────────────────────────────────────────────────────────────
@@ -2387,7 +2467,9 @@ async function applyAllIndicators(pane) {
     if (activeIndicators.has('rsi'))  applyRSI(pane, candles);
     if (activeIndicators.has('macd')) applyMACD(pane, candles);
     if (activeIndicators.has('rs'))   await applyRelativeStrength(pane, candles);
+    if (activeIndicators.has('stage')) await applyStageAnalysis(pane, candles);
     if (activeIndicators.has('ehlers')) { const em = applyEhlers(pane, candles); if (em) allMarkers = allMarkers.concat(em); }
+    if (activeIndicators.has('simplevol')) applySimpleVol(pane, candles, volumes);
 
     if (subCount > 0) {
         let slotIdx = 0;
@@ -2412,10 +2494,27 @@ async function applyAllIndicators(pane) {
     pane.series.setMarkers(allMarkers);
 }
 
+function _candleTimeMs(t) {
+    return typeof t === 'string' ? Date.parse(t + 'T00:00:00') : t * 1000;
+}
+
+// Scroll past the warmup bars so the chart opens on the range the user picked.
+function _applyViewWindow(pane, candles, viewDays) {
+    const ts = pane.chart.timeScale();
+    if (!candles.length) { ts.fitContent(); return; }
+    const cutoff = Date.now() - viewDays * 86400000;
+    let from = 0;
+    while (from < candles.length - 1 && _candleTimeMs(candles[from].time) < cutoff) from++;
+    if (from <= 0) { ts.fitContent(); return; }
+    ts.setVisibleLogicalRange({ from: from, to: candles.length + 1 });
+}
+
 async function loadChartData(pane) {
     const loading = pane.el.querySelector('.loading-overlay');
     loading.classList.add('active');
-    const days = globalViewRange || 365;
+    const viewDays = globalViewRange || 365;
+    const days = viewDays + (INDICATOR_WARMUP_DAYS[pane.interval] || 0);
+    pane._fetchDays = days;
     const url = `${API_BASE}/api/historical?symbol=${encodeURIComponent(pane.symbol)}&interval=${pane.interval}&days=${days}`;
     
     try {
@@ -2486,7 +2585,7 @@ async function loadChartData(pane) {
             
             await applyAllIndicators(pane);
             
-            pane.chart.timeScale().fitContent();
+            _applyViewWindow(pane, candles, viewDays);
             
             // Update ticker from last candle
             const last = candles[candles.length - 1];
@@ -3515,13 +3614,13 @@ const rsSettings = { benchmark: 'NIFTY 500', maPeriod: 50 };
 let _rsBenchmarkCache = {};        // resolved candles { 'NIFTY 500_365': [...] }
 let _rsBenchmarkInFlight = {};     // in-flight Promise dedup so 4 panes hit /api once
 
-async function fetchBenchmarkData(benchmark, days) {
-    const cacheKey = `${benchmark}_${days}`;
+async function fetchBenchmarkData(benchmark, days, interval) {
+    const cacheKey = `${benchmark}_${days}_${interval}`;
     if (_rsBenchmarkCache[cacheKey]) return _rsBenchmarkCache[cacheKey];
     if (_rsBenchmarkInFlight[cacheKey]) return _rsBenchmarkInFlight[cacheKey];
     const p = (async () => {
         try {
-            const resp = await fetch(`${API_BASE}/api/historical?symbol=${encodeURIComponent(benchmark)}&interval=1d&days=${days}`, { signal: _fetchSignal(10000) });
+            const resp = await fetch(`${API_BASE}/api/historical?symbol=${encodeURIComponent(benchmark)}&interval=${interval}&days=${days}`, { signal: _fetchSignal(10000) });
             const data = await resp.json();
             if (data.candles && data.candles.length > 0) {
                 _rsBenchmarkCache[cacheKey] = data.candles;
@@ -3536,8 +3635,10 @@ async function fetchBenchmarkData(benchmark, days) {
 
 async function applyRelativeStrength(pane, candles) {
     const { benchmark, maPeriod } = rsSettings;
-    const days = globalViewRange || 365;
-    const benchCandles = await fetchBenchmarkData(benchmark, days);
+    // Benchmark must match the pane's interval or the resampled period-end
+    // stamps (weekly = Sunday) never align with daily trading dates.
+    const days = pane._fetchDays || globalViewRange || 365;
+    const benchCandles = await fetchBenchmarkData(benchmark, days, pane.interval);
     if (!benchCandles || benchCandles.length === 0) return;
 
     // Build lookup: time -> close for benchmark
@@ -3616,6 +3717,606 @@ function removeRelativeStrength(pane) {
     if (panel) panel.style.display = 'none';
 }
 
+// ─── Stage Analysis (Weinstein) ───────────────────────────────────────────────
+// Every rule lives server-side in stage_analysis.py; this only renders what
+// /api/stage returns, so the chart can never disagree with the Excel report.
+const stageSettings = {
+    showMA: true,
+    showBg: true,
+    showBadge: true,
+    bgAlpha: 0.07,
+};
+
+const STAGE_COLORS = { 1: '#9e9e9e', 2: '#2e7d32', 3: '#ef6c00', 4: '#c62828' };
+
+let _stageCache = {};       // "SYMBOL|YYYY-MM-DD" -> payload
+let _stageInFlight = {};    // same key -> Promise (dedupes multi-pane fan-out)
+
+// Keyed by day as well as symbol so a tab left open overnight cannot keep
+// serving yesterday's weekly close.
+function _stageKey(symbol) {
+    const d = new Date();
+    return symbol.toUpperCase() + '|' + d.getFullYear() + '-'
+        + String(d.getMonth() + 1).padStart(2, '0') + '-'
+        + String(d.getDate()).padStart(2, '0');
+}
+
+async function fetchStageData(symbol) {
+    const key = _stageKey(symbol);
+    if (_stageCache[key]) return _stageCache[key];
+    if (_stageInFlight[key]) return _stageInFlight[key];
+    const p = (async () => {
+        try {
+            const resp = await fetch(`${API_BASE}/api/stage?symbol=${encodeURIComponent(symbol)}`,
+                                     { signal: _fetchSignal(45000) });
+            const data = await resp.json();
+            const keys = Object.keys(_stageCache);
+            if (keys.length > 64) delete _stageCache[keys[0]];
+            _stageCache[key] = data;
+            return data;
+        } catch(e) {
+            console.error('Stage fetch failed:', e);
+            return { error: String(e), bars: [] };
+        }
+    })();
+    _stageInFlight[key] = p;
+    try { return await p; } finally { delete _stageInFlight[key]; }
+}
+
+// Weekly bars are keyed by date; chart bars may be date strings (daily+) or
+// epoch seconds (intraday). Normalise both to YYYY-MM-DD for alignment.
+function _stageDayKey(t) {
+    if (typeof t === 'string') return t;
+    const d = new Date(t * 1000);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+                           + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function _stageBadge(pane, html) {
+    let badge = pane.el.querySelector('.stage-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'stage-badge';
+        // Appended into the OHLC legend, which is a wrapping flexbox: a
+        // full-width basis puts the badge on its own line under the legend and
+        // keeps it there through pane resizes without a ResizeObserver.
+        badge.style.cssText = 'flex:0 0 100%;font-size:10px;font-weight:700;'
+            + 'letter-spacing:0.3px;pointer-events:none;padding:2px 6px;'
+            + 'border-radius:3px;width:fit-content';
+        pane.el.querySelector('.chart-overlay-top').appendChild(badge);
+    }
+    badge.style.display = 'block';
+    badge.innerHTML = html;
+    return badge;
+}
+
+// Solid stage-coloured background. A histogram series was tried first but
+// lightweight-charts leaves a gap between histogram bars, so the tint rendered
+// as vertical stripes. A series primitive paints contiguous runs directly onto
+// the pane canvas underneath the candles instead.
+function _makeStageBg(pane) {
+    const state = { runs: [], requestUpdate: null };
+    const renderer = {
+        draw(target) {
+            if (state.runs.length === 0) return;
+            target.useBitmapCoordinateSpace((scope) => {
+                const range = pane.chart.timeScale().getVisibleLogicalRange();
+                if (!range || range.to <= range.from) return;
+                const ctx = scope.context;
+                const w = scope.mediaSize.width;
+                const span = range.to - range.from;
+                const hr = scope.horizontalPixelRatio;
+                for (const r of state.runs) {
+                    let x1 = (r.from - 0.5 - range.from) / span * w;
+                    let x2 = (r.to + 0.5 - range.from) / span * w;
+                    if (x2 <= 0 || x1 >= w) continue;
+                    x1 = Math.max(x1, 0);
+                    x2 = Math.min(x2, w);
+                    ctx.fillStyle = r.color;
+                    ctx.fillRect(Math.round(x1 * hr), 0,
+                                 Math.round((x2 - x1) * hr), scope.bitmapSize.height);
+                }
+            });
+        },
+    };
+    const view = { zOrder: () => 'bottom', renderer: () => renderer };
+    return {
+        state,
+        attached(p) { state.requestUpdate = p.requestUpdate; },
+        detached() { state.requestUpdate = null; },
+        updateAllViews() {},
+        paneViews() { return [view]; },
+    };
+}
+
+async function applyStageAnalysis(pane, candles) {
+    if (!candles || candles.length === 0) return;
+    if (stageSettings.showBadge && !_stageCache[_stageKey(pane.symbol)]) {
+        const b = _stageBadge(pane, '<span style="color:#787b86">STAGE …</span>');
+        b.style.background = 'transparent';
+    }
+
+    const data = await fetchStageData(pane.symbol);
+    // The pane may have been retargeted while the request was in flight.
+    if (!pane._candles || pane._candles !== candles) return;
+
+    if (!data || !data.bars || data.bars.length === 0) {
+        removeStageAnalysis(pane);
+        if (stageSettings.showBadge) {
+            const b = _stageBadge(pane, `<span style="color:#787b86">STAGE n/a — ${data && data.error ? data.error : 'no data'}</span>`);
+            b.style.background = 'transparent';
+        }
+        return;
+    }
+
+    // Map every displayed bar to the last CONFIRMED weekly stage (bar.time <=
+    // that day). No interpolation and no look-ahead: mid-week you only know
+    // last Friday's 30-week MA, which is exactly what this draws.
+    const bars = data.bars;
+    const stageOf = new Array(candles.length).fill(-1);
+    let j = -1;
+    for (let i = 0; i < candles.length; i++) {
+        const day = _stageDayKey(candles[i].time);
+        while (j + 1 < bars.length && bars[j + 1].time <= day) j++;
+        stageOf[i] = j;
+    }
+
+    if (!pane._stageSeries) {
+        pane._stageSeries = { bg: _makeStageBg(pane), ma: null };
+        pane.series.attachPrimitive(pane._stageSeries.bg);
+        pane._stageSeries.ma = pane.chart.addLineSeries({
+            color: STAGE_COLORS[1], lineWidth: 2,
+            lastValueVisible: false, priceLineVisible: false,
+            crosshairMarkerVisible: false,
+        });
+    }
+
+    // Background tint: collapse the per-bar stages into contiguous runs so the
+    // primitive paints one rectangle per regime instead of one per bar.
+    const runs = [];
+    if (stageSettings.showBg) {
+        const a = stageSettings.bgAlpha;
+        for (let i = 0; i < candles.length; i++) {
+            if (stageOf[i] < 0) continue;
+            const st = bars[stageOf[i]].stage;
+            const last = runs[runs.length - 1];
+            if (last && last.stage === st && last.to === i - 1) { last.to = i; continue; }
+            const rgb = [1, 3, 5].map(k => parseInt(STAGE_COLORS[st].substr(k, 2), 16));
+            runs.push({ from: i, to: i, stage: st,
+                        color: `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})` });
+        }
+    }
+    pane._stageSeries.bg.state.runs = runs;
+    if (pane._stageSeries.bg.state.requestUpdate) pane._stageSeries.bg.state.requestUpdate();
+
+    // 30-week MA, coloured per point by that bar's stage. A single series with
+    // per-point colours is used rather than one series per stage: whitespace
+    // does NOT break a line series in lightweight-charts 4.1, so split series
+    // would draw a straight line across every gap between two visits to the
+    // same stage.
+    pane._stageSeries.ma.setData(!stageSettings.showMA ? [] : candles.map((c, i) => {
+        if (stageOf[i] < 0) return { time: c.time };
+        const b = bars[stageOf[i]];
+        return { time: c.time, value: b.ma, color: STAGE_COLORS[b.stage] };
+    }));
+
+    if (stageSettings.showBadge) {
+        const cur = data.current;
+        const col = STAGE_COLORS[cur.stage];
+        const rs = cur.rs === null ? '—' : (cur.rs >= 0 ? '+' : '') + cur.rs.toFixed(1);
+        const arrow = cur.rs_rising ? '▲' : '▼';
+        const setup = cur.setup ? ` · SETUP ${cur.setup}` : '';
+        const rgb = [1, 3, 5].map(k => parseInt(col.substr(k, 2), 16));
+        const b = _stageBadge(pane,
+            `<span style="color:${col}">STAGE ${cur.stage} · ${cur.action}</span>`
+            + `<span style="color:#787b86"> · ${cur.weeks}w · RS ${rs} ${arrow}${setup}`
+            + ` · wk ${data.as_of}</span>`);
+        b.style.background = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.12)`;
+    } else {
+        const badge = pane.el.querySelector('.stage-badge');
+        if (badge) badge.style.display = 'none';
+    }
+}
+
+function removeStageAnalysis(pane) {
+    if (pane._stageSeries) {
+        try { pane.series.detachPrimitive(pane._stageSeries.bg); } catch(e) {}
+        try { pane.chart.removeSeries(pane._stageSeries.ma); } catch(e) {}
+        pane._stageSeries = null;
+    }
+    const badge = pane.el.querySelector('.stage-badge');
+    if (badge) badge.style.display = 'none';
+}
+
+// ─── SimpleVol Indicator ─────────────────────────────────────────────────────
+const simpleVolSettings = {
+    ppLookback: 10,
+    volAvgLookback: 50,
+    rvolLookback: 20,
+    udLookback: 20,
+    bullSnortAvgLookback: 50,
+    dryVolDivisor: 5,
+    powerVolThreshold: 500000,
+    showDryVol: true,
+    showPowerVol: false,
+    showPowerVolDown: false,
+    showBullSnort: false,
+    showHV: true,
+    showLV: true,
+    colorHVUpOnly: true,
+    colorByPrevClose: false,
+    paintPriceBars: false,
+    turnoverThreshold: 5,
+    rvolThreshold: 100,
+    oneMlThreshold: 0.5,
+};
+
+function computeSimpleVol(candles, volumes) {
+    const len = candles.length;
+    const closes = candles.map(c => c.close);
+    const opens = candles.map(c => c.open);
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const vols = volumes.map(v => v.value);
+    const { ppLookback, volAvgLookback, rvolLookback, udLookback, dryVolDivisor,
+            bullSnortAvgLookback, powerVolThreshold,
+            showDryVol, showPowerVol, showPowerVolDown, showBullSnort, colorByPrevClose } = simpleVolSettings;
+
+    const volSma = [];
+    for (let i = 0; i < len; i++) {
+        if (i < volAvgLookback - 1) { volSma.push(null); continue; }
+        let s = 0;
+        for (let j = i - volAvgLookback + 1; j <= i; j++) s += vols[j];
+        volSma.push(s / volAvgLookback);
+    }
+
+    const bsAvg = [];
+    if (showBullSnort && bullSnortAvgLookback !== volAvgLookback) {
+        for (let i = 0; i < len; i++) {
+            if (i < bullSnortAvgLookback - 1) { bsAvg.push(null); continue; }
+            let s = 0;
+            for (let j = i - bullSnortAvgLookback + 1; j <= i; j++) s += vols[j];
+            bsAvg.push(s / bullSnortAvgLookback);
+        }
+    }
+
+    const isUp = [];
+    for (let i = 0; i < len; i++) {
+        if (colorByPrevClose && i > 0) isUp.push(closes[i] > closes[i - 1]);
+        else isUp.push(closes[i] >= opens[i]);
+    }
+
+    const downVolMax = [];
+    for (let i = 0; i < len; i++) {
+        let maxDV = 0;
+        for (let j = Math.max(0, i - ppLookback); j < i; j++) {
+            if (!isUp[j] && vols[j] > maxDV) maxDV = vols[j];
+        }
+        downVolMax.push(maxDV);
+    }
+
+    const classifications = [];
+    for (let i = 0; i < len; i++) {
+        const avg = volSma[i];
+        const vol = vols[i];
+        let cls = 'belowAvg';
+
+        if (showDryVol && avg !== null && vol < avg / dryVolDivisor) {
+            classifications.push('dryVol');
+            continue;
+        }
+
+        if (isUp[i] && i > 0 && vol > downVolMax[i] && downVolMax[i] > 0) {
+            cls = 'pocketPivot';
+        } else if (showBullSnort && i > 0 && closes[i] > closes[i - 1]) {
+            const bsA = bsAvg.length ? bsAvg[i] : avg;
+            if (bsA !== null && vol >= 3 * bsA && isUp[i]) {
+                const range = highs[i] - lows[i];
+                if (range > 0 && (closes[i] - lows[i]) / range >= 0.75) {
+                    cls = 'bullSnort';
+                }
+            }
+        }
+
+        if (cls === 'pocketPivot' || cls === 'bullSnort') {
+            classifications.push(cls);
+            continue;
+        }
+
+        if (showPowerVol && vol > powerVolThreshold && i > 0) {
+            const pctMove = Math.abs(closes[i] - closes[i - 1]) / closes[i - 1] * 100;
+            if (pctMove >= 5) {
+                if (isUp[i] || showPowerVolDown) {
+                    cls = isUp[i] ? 'powerUp' : 'powerDown';
+                    classifications.push(cls);
+                    continue;
+                }
+            }
+        }
+
+        if (avg !== null && vol >= avg) {
+            cls = isUp[i] ? 'highUp' : 'highDown';
+        }
+        classifications.push(cls);
+    }
+
+    let rvolPct = null, udRatio = null, avgTurnover = null;
+    const last = len - 1;
+    if (last >= rvolLookback) {
+        let rSum = 0;
+        for (let j = last - rvolLookback; j < last; j++) rSum += vols[j];
+        const rAvg = rSum / rvolLookback;
+        rvolPct = rAvg > 0 ? (vols[last] / rAvg * 100) : 0;
+    }
+    if (last >= udLookback - 1) {
+        let upSum = 0, downSum = 0;
+        for (let j = last - udLookback + 1; j <= last; j++) {
+            if (isUp[j]) upSum += vols[j]; else downSum += vols[j];
+        }
+        udRatio = downSum > 0 ? upSum / downSum : 99;
+    }
+    if (last >= volAvgLookback - 1) {
+        let tvSum = 0;
+        for (let j = last - volAvgLookback + 1; j <= last; j++) tvSum += closes[j] * vols[j];
+        avgTurnover = tvSum / volAvgLookback;
+    }
+
+    const hvMap = {};
+    if (simpleVolSettings.showHV || simpleVolSettings.showLV) {
+        let hve = 0, hvy = 0, hvq = 0;
+        let lvy = Infinity, lvq = Infinity;
+        let prevYear = null, prevQ = null;
+        for (let i = 0; i < len; i++) {
+            const d = typeof candles[i].time === 'string' ? new Date(candles[i].time + 'T00:00:00') : new Date(candles[i].time * 1000);
+            const yr = d.getFullYear();
+            const q = `${yr}-Q${Math.floor(d.getMonth() / 3)}`;
+            if (prevYear !== null && yr !== prevYear) { hvy = 0; lvy = Infinity; }
+            if (prevQ !== null && q !== prevQ) { hvq = 0; lvq = Infinity; }
+            prevYear = yr; prevQ = q;
+            const vol = vols[i];
+            let avg = volSma[i];
+            if (avg === null && i > 0) {
+                let s = 0;
+                for (let k = 0; k <= i; k++) s += vols[k];
+                avg = s / (i + 1);
+            }
+            const pct = avg && avg > 0 ? Math.round((vol / avg - 1) * 100) : 0;
+            const upDay = isUp[i];
+
+            if (simpleVolSettings.showHV) {
+                if (vol > hve) { hve = vol; hvMap['HVE'] = { idx: i, type: 'HVE', vol, pct, upDay }; }
+                if (vol > hvy) { hvy = vol; hvMap['HVY_' + yr] = { idx: i, type: 'HVY', vol, pct, upDay }; }
+                if (vol > hvq) { hvq = vol; hvMap['HVQ_' + q] = { idx: i, type: 'HVQ', vol, pct, upDay }; }
+            }
+            if (simpleVolSettings.showLV) {
+                if (vol < lvy && vol > 0) { lvy = vol; hvMap['LVY_' + yr] = { idx: i, type: 'LVY', vol, pct, upDay }; }
+                if (vol < lvq && vol > 0) { lvq = vol; hvMap['LVQ_' + q] = { idx: i, type: 'LVQ', vol, pct, upDay }; }
+            }
+        }
+    }
+
+    const hvMarkers = Object.values(hvMap);
+    for (const m of hvMarkers) {
+        if (m.type === 'LVY' || m.type === 'LVQ') {
+            classifications[m.idx] = 'lvBar';
+        }
+    }
+    return { classifications, volSma, rvolPct, udRatio, avgTurnover, hvMarkers };
+}
+
+const _svColors = {
+    pocketPivot: '#00bcd4',
+    bullSnort:   '#ffeb3b',
+    powerUp:     '#e040fb',
+    powerDown:   '#9c27b0',
+    dryVol:      '#ff9800',
+    highUp:      'rgba(8,153,129,0.7)',
+    highDown:    'rgba(242,54,69,0.7)',
+    belowAvg:    'rgba(120,123,134,0.35)',
+    lvBar:       'rgba(255,152,0,0.7)',
+};
+
+function _svFmtVol(v) {
+    if (v >= 1e7) return (v / 1e7).toFixed(2) + 'Cr';
+    if (v >= 1e5) return (v / 1e5).toFixed(2) + 'L';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return v.toFixed(0);
+}
+
+function _svFmtVolM(v) {
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return v.toFixed(0);
+}
+
+function applySimpleVol(pane, candles, volumes) {
+    if (!candles || !volumes || candles.length === 0) return;
+    const result = computeSimpleVol(candles, volumes);
+    const { classifications, volSma, rvolPct, udRatio, avgTurnover, hvMarkers } = result;
+
+    pane._svClassMap = new Map();
+    const _svClassNames = {
+        pocketPivot: 'Pocket Pivot', bullSnort: 'Bull Snort',
+        powerUp: 'Power Vol Up', powerDown: 'Power Vol Down',
+        dryVol: 'Dry Volume', highUp: 'High Vol Up',
+        highDown: 'High Vol Down', belowAvg: 'Below Avg',
+        lvBar: 'Lowest Volume',
+    };
+    for (let i = 0; i < candles.length; i++) {
+        pane._svClassMap.set(candles[i].time, {
+            cls: classifications[i],
+            name: _svClassNames[classifications[i]] || classifications[i],
+            color: _svColors[classifications[i]] || _svColors.belowAvg,
+        });
+    }
+
+    if (!pane._svOrigVolumes) pane._svOrigVolumes = volumes.slice();
+
+    const coloredVols = volumes.map((v, i) => ({
+        time: v.time,
+        value: v.value,
+        color: _svColors[classifications[i]] || _svColors.belowAvg,
+    }));
+    pane.volumeSeries.setData(coloredVols);
+
+    const volMaData = [];
+    for (let i = 0; i < candles.length; i++) {
+        if (volSma[i] !== null) volMaData.push({ time: candles[i].time, value: volSma[i] });
+    }
+    pane.volMaSeries.setData(volMaData);
+
+    const markers = [];
+    for (const hv of hvMarkers) {
+        const isLow = hv.type === 'LVY' || hv.type === 'LVQ';
+        let text;
+        if (isLow) {
+            text = hv.type.replace('LV', '') ;
+        } else {
+            text = hv.type + ' ' + _svFmtVolM(hv.vol) + (hv.pct > 0 ? ' (' + hv.pct + '%)' : '');
+        }
+        let color;
+        if (isLow) {
+            color = '#ff9800';
+        } else if (simpleVolSettings.colorHVUpOnly && !hv.upDay) {
+            color = 'rgba(120,123,134,0.6)';
+        } else {
+            color = hv.type === 'HVE' ? '#2196f3' : hv.type === 'HVY' ? '#26a69a' : '#66bb6a';
+        }
+        markers.push({
+            time: candles[hv.idx].time,
+            position: isLow ? 'belowBar' : 'aboveBar',
+            color: color,
+            shape: 'text',
+            text: text,
+            size: 0,
+        });
+    }
+    markers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+    pane.volumeSeries.setMarkers(markers);
+
+    if (pane._svHveLine) {
+        try { pane.volumeSeries.removePriceLine(pane._svHveLine); } catch(e) {}
+        pane._svHveLine = null;
+    }
+    let hveVol = 0;
+    for (let i = 0; i < volumes.length; i++) {
+        if (volumes[i].value > hveVol) hveVol = volumes[i].value;
+    }
+    if (hveVol > 0) {
+        pane._svHveLine = pane.volumeSeries.createPriceLine({
+            price: hveVol,
+            color: 'rgba(33,150,243,0.4)',
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: false,
+        });
+    }
+
+    if (simpleVolSettings.paintPriceBars) {
+        const barColors = candles.map((c, i) => _svColors[classifications[i]] || null);
+        pane._svPaintedBars = true;
+        const painted = candles.map((c, i) => {
+            const col = barColors[i];
+            if (!col || col === _svColors.belowAvg) return {
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+            };
+            return {
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+                color: col, borderColor: col, wickColor: col,
+            };
+        });
+        const seriesData = (globalChartType === 'heikinashi') ? toHeikinAshi(candles).map((hc, i) => {
+            const p = painted[i];
+            return p.color ? { ...hc, color: p.color, borderColor: p.borderColor, wickColor: p.wickColor } : hc;
+        }) : painted;
+        pane.series.setData(seriesData);
+    } else if (pane._svPaintedBars) {
+        const seriesCandles = (globalChartType === 'heikinashi') ? toHeikinAshi(candles) : candles;
+        pane.series.setData(seriesCandles);
+        pane._svPaintedBars = false;
+    }
+
+    let svPanel = pane.el.querySelector('.simplevol-panel');
+    if (!svPanel) {
+        svPanel = document.createElement('div');
+        svPanel.className = 'simplevol-panel';
+        pane.el.querySelector('.chart-container').appendChild(svPanel);
+    }
+    svPanel.style.display = 'block';
+
+    const turnCr = avgTurnover !== null ? (avgTurnover / 1e7).toFixed(2) : '—';
+    const oneMl = avgTurnover !== null ? (avgTurnover / 1e7 / 375 * 100).toFixed(2) : '—';
+    const rvStr = rvolPct !== null ? rvolPct.toFixed(0) : '—';
+    const udStr = udRatio !== null ? udRatio.toFixed(2) : '—';
+    const turnTh = simpleVolSettings.turnoverThreshold || 5;
+    const rvTh = simpleVolSettings.rvolThreshold || 100;
+    const udTh = 1;
+    const mlTh = simpleVolSettings.oneMlThreshold || 0.5;
+    const turnPill = avgTurnover !== null && avgTurnover / 1e7 >= turnTh ? 'sv-pill sv-pill-green' : 'sv-pill sv-pill-red';
+    const rvPill = rvolPct !== null && rvolPct >= rvTh ? 'sv-pill sv-pill-green' : 'sv-pill sv-pill-red';
+    const udPill = udRatio !== null && udRatio >= udTh ? 'sv-pill sv-pill-green' : 'sv-pill sv-pill-red';
+    const mlVal = avgTurnover !== null ? avgTurnover / 1e7 / 375 * 100 : 0;
+    const mlPill = mlVal >= mlTh ? 'sv-pill sv-pill-green' : 'sv-pill sv-pill-red';
+    svPanel.innerHTML =
+        `<span class="${turnPill}">Avg₹Vol ${turnCr}Cr</span>` +
+        `<span class="${rvPill}">RVol ${rvStr}%</span>` +
+        `<span class="${udPill}">U/D ${udStr}</span>` +
+        `<span class="${mlPill}">1mL ${oneMl}L</span>`;
+}
+
+function removeSimpleVol(pane) {
+    if (pane._svOrigVolumes) {
+        pane.volumeSeries.setData(pane._svOrigVolumes);
+        pane._svOrigVolumes = null;
+        const candles = pane._candles;
+        const volumes = pane._volumes;
+        if (volumes) {
+            const volMaData = [];
+            for (let i = 0; i < volumes.length; i++) {
+                if (i < 9) continue;
+                let sum = 0;
+                for (let j = i - 9; j <= i; j++) sum += volumes[j].value;
+                volMaData.push({ time: volumes[i].time, value: sum / 10 });
+            }
+            pane.volMaSeries.setData(volMaData);
+        }
+        if (candles && volumes) {
+            const volByTime = {};
+            volumes.forEach(v => { volByTime[String(v.time)] = v.value; });
+            const qMap = {};
+            const qMarkers = [];
+            candles.forEach(c => {
+                if (c.close < c.open) return;
+                const vol = volByTime[String(c.time)] || 0;
+                const d = typeof c.time === 'string' ? new Date(c.time + 'T00:00:00') : new Date(c.time * 1000);
+                const q = `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`;
+                const prev = qMap[q] || 0;
+                if (vol > prev) {
+                    qMap[q] = vol;
+                    qMarkers.push({ time: c.time, position: 'aboveBar', color: '#089981', shape: 'text', text: 'Q', size: 0 });
+                }
+            });
+            qMarkers.sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+            pane.volumeSeries.setMarkers(qMarkers);
+        }
+    }
+    if (pane._svHveLine) {
+        try { pane.volumeSeries.removePriceLine(pane._svHveLine); } catch(e) {}
+        pane._svHveLine = null;
+    }
+    if (pane._svPaintedBars) {
+        const candles = pane._candles;
+        if (candles) {
+            const seriesCandles = (globalChartType === 'heikinashi') ? toHeikinAshi(candles) : candles;
+            pane.series.setData(seriesCandles);
+        }
+        pane._svPaintedBars = false;
+    }
+    pane._svClassMap = null;
+    const svPanel = pane.el.querySelector('.simplevol-panel');
+    if (svPanel) svPanel.style.display = 'none';
+}
+
 // ─── Indicator Flyout Menu ────────────────────────────────────────────────────
 const activeIndicators = (() => {
     try {
@@ -3667,7 +4368,9 @@ document.querySelectorAll('.indi-flyout-row').forEach(row => {
                 if (indi === 'rsi') removeRSI(pane);
                 if (indi === 'macd') removeMACD(pane);
                 if (indi === 'rs') removeRelativeStrength(pane);
+                if (indi === 'stage') removeStageAnalysis(pane);
                 if (indi === 'ehlers') removeEhlers(pane);
+                if (indi === 'simplevol') removeSimpleVol(pane);
             });
         } else {
             activeIndicators.add(indi);
@@ -3697,7 +4400,7 @@ indiMenuBtn.classList.toggle('has-active', activeIndicators.size > 0);
 const indiModal = document.getElementById('indiModalOverlay');
 
 function openIndiSettings(indi) {
-    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalInstAccum', 'indiModalRSI', 'indiModalMACD', 'indiModalRS', 'indiModalEhlers'];
+    const allPanels = ['indiModalSmartVPSG', 'indiModalSupResEPS', 'indiModalInstAccum', 'indiModalRSI', 'indiModalMACD', 'indiModalRS', 'indiModalStage', 'indiModalEhlers', 'indiModalSimpleVol'];
     allPanels.forEach(id => document.getElementById(id).style.display = 'none');
     const title = document.getElementById('indiModalTitle');
     if (indi === 'supreseps') {
@@ -3732,6 +4435,13 @@ function openIndiSettings(indi) {
         title.textContent = 'Relative Strength Settings';
         document.getElementById('indi_rsBenchmark').value = rsSettings.benchmark;
         document.getElementById('indi_rsMaPeriod').value = rsSettings.maPeriod;
+    } else if (indi === 'stage') {
+        document.getElementById('indiModalStage').style.display = '';
+        title.textContent = 'Stage Analysis Settings';
+        document.getElementById('indi_stageMA').checked = !!stageSettings.showMA;
+        document.getElementById('indi_stageBg').checked = !!stageSettings.showBg;
+        document.getElementById('indi_stageBadge').checked = !!stageSettings.showBadge;
+        document.getElementById('indi_stageAlpha').value = stageSettings.bgAlpha;
     } else if (indi === 'instaccum') {
         document.getElementById('indiModalInstAccum').style.display = '';
         title.textContent = 'Institutional Accumulation Settings';
@@ -3745,6 +4455,28 @@ function openIndiSettings(indi) {
         title.textContent = 'Ehlers Cycle Settings';
         document.getElementById('indi_ehShowPeriod').checked = !!ehlersSettings.showPeriod;
         document.getElementById('indi_ehShowSine').checked = !!ehlersSettings.showSine;
+    } else if (indi === 'simplevol') {
+        document.getElementById('indiModalSimpleVol').style.display = '';
+        title.textContent = 'SimpleVol Settings';
+        document.getElementById('indi_svPPLookback').value = simpleVolSettings.ppLookback;
+        document.getElementById('indi_svVolAvg').value = simpleVolSettings.volAvgLookback;
+        document.getElementById('indi_svRVolLookback').value = simpleVolSettings.rvolLookback;
+        document.getElementById('indi_svUDLookback').value = simpleVolSettings.udLookback;
+        document.getElementById('indi_svDryDiv').value = simpleVolSettings.dryVolDivisor;
+        document.getElementById('indi_svBsAvgLookback').value = simpleVolSettings.bullSnortAvgLookback;
+        document.getElementById('indi_svPowerVolThresh').value = simpleVolSettings.powerVolThreshold;
+        document.getElementById('indi_svTurnoverThresh').value = simpleVolSettings.turnoverThreshold;
+        document.getElementById('indi_svRVolThresh').value = simpleVolSettings.rvolThreshold;
+        document.getElementById('indi_svOneMlThresh').value = simpleVolSettings.oneMlThreshold;
+        document.getElementById('indi_svShowDry').checked = !!simpleVolSettings.showDryVol;
+        document.getElementById('indi_svShowPower').checked = !!simpleVolSettings.showPowerVol;
+        document.getElementById('indi_svShowPowerDown').checked = !!simpleVolSettings.showPowerVolDown;
+        document.getElementById('indi_svShowBullSnort').checked = !!simpleVolSettings.showBullSnort;
+        document.getElementById('indi_svShowHV').checked = !!simpleVolSettings.showHV;
+        document.getElementById('indi_svShowLV').checked = !!simpleVolSettings.showLV;
+        document.getElementById('indi_svColorHVUpOnly').checked = simpleVolSettings.colorHVUpOnly !== false;
+        document.getElementById('indi_svColorByPrevClose').checked = !!simpleVolSettings.colorByPrevClose;
+        document.getElementById('indi_svPaintBars').checked = !!simpleVolSettings.paintPriceBars;
     } else {
         document.getElementById('indiModalSmartVPSG').style.display = '';
         title.textContent = 'SmartVPSG Settings';
@@ -3790,6 +4522,11 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
         rsSettings.benchmark = document.getElementById('indi_rsBenchmark').value;
         rsSettings.maPeriod = parseInt(document.getElementById('indi_rsMaPeriod').value) || 50;
         _rsBenchmarkCache = {}; // clear cache on benchmark change
+    } else if (indi === 'stage') {
+        stageSettings.showMA = document.getElementById('indi_stageMA').checked;
+        stageSettings.showBg = document.getElementById('indi_stageBg').checked;
+        stageSettings.showBadge = document.getElementById('indi_stageBadge').checked;
+        stageSettings.bgAlpha = Math.min(0.4, Math.max(0, parseFloat(document.getElementById('indi_stageAlpha').value) || 0.07));
     } else if (indi === 'instaccum') {
         instAccumSettings.ppLookback = parseInt(document.getElementById('indi_ppLookback').value) || 10;
         instAccumSettings.mfLookback = parseInt(document.getElementById('indi_mfLookback').value) || 20;
@@ -3801,16 +4538,35 @@ document.getElementById('indiModalApply').addEventListener('click', () => {
         ehlersSettings.showPeriod = document.getElementById('indi_ehShowPeriod').checked;
         ehlersSettings.showSine = document.getElementById('indi_ehShowSine').checked;
         saveEhlersSettings();
+    } else if (indi === 'simplevol') {
+        simpleVolSettings.ppLookback = parseInt(document.getElementById('indi_svPPLookback').value) || 10;
+        simpleVolSettings.volAvgLookback = parseInt(document.getElementById('indi_svVolAvg').value) || 50;
+        simpleVolSettings.rvolLookback = parseInt(document.getElementById('indi_svRVolLookback').value) || 20;
+        simpleVolSettings.udLookback = parseInt(document.getElementById('indi_svUDLookback').value) || 20;
+        simpleVolSettings.dryVolDivisor = parseInt(document.getElementById('indi_svDryDiv').value) || 5;
+        simpleVolSettings.bullSnortAvgLookback = parseInt(document.getElementById('indi_svBsAvgLookback').value) || 50;
+        simpleVolSettings.powerVolThreshold = parseInt(document.getElementById('indi_svPowerVolThresh').value) || 500000;
+        simpleVolSettings.turnoverThreshold = parseFloat(document.getElementById('indi_svTurnoverThresh').value) || 5;
+        simpleVolSettings.rvolThreshold = parseFloat(document.getElementById('indi_svRVolThresh').value) || 100;
+        simpleVolSettings.oneMlThreshold = parseFloat(document.getElementById('indi_svOneMlThresh').value) || 0.5;
+        simpleVolSettings.showDryVol = document.getElementById('indi_svShowDry').checked;
+        simpleVolSettings.showPowerVol = document.getElementById('indi_svShowPower').checked;
+        simpleVolSettings.showPowerVolDown = document.getElementById('indi_svShowPowerDown').checked;
+        simpleVolSettings.showBullSnort = document.getElementById('indi_svShowBullSnort').checked;
+        simpleVolSettings.showHV = document.getElementById('indi_svShowHV').checked;
+        simpleVolSettings.showLV = document.getElementById('indi_svShowLV').checked;
+        simpleVolSettings.colorHVUpOnly = document.getElementById('indi_svColorHVUpOnly').checked;
+        simpleVolSettings.colorByPrevClose = document.getElementById('indi_svColorByPrevClose').checked;
+        simpleVolSettings.paintPriceBars = document.getElementById('indi_svPaintBars').checked;
+        panes.forEach(p => removeSimpleVol(p));
     } else {
         smartVPSGSettings.avgLookback = parseInt(document.getElementById('indi_avgLookback').value) || 21;
         smartVPSGSettings.showVolProfile = !!document.getElementById('indi_showVolProfile').checked;
         smartVPSGSettings.vpBuckets = parseInt(document.getElementById('indi_vpBuckets').value) || 30;
         saveSmartVPSGSettings();
-        // Re-create on the next reload (remove stale series first)
         panes.forEach(p => removeSmartVPSG(p));
     }
     indiModal.classList.remove('active');
-    // Remove series before re-applying so they get re-created with new settings
     if (indi === 'rsi') panes.forEach(p => removeRSI(p));
     if (indi === 'macd') panes.forEach(p => removeMACD(p));
     if (indi === 'rs') panes.forEach(p => removeRelativeStrength(p));

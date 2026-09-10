@@ -472,12 +472,20 @@ def _get_symbol_list():
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    resp = send_from_directory("static", "index.html")
+    resp.cache_control.no_cache = True
+    resp.cache_control.no_store = True
+    resp.cache_control.must_revalidate = True
+    return resp
 
 
 @app.route("/static/<path:path>")
 def static_files(path):
-    return send_from_directory("static", path)
+    resp = send_from_directory("static", path)
+    resp.cache_control.no_cache = True
+    resp.cache_control.no_store = True
+    resp.cache_control.must_revalidate = True
+    return resp
 
 
 # ─── Bulk/Block deals (institutional footprints) ──────────────────────────────
@@ -1082,6 +1090,87 @@ def api_historical():
     _last_candle_fetch_ts = time.time()
     return app.response_class('{"candles":' + candles_json + ',"cached":false}',
                               mimetype="application/json")
+
+
+# ─── Weinstein stage analysis ────────────────────────────────────────────────
+# The stage rules live entirely in stage_analysis.py; this endpoint is a thin
+# caching wrapper so the badge on a chart and the row in the Excel report are
+# produced by the same code and can never disagree. A cold build pulls ~3 years
+# of dailies, so results are TTL-cached, concurrent identical requests collapse
+# to one build, and a burst of cold builds is capped like the CIDX path.
+_STAGE_TTL = 1800.0
+_STAGE_SEM = threading.BoundedSemaphore(3)
+_STAGE_INDEX_ALIASES = {"NIFTY", "BANKNIFTY", "NIFTYNXT50", "MIDCPNIFTY",
+                        "SENSEX", "BANKEX", "INDIAVIX"}
+_stage_cache = {}
+_stage_cache_lock = threading.Lock()
+_stage_inflight = {}
+_stage_inflight_lock = threading.Lock()
+
+
+def _stage_cached(symbol, day):
+    key = (symbol, day)
+    with _stage_cache_lock:
+        v = _stage_cache.get(key)
+        if v is not None:
+            ts, payload = v
+            if (time.time() - ts) <= _STAGE_TTL:
+                return payload
+            _stage_cache.pop(key, None)
+
+    with _stage_inflight_lock:
+        lk = _stage_inflight.get(key)
+        if lk is None:
+            if len(_stage_inflight) > 128:
+                _stage_inflight.clear()
+            lk = threading.Lock()
+            _stage_inflight[key] = lk
+
+    with lk:
+        with _stage_cache_lock:
+            v = _stage_cache.get(key)       # another thread may have built it
+            if v is not None and (time.time() - v[0]) <= _STAGE_TTL:
+                return v[1]
+        from stage_analysis import stage_for
+        with _STAGE_SEM:
+            payload = stage_for(symbol)
+        with _stage_cache_lock:
+            _stage_cache[key] = (time.time(), payload)
+            if len(_stage_cache) > 128:
+                for k in sorted(_stage_cache, key=lambda x: _stage_cache[x][0])[:-128]:
+                    _stage_cache.pop(k, None)
+        return payload
+
+
+@app.route("/api/stage")
+def api_stage():
+    """Weekly Weinstein stage series + current state for one symbol.
+
+    Params: symbol. Returns {symbol, ma_weeks, as_of, bars[{time,ma,close,
+    stage}], current{...}, colors} or {error}. Indices and custom indices are
+    rejected: the stage rules are calibrated on the NIFTY 500 equity universe.
+    """
+    symbol = request.args.get("symbol", "").strip()
+    if not symbol:
+        return jsonify({"error": "symbol required", "bars": []}), 400
+    # _is_index_symbol() deliberately exempts _INDEX_YF_MAP names so the RS
+    # indicator can fetch them as benchmarks; here they are still indices.
+    # Bare aliases ("NIFTY" -> NIFTY 50) resolve to a real Angel scrip and
+    # slip past both checks, so they are listed explicitly. Indices are
+    # rejected because they carry no volume and the setup grade needs it.
+    if (symbol.upper().startswith("CIDX:") or _is_index_symbol(symbol)
+            or symbol.upper() in _INDEX_YF_MAP
+            or symbol.upper() in _STAGE_INDEX_ALIASES):
+        return jsonify({"error": "stage analysis covers equities only",
+                        "bars": []})
+    try:
+        payload = _stage_cached(symbol.upper(), str(datetime.date.today()))
+    except Exception as e:
+        app.logger.warning("stage failed for %s: %s", symbol, e)
+        return jsonify({"error": str(e), "bars": []}), 502
+    if payload.get("error"):
+        app.logger.info("stage unavailable for %s: %s", symbol, payload["error"])
+    return jsonify(payload)
 
 
 @app.route("/api/quote")

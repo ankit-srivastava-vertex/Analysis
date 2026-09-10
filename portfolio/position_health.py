@@ -18,7 +18,7 @@ WORKFLOW
       - Last close vs 50 / 100 / 200-DMA (above/below + % distance)
       - Distance from 52-week high (drawdown)
       - 3-month and 6-month price return
-      - Mansfield Relative Strength vs NIFTY 500 (3M)
+      - Relative Strength vs NIFTY 500 over 3M (ratio now / ratio 3M ago)
       - Volume spike: today's vol / 50-day avg vol
       - Down-day on volume flag (close < prev close & vol > 2x avg)
       - Drawdown from average buy cost
@@ -158,7 +158,8 @@ def _signals_for(symbol: str, series: str, avg_cost: float,
     if len(close) >= 130:
         out["Ret6M%"] = round(_pct(last, close.iloc[-130]), 2)
 
-    # Mansfield-style RS: (stock_price / bench_price) normalised to 100
+    # 3-month comparative RS (not Mansfield): how the price/benchmark ratio
+    # has moved over 65 sessions, indexed to 100 = matched the benchmark.
     if bench_close is not None and len(bench_close) >= 65:
         try:
             joined = pd.concat([close.rename("s"), bench_close.rename("b")],
