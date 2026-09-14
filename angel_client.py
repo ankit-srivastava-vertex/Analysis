@@ -11,6 +11,9 @@ Public surface:
         DataFrame[Open,High,Low,Close,Volume] indexed by Timestamp.
   - angel_download_many(tickers, start, end, max_workers=RATE_LIMIT_PER_SEC) -> dict
         Bulk fetch, rate-limit safe.
+  - angel_quotes(tickers, mode="FULL") -> dict
+        Batched snapshot quotes (<=50 tokens per request), including
+        split/bonus-adjusted 52-week high and low.
   - get_angel_session() -> (api_key, jwt_token)  (lazy, auto-relogin)
   - refresh_token(force=False) -> bool
   - INDEX_OVERRIDES: dict of synthetic index tickers → (exch, token, name)
@@ -834,6 +837,103 @@ def angel_download_many(tickers,
             if done % 50 == 0 or done == len(futs):
                 print("    %d/%d (%.1fs, usable=%d)"
                       % (done, len(futs), time.time() - t0, len(out)))
+    return out
+
+
+# Angel rejects a quote request carrying more than 50 tokens with AB4029;
+# well past that the WAF returns an HTML error page instead of JSON.
+QUOTE_BATCH_MAX = 50
+
+
+def angel_quotes(tickers, mode: str = "FULL", retries: int = 2) -> dict:
+    """Batched market-data snapshot. Returns {ticker: quote dict}.
+
+    Where angel_download spends one getCandleData call per symbol, this uses
+    getMarketData, which accepts up to QUOTE_BATCH_MAX tokens per request
+    across all exchanges combined. FULL mode includes '52WeekHigh' and
+    '52WeekLow' (adjusted for splits and bonuses, matching the candle series),
+    so a whole-market level screen costs ~54 requests rather than ~2,700.
+
+    Tickers that fail to resolve, or that Angel returns as unfetched, are
+    omitted rather than reported with null values.
+    """
+    out = {}
+    if not tickers:
+        return out
+    _load_scrip_master()
+
+    # Keyed by (exchange, token) because the same token can exist on NSE and BSE.
+    owner = {}
+    pending = []
+    for t in tickers:
+        try:
+            exch, tok = _parse_ticker(t)
+        except Exception:
+            continue
+        if not exch or not tok:
+            continue
+        key = (exch, str(tok))
+        if key in owner:
+            continue
+        owner[key] = t
+        pending.append(key)
+
+    for i in range(0, len(pending), QUOTE_BATCH_MAX):
+        chunk = pending[i:i + QUOTE_BATCH_MAX]
+        by_exch = {}
+        for exch, tok in chunk:
+            by_exch.setdefault(exch, []).append(tok)
+
+        for attempt in range(retries + 1):
+            _rate_limiter.acquire()
+            try:
+                try:
+                    obj = _ensure_session()
+                    resp, timed_out = _call_with_timeout(
+                        obj.getMarketData, mode, by_exch)
+                    if timed_out:
+                        _reset_session()
+                        if attempt < retries:
+                            time.sleep(0.3)
+                            continue
+                        break
+                except Exception:
+                    if attempt < retries:
+                        time.sleep(0.5 * (attempt + 1)
+                                   + random.uniform(0.0, 0.25))
+                        continue
+                    break
+
+                if not isinstance(resp, dict) or not resp.get("status"):
+                    err_code = str((resp or {}).get("errorcode", "")).upper()
+                    err_msg = str((resp or {}).get("message", ""))
+                    if err_code in _RATE_LIMIT_ERR_CODES:
+                        _rate_limiter.report_rate_limited()
+                        if attempt < retries:
+                            time.sleep((1.5 ** attempt)
+                                       + random.uniform(0.0, 0.5))
+                            continue
+                        break
+                    if (_is_auth_error_msg(err_code + " " + err_msg)
+                            and attempt < retries):
+                        if _try_refresh_access_token() or refresh_token(force=False):
+                            continue
+                    if attempt < retries:
+                        time.sleep(0.5 * (attempt + 1)
+                                   + random.uniform(0.0, 0.25))
+                        continue
+                    break
+
+                _rate_limiter.report_success()
+                for rec in (resp.get("data") or {}).get("fetched") or []:
+                    key = (str(rec.get("exchange", "")).upper(),
+                           str(rec.get("symbolToken", "")))
+                    name = owner.get(key)
+                    if name:
+                        out[name] = rec
+                break
+            finally:
+                _rate_limiter.release()
     return out
 
 

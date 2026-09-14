@@ -126,6 +126,7 @@ Analysis/
 │
 ├── data_provider.py              # Unified OHLCV router (Angel→jugaad→yfinance)
 ├── angel_client.py               # Angel One SmartAPI session + scrip-master
+├── screener_client.py            # Shared Screener.in client (one login, one cache, one rate limiter)
 ├── ohlcv_cache.py                # 2-tier incremental daily-bar cache in front of Angel
 ├── email_sender.py               # SMTP helper (Gmail App Password)
 │
@@ -1610,6 +1611,7 @@ Each writes into `portfolio/` and is overwritten every run. Under
 | Producer | Path | Purpose |
 |---|---|---|
 | `angel_client.py` | `.angel_scrip_master.json` | ~25 MB scrip master, 7-day TTL |
+| `screener_client.py` | `.cache/screener_client/` | Shared screener.in page cache, 7-day TTL |
 | `ohlcv_cache.py` | `.cache/` pickles | One per `(symbol, interval)`, daily bars only |
 | `ipo_listing_gainers.py` | `.cache/ipo_gainers/` | TTL'd HTTP responses |
 | `forensic_accounting.py` | `.cache/screener_<md5>.html` | Scraped Screener.in pages |
@@ -1728,7 +1730,7 @@ All data flows through public/free sources. No paid market-data feeds.
 | **NSDL FPI monthly** | `fii_flows.py` | None |
 | **NSE BhavCopy (F&O)** | `fno_max_oi.py` (default EOD source) | None |
 | **Tickertape Screener API** | `fii_stake_tracker.py`, `pledge_promoter.py` | None |
-| **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py`, `screener/app.py` | `.env`: `SCREENER_*` |
+| **screener.in** | `fii_stake_tracker.py` (fallback), `breakout_scanner_angel.py`, `forensic_accounting.py`, `ipo_listing_gainers.py`, `screener/app.py` — all via `screener_client.py` | `.env`: `SCREENER_*` |
 | **ETMoney** | `mf_overlap.py` (MF scheme lists) | None |
 | **RBI / AMFI / CEA / PPAC / NSDL / CDSL** | `india_macro.py` (28 indicators) | None |
 | **NSE corporate APIs** | `events_calendar.py`, `forensic_accounting.py` | None |

@@ -1,4 +1,11 @@
-"""Flask app for Screener.in-backed valuation and financial charts."""
+"""Flask app for valuation and financial charts.
+
+Metric series are resolved through three tiers, in order: Screener.in (deepest,
+~12 years, requires a login), Tickertape (public JSON, ~5-6 years, covers NSE
+and BSE including SME), then Yahoo Finance. Each tier is only consulted when
+the one above it fails, so the common path stays on the richest source while an
+outage or a ban still leaves the charts populated.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,7 @@ import calendar
 import json
 import os
 import re
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -21,6 +29,16 @@ from flask import Flask, jsonify, request, send_from_directory
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+try:
+    import tickertape_client
+except Exception:
+    tickertape_client = None
+
+import screener_client
+
 STATIC_DIR = HERE / "static"
 TRADINGCHARTS_STATIC_DIR = ROOT / "tradingcharts" / "static"
 STATE_DIR = HERE / "state"
@@ -174,10 +192,8 @@ load_dotenv(ROOT / ".env")
 SCREENER_USER = os.getenv("SCREENER_USER", "").strip().strip("'").strip('"')
 SCREENER_PASS = os.getenv("SCREENER_PASS", "").strip().strip("'").strip('"')
 
-_SESSION = requests.Session()
-_SESSION.headers.update(HEADERS)
-_SESSION_LOCK = threading.Lock()
-
+# The session, login and request pacing all live in screener_client, which is
+# shared with the batch scripts so the whole repo stays under one rate budget.
 _LOGIN_STATE = {"attempted": False, "ok": False}
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
@@ -233,67 +249,39 @@ def _normalize_row_label(label: str) -> str:
 
 
 def _ensure_login() -> None:
+    """Authenticate once, via the shared screener_client.
+
+    The login itself is owned by screener_client and is shared with every other
+    screener.in caller in the repo; this only mirrors the outcome into
+    _LOGIN_STATE, which /api/health reports.
+    """
     if _LOGIN_STATE["attempted"]:
         return
     _LOGIN_STATE["attempted"] = True
-    if not (SCREENER_USER and SCREENER_PASS):
-        return
-
     try:
-        login_url = f"{SCREENER_BASE}/login/"
-        page = _request_with_retry("GET", login_url, timeout=6)
-        page.raise_for_status()
-        soup = BeautifulSoup(page.text, "html.parser")
-        token_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
-        csrf_token = token_input.get("value") if token_input else _SESSION.cookies.get("csrftoken", "")
-        data = {
-            "username": SCREENER_USER,
-            "password": SCREENER_PASS,
-            "next": "/",
-            "csrfmiddlewaretoken": csrf_token,
-        }
-        headers = {"Referer": login_url}
-        resp = _request_with_retry(
-            "POST",
-            login_url,
-            data=data,
-            headers=headers,
-            timeout=6,
-            allow_redirects=True,
-        )
-        resp.raise_for_status()
-        _LOGIN_STATE["ok"] = ("logout" in resp.text.lower()) or ("/user/" in resp.text)
+        _LOGIN_STATE["ok"] = screener_client.login_ok()
     except Exception:
         _LOGIN_STATE["ok"] = False
 
 
-def _request_with_retry(method: str, url: str, retries: int = 2, backoff: float = 0.2, **kwargs: Any) -> requests.Response:
-    kwargs.setdefault("timeout", 10)
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            with _SESSION_LOCK:
-                return _SESSION.request(method, url, **kwargs)
-        except Exception as exc:
-            last_error = exc
-            if attempt < retries - 1:
-                time.sleep(backoff * (attempt + 1))
-    if last_error:
-        raise last_error
-    raise RuntimeError("Request failed")
-
-
 def _fetch_company_html(url: str) -> str:
+    """Company page HTML, memory-cached for PAGE_TTL_SECONDS.
+
+    Two cache layers sit in front of the network: this process-local dict, and
+    the shared on-disk cache in screener_client, which means a page already
+    pulled by one of the batch scripts is served here without a request.
+    """
     _ensure_login()
     abs_url = url if url.startswith("http") else f"{SCREENER_BASE}{url}"
     cached = _PAGE_CACHE.get(abs_url)
     if cached and time.time() - cached[0] < PAGE_TTL_SECONDS:
         return cached[1]
     try:
-        resp = _request_with_retry("GET", abs_url, timeout=8)
-        resp.raise_for_status()
-        _PAGE_CACHE[abs_url] = (time.time(), resp.text)
-        return resp.text
+        text = screener_client.get(abs_url, ttl_hours=PAGE_TTL_SECONDS / 3600.0)
+        if not text:
+            raise RuntimeError(f"screener.in returned no body for {abs_url}")
+        _PAGE_CACHE[abs_url] = (time.time(), text)
+        return text
     except Exception:
         # Under burst traffic, use stale cached page instead of failing the whole API call.
         if cached:
@@ -973,6 +961,200 @@ def _build_yahoo_payload(symbol: str, selected: list[str]) -> dict[str, Any] | N
     return None
 
 
+# ── Tickertape middle tier ───────────────────────────────────────────────────
+# Public JSON API, no login, ~5,900 NSE + BSE listings including SME. Shallower
+# than Screener (~5-6 annual periods, 5 quarters) so it is a fallback rather
+# than a primary, but it needs no credentials and carries no ban risk.
+
+def _tt_annual_index(raw: dict[str, Any]) -> dict[str, dict[str, float]]:
+    """Merge the annual statements into ``{period_end_date: {row: value}}``."""
+    merged: dict[str, dict[str, float]] = {}
+    for key in ("income_annual", "balance_annual", "cashflow_annual"):
+        for rec in raw.get(key) or []:
+            if rec.get("date"):
+                merged.setdefault(rec["date"], {}).update(rec["values"])
+    return merged
+
+
+def _tt_label(date_str: str) -> str:
+    try:
+        from datetime import datetime
+
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%b %Y")
+    except Exception:
+        return date_str
+
+
+def _tt_points(
+    index: dict[str, dict[str, float]],
+    fn: Any,
+    to_crore: bool = False,
+) -> list[dict[str, Any]]:
+    """Build a sorted point list by applying ``fn`` to each period's row dict."""
+    out: list[dict[str, Any]] = []
+    for date_str in sorted(index):
+        try:
+            value = fn(index[date_str])
+        except Exception:
+            value = None
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except Exception:
+            continue
+        if value != value:
+            continue
+        if to_crore:
+            value /= 10_000_000.0
+        out.append({"label": _tt_label(date_str), "date": date_str,
+                    "value": round(value, 4)})
+    return out
+
+
+def _tt_div(numerator: Any, denominator: Any, scale: float = 1.0) -> Any:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return numerator / denominator * scale
+
+
+def _build_tickertape_payload(symbol: str, selected: list[str]) -> dict[str, Any] | None:
+    """Build an /api/stock payload from Tickertape, or None if unavailable.
+
+    Ratios Screener publishes directly (ROCE, Debtor Days, Cash Conversion
+    Cycle and friends) are derived here from the raw statements, so the metric
+    catalogue stays the same shape the UI already expects. Price-linked series
+    (PE, PB, Stock Price, Market Cap) still come from Yahoo, but PB uses the
+    reported share count rather than the face-value inference the Screener path
+    needs.
+    """
+    if tickertape_client is None:
+        return None
+    sid = tickertape_client.resolve_sid(symbol)
+    if not sid:
+        return None
+    try:
+        raw = tickertape_client.fetch_statements(sid)
+    except Exception:
+        return None
+    index = _tt_annual_index(raw)
+    if not index:
+        return None
+
+    g = dict.get
+    series_map: dict[str, list[dict[str, Any]]] = {
+        "Sales": _tt_points(index, lambda r: g(r, "Total Revenue"), True),
+        "Expenses": _tt_points(index, lambda r: g(r, "Total Expenses"), True),
+        "Operating Profit": _tt_points(index, lambda r: g(r, "EBITDA"), True),
+        "Net Profit": _tt_points(index, lambda r: g(r, "Net Income"), True),
+        "EPS": _tt_points(index, lambda r: g(r, "Basic EPS")),
+        "Reserves": _tt_points(index, lambda r: g(r, "Retained Earnings"), True),
+        "Borrowings": _tt_points(index, lambda r: g(r, "Total Debt"), True),
+        "Total liabilities": _tt_points(
+            index, lambda r: g(r, "Total Liabilities Net Minority Interest"), True),
+        "Total assets": _tt_points(index, lambda r: g(r, "Total Assets"), True),
+        "Free cash flow": _tt_points(index, lambda r: g(r, "Free Cash Flow"), True),
+        "Fixed Assets": _tt_points(index, lambda r: g(r, "Net PPE"), True),
+        "CFO": _tt_points(index, lambda r: g(r, "Operating Cash Flow"), True),
+        "Net Cash Flow": _tt_points(index, lambda r: g(r, "Changes In Cash"), True),
+        "CFO/OP": _tt_points(
+            index, lambda r: _tt_div(g(r, "Operating Cash Flow"), g(r, "EBITDA"), 100.0)),
+        "Net Profit Margin": _tt_points(
+            index, lambda r: _tt_div(g(r, "Net Income"), g(r, "Total Revenue"), 100.0)),
+        "OPM %": _tt_points(
+            index, lambda r: _tt_div(g(r, "EBITDA"), g(r, "Total Revenue"), 100.0)),
+        "ROE %": _tt_points(
+            index, lambda r: _tt_div(g(r, "Net Income"), g(r, "Stockholders Equity"), 100.0)),
+        "Debt/Equity": _tt_points(
+            index, lambda r: _tt_div(g(r, "Total Debt"), g(r, "Stockholders Equity"))),
+        # Capital employed approximated as equity + total debt.
+        "ROCE %": _tt_points(
+            index,
+            lambda r: _tt_div(
+                g(r, "EBIT"),
+                (g(r, "Stockholders Equity") or 0) + (g(r, "Total Debt") or 0) or None,
+                100.0)),
+        "Debtor Days": _tt_points(
+            index, lambda r: _tt_div(g(r, "Accounts Receivable"), g(r, "Total Revenue"), 365.0)),
+        "Inventory Days": _tt_points(
+            index, lambda r: _tt_div(g(r, "Inventory"), g(r, "Total Revenue"), 365.0)),
+        "Cash Conversion Cycle": _tt_points(
+            index,
+            lambda r: (
+                None
+                if None in (_tt_div(g(r, "Accounts Receivable"), g(r, "Total Revenue"), 365.0),
+                            _tt_div(g(r, "Inventory"), g(r, "Total Revenue"), 365.0),
+                            _tt_div(g(r, "Accounts Payable"), g(r, "Total Revenue"), 365.0))
+                else _tt_div(g(r, "Accounts Receivable"), g(r, "Total Revenue"), 365.0)
+                + _tt_div(g(r, "Inventory"), g(r, "Total Revenue"), 365.0)
+                - _tt_div(g(r, "Accounts Payable"), g(r, "Total Revenue"), 365.0))),
+        "Working Capital Days": _tt_points(
+            index,
+            lambda r: _tt_div(
+                (g(r, "Current Assets") - g(r, "Current Liabilities"))
+                if None not in (g(r, "Current Assets"), g(r, "Current Liabilities"))
+                else None,
+                g(r, "Total Revenue"), 365.0)),
+        "PE": [],
+        "PB": [],
+        "Stock Price": [],
+        "Market Cap": [],
+    }
+
+    if "PE" in selected:
+        try:
+            series_map["PE"] = _pe_from_eps_and_prices(symbol, series_map["EPS"])
+        except Exception:
+            pass
+    if "PB" in selected:
+        try:
+            bvps = _tt_points(
+                index,
+                lambda r: _tt_div(g(r, "Stockholders Equity"), g(r, "Ordinary Shares Number")))
+            series_map["PB"] = _pe_from_eps_and_prices(symbol, bvps)
+        except Exception:
+            pass
+    if "Stock Price" in selected or "Market Cap" in selected:
+        try:
+            shares = [
+                (d, (index[d]["Ordinary Shares Number"] / 1e7))
+                for d in sorted(index)
+                if index[d].get("Ordinary Shares Number")
+            ]
+            start = min(index) if index else None
+            price_pts, mcap_pts = _price_and_mcap_series(symbol, start, shares)
+            series_map["Stock Price"] = price_pts
+            series_map["Market Cap"] = mcap_pts
+        except Exception:
+            pass
+
+    metrics = [
+        {
+            "label": label,
+            "type": "series",
+            "unit": SERIES_METRICS[label]["unit"],
+            "period": SERIES_METRICS[label]["kind"],
+            "points": series_map.get(label, []),
+        }
+        for label in selected
+        if label in SERIES_METRICS
+    ]
+    if not any(item["points"] for item in metrics):
+        return None
+
+    return {
+        "stock": {
+            "ticker": symbol.upper(),
+            "name": symbol.upper(),
+            "url": f"https://www.tickertape.in/stocks/?s={sid}",
+            "price": None,
+            "changePct": None,
+        },
+        "metrics": metrics,
+        "fallbackProvider": "tickertape",
+    }
+
+
 def _search_entries(query: str, limit: int = 20) -> list[CompanyEntry]:
     q = (query or "").strip()
     if not q:
@@ -985,9 +1167,10 @@ def _search_entries(query: str, limit: int = 20) -> list[CompanyEntry]:
 
     _ensure_login()
     url = f"{SCREENER_BASE}/api/company/search/"
-    resp = _request_with_retry("GET", url, params={"q": q}, timeout=6)
-    resp.raise_for_status()
-    rows = resp.json()
+    rows = screener_client.get_json(
+        url, params={"q": q}, ttl_hours=SEARCH_TTL_SECONDS / 3600.0)
+    if rows is None:
+        raise RuntimeError(f"screener.in search failed for {q!r}")
     out: list[CompanyEntry] = []
     for row in rows[:limit]:
         rel_url = str(row.get("url") or "")
@@ -1336,6 +1519,11 @@ def stock_data() -> Any:
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
+        tt_payload = _build_tickertape_payload(symbol, selected)
+        if tt_payload:
+            _STOCK_CACHE[cache_key] = (time.time(), tt_payload)
+            return jsonify(tt_payload)
+
         yahoo_payload = _build_yahoo_payload(symbol, selected)
         if yahoo_payload:
             _STOCK_CACHE[cache_key] = (time.time(), yahoo_payload)

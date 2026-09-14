@@ -11,7 +11,9 @@ one email with the workbook + interactive HTML charts attached.
 WORKFLOW
 --------
 1. Parse CLI args (--no-email, --skip <scenarios>).
-2. Run 9 scenarios in order:
+2. Run 9 scenarios. They are LISTED below in output order (ALL_SCENARIOS,
+   which fixes workbook sheet and chart tab order) but EXECUTED in
+   EXECUTION_ORDER, widest download window first:
 
    a. bulk_block        → BulkBlock.BSEScraper          — NSE+BSE bulk & block deals,
                                                           filtered to a hardcoded
@@ -58,6 +60,15 @@ WORKFLOW
    Each scenario is wrapped in try/except so a single failure does not
    abort the pipeline; failures are collected in `errors` and reported
    in the email body + summary.
+
+   Scenarios are executed widest-download-window-first and the results are
+   folded back in ALL_SCENARIOS order, so ordering is purely a cache
+   optimisation and never moves a sheet or a tab. Four scenarios request
+   heavily overlapping universes; this module also widens ohlcv_cache's
+   in-memory TTL (ANGEL_CACHE_L1_TTL) for its own process so the second and
+   later requests for a symbol are served from memory rather than re-fetched.
+   That also pins every scenario to one price snapshot, so the sector index
+   and the RS sheet can no longer be built from different bars.
 
    NOTE: the breakout scanner (breakout_scanner_angel.py) is not part of
    this pipeline. Run that script separately for the breakout output.
@@ -113,7 +124,14 @@ import sys
 import datetime
 import argparse
 import traceback
-import pandas as pd
+
+# Scenarios re-request the same symbols minutes apart, which outlives
+# ohlcv_cache's 300s in-memory TTL and forces a full re-fetch. Widen it for
+# this process only — set before any sub-module (and hence ohlcv_cache) is
+# imported, and left as a default so the caller can still override it.
+os.environ.setdefault("ANGEL_CACHE_L1_TTL", "7200")
+
+import pandas as pd  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TODAY = datetime.date.today()
@@ -538,14 +556,46 @@ EXCLUDED_SHEETS = {
     "RRG Quarterly",
 }
 
+# Sheets lifted out of scenario order and placed immediately after a named
+# anchor: (sheet, anchor). Workbook order otherwise follows ALL_SCENARIOS,
+# which strands "Sector RS Ranking" at the end because merge_rs_rankings()
+# appends it after popping its two source sheets.
+SHEET_PLACEMENT = (
+    ("Sector RS Ranking", "Watchlist"),
+)
+
+
+def _apply_sheet_placement(sheets):
+    """Reorder `sheets` so each SHEET_PLACEMENT entry follows its anchor.
+
+    Silently skipped when either sheet is missing, so a partial scenario run
+    still produces a workbook in whatever order it managed to build.
+    """
+    ordered = sheets
+    for name, anchor in SHEET_PLACEMENT:
+        if name not in ordered or anchor not in ordered or name == anchor:
+            continue
+        moved = ordered.pop(name)
+        rebuilt = {}
+        for key, val in ordered.items():
+            rebuilt[key] = val
+            if key == anchor:
+                rebuilt[name] = moved
+        ordered = rebuilt
+    return ordered
+
 
 def build_unified_excel(all_sheets, output_path):
-    """Write all scenario sheets into one Excel workbook."""
+    """Write all scenario sheets into one Excel workbook.
+
+    Sheet order follows insertion order, adjusted by SHEET_PLACEMENT.
+    """
     if not all_sheets:
         print("  No data to write to unified Excel.")
         return None
 
     filtered = {k: v for k, v in all_sheets.items() if k not in EXCLUDED_SHEETS}
+    filtered = _apply_sheet_placement(filtered)
     skipped = [k for k in all_sheets if k in EXCLUDED_SHEETS]
 
     if not filtered:
@@ -660,6 +710,42 @@ function showTab(idx) {
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
+# Scenario name -> (display label, runner callable).
+SCENARIOS = {
+    "bulk_block":       ("Bulk & Block Deals (NSE + BSE)", run_bulk_block),
+    "sector_index":     ("Custom Sector Index", run_sector_index),
+    "fii_flows":        ("FII Equity Cash Market Flows", run_fii_flows),
+    "fii_sector_flows": ("FII Sector-wise Flows", run_fii_sector_flows),
+    "sector_momentum":  ("Sector Momentum & Relative Strength",
+                         run_sector_momentum),
+    "nse_sector_rs":    ("NSE Sector Relative Strength (Official Indices)",
+                         run_nse_sector_rs),
+    "rrg":              ("Relative Rotation Graph", run_rrg),
+    "sector_breadth":   ("Sector Market Breadth", run_sector_breadth),
+    "stage_analysis":   ("Weinstein Stage Analysis", run_stage_analysis),
+}
+
+# Execution order, widest download window first. ohlcv_cache only serves a
+# request whose span its cached frame already covers, so fetching the 1200-day
+# stage universe first lets the narrower scenarios read those same bars from
+# memory instead of re-fetching. Output order stays ALL_SCENARIOS.
+EXECUTION_ORDER = [
+    "stage_analysis",     # ~1200d over ~991 symbols — widest window, runs first
+    "sector_index",       # since 2024-01-01, 741 symbols
+    "sector_momentum",    # identical 741 symbols to sector_index
+    "rrg",                # same constituents again
+    "sector_breadth",     # 180d over the NIFTY 500
+    "bulk_block",         # remaining scenarios fetch no constituent OHLCV
+    "fii_flows",
+    "fii_sector_flows",
+    "nse_sector_rs",
+]
+
+# A scenario missing from either list would be silently dropped from the run.
+assert set(EXECUTION_ORDER) == set(ALL_SCENARIOS), \
+    "EXECUTION_ORDER and ALL_SCENARIOS must cover the same scenarios"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Master Report Runner")
     parser.add_argument("--no-email", action="store_true",
@@ -679,149 +765,32 @@ def main():
     chart_files = []
     errors = []
 
-    # ── 1. Bulk & Block Deals (NSE + BSE) ─────────────────────────
-    if "bulk_block" not in skip:
+    # Run in cache-friendly order, keyed by scenario name so the results can be
+    # folded back in the canonical order below.
+    results = {}
+    to_run = [name for name in EXECUTION_ORDER if name not in skip]
+    for pos, name in enumerate(to_run, 1):
+        label, runner = SCENARIOS[name]
         print("\n" + "=" * 70)
-        print("  SCENARIO 1/9: Bulk & Block Deals (NSE + BSE)")
+        print("  SCENARIO %d/%d: %s" % (pos, len(to_run), label))
         print("=" * 70)
         try:
-            sheets, chart = run_bulk_block()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ Bulk & Block Deals complete (%d sheets)" % len(sheets))
+            sheets, chart = runner()
+            sheets = sheets or {}
+            results[name] = (sheets, chart)
+            print("  ✓ %s complete (%d sheets)" % (label, len(sheets)))
         except Exception as e:
-            errors.append("bulk_block: %s" % e)
-            print("  ✗ Bulk & Block Deals FAILED: %s" % e)
+            errors.append("%s: %s" % (name, e))
+            print("  ✗ %s FAILED: %s" % (label, e))
             traceback.print_exc()
 
-    # ── 2. Custom Sector Index ─────────────────────────────────
-    if "sector_index" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 2/9: Custom Sector Index")
-        print("=" * 70)
-        try:
-            sheets, chart = run_sector_index()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ Sector Index complete")
-        except Exception as e:
-            errors.append("sector_index: %s" % e)
-            print("  ✗ Sector Index FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 3. FII Equity Flows ────────────────────────────────────
-    if "fii_flows" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 3/9: FII Equity Cash Market Flows")
-        print("=" * 70)
-        try:
-            sheets, chart = run_fii_flows()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ FII Flows complete")
-        except Exception as e:
-            errors.append("fii_flows: %s" % e)
-            print("  ✗ FII Flows FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 4. FII Sector-wise Flows ─────────────────────────────────
-    if "fii_sector_flows" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 4/9: FII Sector-wise Flows")
-        print("=" * 70)
-        try:
-            sheets, chart = run_fii_sector_flows()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ FII Sector Flows complete")
-        except Exception as e:
-            errors.append("fii_sector_flows: %s" % e)
-            print("  ✗ FII Sector Flows FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 5. Sector Momentum ─────────────────────────────────────
-    if "sector_momentum" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 5/9: Sector Momentum & Relative Strength")
-        print("=" * 70)
-        try:
-            sheets, chart = run_sector_momentum()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ Sector Momentum complete")
-        except Exception as e:
-            errors.append("sector_momentum: %s" % e)
-            print("  ✗ Sector Momentum FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 6. NSE Sector RS (Official Indices) ────────────────────
-    if "nse_sector_rs" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 6/9: NSE Sector Relative Strength (Official Indices)")
-        print("=" * 70)
-        try:
-            sheets, chart = run_nse_sector_rs()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ NSE Sector RS complete")
-        except Exception as e:
-            errors.append("nse_sector_rs: %s" % e)
-            print("  ✗ NSE Sector RS FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 7. RRG Chart ────────────────────────────────────────────
-    if "rrg" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 7/9: Relative Rotation Graph")
-        print("=" * 70)
-        try:
-            sheets, chart = run_rrg()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ RRG Chart complete")
-        except Exception as e:
-            errors.append("rrg: %s" % e)
-            print("  ✗ RRG Chart FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 8. Sector Market Breadth ────────────────────────────────
-    if "sector_breadth" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 8/9: Sector Market Breadth")
-        print("=" * 70)
-        try:
-            sheets, chart = run_sector_breadth()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ Sector Breadth complete")
-        except Exception as e:
-            errors.append("sector_breadth: %s" % e)
-            print("  ✗ Sector Breadth FAILED: %s" % e)
-            traceback.print_exc()
-
-    # ── 9. Weinstein Stage Analysis ─────────────────────────────
-    if "stage_analysis" not in skip:
-        print("\n" + "=" * 70)
-        print("  SCENARIO 9/9: Weinstein Stage Analysis")
-        print("=" * 70)
-        try:
-            sheets, chart = run_stage_analysis()
-            unified_sheets.update(sheets)
-            if chart:
-                chart_files.append(chart)
-            print("  ✓ Stage Analysis complete (%d sheets)" % len(sheets))
-        except Exception as e:
-            errors.append("stage_analysis: %s" % e)
-            print("  ✗ Stage Analysis FAILED: %s" % e)
-            traceback.print_exc()
+    # Assemble in ALL_SCENARIOS order so changing EXECUTION_ORDER can never
+    # move a workbook sheet or a chart tab.
+    for name in ALL_SCENARIOS:
+        sheets, chart = results.get(name, ({}, None))
+        unified_sheets.update(sheets)
+        if chart:
+            chart_files.append(chart)
 
     # ── Build Unified Excel ───────────────────────────────────────────
     print("\n" + "=" * 70)

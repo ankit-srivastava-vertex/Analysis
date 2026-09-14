@@ -372,6 +372,9 @@ import requests
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
+
+import screener_client
+
 # Outputs land next to this script, not in Output/.
 OUTPUT_DIR = SCRIPT_DIR
 CACHE_DIR = SCRIPT_DIR / ".cache" / "ipo_gainers"
@@ -5742,24 +5745,20 @@ def write_workbook(all_df: pd.DataFrame, gainers_df: pd.DataFrame,
 # exited every one of those companies, or that sit below Screener's 1% naming
 # threshold, will not resolve — that is a limit of the source, not a bug.
 SCREENER_BASE = "https://www.screener.in"
-SCREENER_CACHE_DIR = CACHE_DIR / "screener"
 SCREENER_TTL_HOURS = 24 * 7
 # Anchor books are institutions and large non-institutional funds. Promoters and
 # government holdings are never anchors, so those two classifications are skipped.
 SCREENER_CLASSES = ("foreign_institutions", "domestic_institutions", "public")
-# Pacing. Screener bans by IP, silently and durably, so this is set slow on
-# purpose — a full cold run is a few minutes, every later run is served from
-# .cache/ipo_gainers/screener/ and costs nothing.
-SCREENER_DELAY = 1.1          # seconds between successful requests
-SCREENER_BACKOFF = 20.0       # seconds to wait after a refused connection
-SCREENER_MAX_FAILS = 4        # consecutive failures before abandoning the stage
+# Pacing, caching, login and the give-up circuit breaker all live in
+# screener_client now, shared with every other screener.in caller in the repo.
+# Screener bans by IP, so one shared budget is the only way to stay under it
+# when several of these scripts run in the same session.
 # A holdings header cell: "Mar 2016", "Jun 2026". Distinguishes the holdings
 # table from the deal tables, which a person can have more than one of.
 _QUARTER_LABEL = re.compile(r"^([A-Z][a-z]{2})\s+(\d{4})$")
 _MONTHS = {m: i for i, m in enumerate(
     ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
-_SCREENER_FAILS = 0
 
 
 _PERSON_ID = re.compile(r"^/people/(\d+)/")
@@ -5793,57 +5792,13 @@ def _deal_sort_key(date_text: str) -> "tuple[int, int, int]":
     return (int(m.group(3)), _MONTHS.get(m.group(2).title(), 0), int(m.group(1)))
 
 
-def _screener_cache(key: str, ttl_hours: float = SCREENER_TTL_HOURS) -> str | None:
-    """Return cached body for `key` if it is present and still fresh."""
-    fp = SCREENER_CACHE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".json")
-    if not fp.exists():
-        return None
-    try:
-        blob = json.loads(fp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    if time.time() - blob.get("t", 0) > ttl_hours * 3600:
-        return None
-    return blob.get("body")
-
-
-def _screener_store(key: str, body: str) -> None:
-    SCREENER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    fp = SCREENER_CACHE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".json")
-    try:
-        fp.write_text(json.dumps({"t": time.time(), "key": key, "body": body}),
-                      encoding="utf-8")
-    except OSError:
-        pass
-
-
 def screener_session() -> "tuple[requests.Session, bool]":
-    """Return a Screener session and whether the login succeeded.
+    """Return the shared Screener session and whether the login succeeded.
 
     A session is always returned, even unauthenticated: cached responses are
     served without touching the network, so an expired login or a rate-limit
     block still leaves the profile tab populated from the last good run."""
-    import os
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
-    user, pwd = os.environ.get("SCREENER_USER"), os.environ.get("SCREENER_PASS")
-    if not user or not pwd:
-        return s, False
-    try:
-        page = s.get(f"{SCREENER_BASE}/login/", timeout=20)
-        m = re.search(r'name="csrfmiddlewaretoken"[^>]*?value="([^"]+)"', page.text)
-        if not m:
-            m = re.search(r'value="([^"]+)"[^>]*?name="csrfmiddlewaretoken"', page.text)
-        if not m:
-            return s, False
-        r = s.post(f"{SCREENER_BASE}/login/",
-                   data={"username": user, "password": pwd, "next": "/",
-                         "csrfmiddlewaretoken": m.group(1)},
-                   headers={"Referer": f"{SCREENER_BASE}/login/"},
-                   timeout=25)
-        return s, r.status_code < 400
-    except requests.RequestException:
-        return s, False
+    return screener_client.session(), screener_client.login_ok()
 
 
 def _screener_get(session: requests.Session, path: str,
@@ -5852,42 +5807,15 @@ def _screener_get(session: requests.Session, path: str,
 
     Screener blocks a client at the TCP level — connection refused, not 429 —
     once it decides the request rate is abusive, and the block outlives the
-    process. Hence the deliberate pacing, the backoff on connection errors, and
-    the circuit breaker: after a run of hard failures the whole enrichment gives
-    up rather than hammering a host that has already shut the door. Everything
-    fetched before that point stays cached, so a later run resumes instead of
-    starting over."""
-    global _SCREENER_FAILS
-    hit = _screener_cache(path, ttl_hours)
-    if hit is not None:
-        return hit or None
-    if _SCREENER_FAILS >= SCREENER_MAX_FAILS:
-        return None
-    # /api/ paths are XHR endpoints; ordinary pages are not, and asking for one
-    # with an XHR header invites a fragment instead of the page.
-    headers = {"X-Requested-With": "XMLHttpRequest"} if path.startswith("/api/") else {}
-    for attempt in range(3):
-        try:
-            r = session.get(SCREENER_BASE + path, timeout=25, headers=headers)
-        except requests.RequestException:
-            time.sleep(SCREENER_BACKOFF * (attempt + 1))
-            continue
-        _SCREENER_FAILS = 0
-        time.sleep(SCREENER_DELAY)
-        if r.status_code == 429:
-            time.sleep(SCREENER_BACKOFF)
-            continue
-        if r.status_code != 200:
-            _screener_store(path, "")      # cache the miss; 404s do not heal
-            return None
-        _screener_store(path, r.text)
-        return r.text
-    _SCREENER_FAILS += 1
-    if _SCREENER_FAILS == SCREENER_MAX_FAILS:
-        print("  [screener] connection repeatedly refused — Screener is rate "
-              "limiting this IP. Skipping the rest; cached data is kept and the "
-              "next run resumes from it.")
-    return None
+    process. The deliberate pacing, the backoff on connection errors and the
+    circuit breaker that abandons the stage rather than keep knocking all live
+    in screener_client, so this module shares one budget with every other
+    screener.in caller. Everything fetched before the breaker trips stays
+    cached, so a later run resumes instead of starting over.
+
+    `session` is accepted for call-site compatibility and is the shared session.
+    """
+    return screener_client.get(path, ttl_hours=ttl_hours)
 
 
 def _company_search(session: requests.Session, q: str) -> list:

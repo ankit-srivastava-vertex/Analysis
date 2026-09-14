@@ -5,20 +5,28 @@ Bulk & Block Deals Scraper (NSE + BSE)
 
 SUMMARY
 -------
-Fetches today's bulk and block deals from both NSE and BSE, applies two
-independent filters — a hardcoded superstar-investor list and a hardcoded
-stock watchlist — exports to Excel, and sends an email report with styled
-HTML preview.
+Two modes over the same four feeds (NSE bulk, NSE block, BSE bulk, BSE block):
 
-WORKFLOW
---------
-1. Fetch NSE bulk + block deals:
-   Primary: direct requests with NSE cookie management (3 retries, backoff).
-   Fallback: nsepython library (if installed).
-2. Fetch BSE bulk + block deals:
-   Primary: BSE JSON API (api.bseindia.com).
-   Fallback: BSE HTML website scraping (bseindia.com).
-3. Parse and normalise deal data from both exchanges.
+* DAILY (default) — latest trading session only. Applies two independent
+  filters, writes eight Excel sheets, emails the report. This is what
+  ``run_all.py`` drives and its behaviour is unchanged.
+* RANGE (``--from``/``--to``) — arbitrary historical window. Dumps RAW,
+  UNFILTERED deals into one Excel file, plus the same four scrip-filtered
+  ``watchlist_*`` views the daily run produces. No email.
+
+Each mode uses a different set of exchange endpoints, and both sets are kept
+deliberately: if one is deprecated or blocked, the other still works.
+
+WORKFLOW (daily)
+----------------
+1. Fetch NSE bulk + block deals from the single-day snapshot endpoint.
+   Verified complete — a row-for-row compare against NSE's own CSV archive
+   for the same session matched 123/123 with zero rows missing either way.
+2. Fetch BSE bulk + block deals.
+   Primary: the legacy per-deal-type JSON APIs (BulkDeal_Beta/BlockDeal_Beta).
+   Fallback: the range API pinned to a single day. Both are live; the two
+   were verified to return identical rows for the same session (87 = 87).
+3. Normalise both feeds onto one column schema per exchange.
 4. Filter the same four feeds two ways:
    a. by a hardcoded list of superstar client names (who traded?)
    b. by the hardcoded STOCK_WATCHLIST of scrips (what was traded?)
@@ -29,24 +37,71 @@ WORKFLOW
 6. Generate styled HTML email preview table.
 7. Send email with Excel attachment via SMTP.
 
+WORKFLOW (range)
+----------------
+1. BSE — one call per deal type against the range API. No row cap: a
+   101-day window returned 5,009 bulk rows across all 73 trading days, and
+   per-day counts reconciled exactly against single-day queries.
+2. NSE — the CSV form of the historical endpoint. The JSON form of the same
+   endpoint is NEVER used: it silently caps at 70 rows and returns only the
+   first day of any range.
+3. The NSE archive is published with a delay, so on a trading day the
+   snapshot can hold deals the archive does not carry yet. When the window
+   includes today the snapshot rows are merged in and de-duplicated. The two
+   sources were verified to agree exactly wherever they overlap.
+4. Every fetch is checked for short coverage — if the newest row returned is
+   older than the date requested, a warning is printed rather than the gap
+   passing unnoticed.
+
+HOW TO RUN A MULTI-DAY PULL
+---------------------------
+Step 1. Pick the window. Dates are DD-MM-YYYY and both ends are inclusive.
+Step 2. Run, from the project root:
+
+            .venv/bin/python BulkBlock.py --from 01-06-2026 --to 11-09-2026
+
+        Add ``--out <path.xlsx>`` to control the filename, otherwise it
+        defaults to ``BULK_BLOCK_Range_<from>_<to>.xlsx`` in the cwd.
+Step 3. Watch the console. Each feed prints its row count, its date span and
+        its distinct-day count. A ``WARNING: coverage ends <date>`` line
+        means the exchange has not published the tail of your window yet.
+        Re-run later to fill it.
+Step 4. Open the workbook. Four raw sheets — nse_bulk, nse_block, bse_bulk,
+        bse_block — each holding every deal in the window, unfiltered; then
+        four ``watchlist_*`` sheets carrying only STOCK_WATCHLIST scrips over
+        that same window. Filter the raw sheets in Excel for anything else.
+
+Notes:
+  * No email is sent in range mode, and the daily workbook is never touched.
+  * Long windows are one HTTP call per feed; be considerate re-running them.
+  * Omitting both ``--from`` and ``--to`` runs the normal daily job.
+
 DATA SOURCES
 ------------
-- NSE API                  — /api/snapshot-capital-market-largedeal
-                              (direct requests primary, nsepython fallback)
-- BSE JSON API             — https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w
-- BSE Website (fallback)   — https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx
+Daily:
+- NSE snapshot   — /api/snapshot-capital-market-largedeal
+- BSE bulk       — https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w
+- BSE block      — https://api.bseindia.com/BseIndiaAPI/api/BlockDeal_Beta/w
+Range:
+- NSE historical — /api/historicalOR/bulk-block-short-deals?...&csv=true
+- BSE range      — https://api.bseindia.com/BseIndiaAPI/api/BulkblockDeal/w
+                   (?fromdt=&todt=&type=1|2&scripcode=, dates DD/MM/YYYY)
 
 OUTPUT
 ------
-- BULK_BLOCK_Deals_<timestamp>.xlsx — 8 sheets: nse_bulk, nse_block,
+- Daily: BULK_BLOCK_Deals_<timestamp>.xlsx — 8 sheets: nse_bulk, nse_block,
   bse_bulk, bse_block (investor filter) + watchlist_nse_bulk,
   watchlist_nse_block, watchlist_bse_bulk, watchlist_bse_block (scrip filter)
-- HTML email with styled deal tables
+  plus an HTML email with styled deal tables.
+- Range: BULK_BLOCK_Range_<from>_<to>.xlsx — 8 sheets: nse_bulk, nse_block,
+  bse_bulk, bse_block (raw, unfiltered) + the four watchlist_* scrip views.
 
 USAGE
 -----
 Individual run:
-    python3 BulkBlock.py           # scrape deals, save Excel, send email
+    python3 BulkBlock.py                               # daily, Excel + email
+    python3 BulkBlock.py --dry-run                     # daily, preview only
+    python3 BulkBlock.py --from 01-06-2026 --to 11-09-2026   # range dump
 
 Group run (via run_all.py):
     Scenario 1 (bulk_block) — deal scraping only; no email.
@@ -54,13 +109,15 @@ Group run (via run_all.py):
 
 DEPENDENCIES
 ------------
-requests, BeautifulSoup (bs4), pandas, openpyxl, smtplib
-(optional: nsepython — used as NSE fallback if installed)
+requests, pandas, openpyxl, smtplib
 """
 
 import os
+import io
+import re
 import sys
 import time
+import argparse
 import traceback
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -68,15 +125,153 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
 
-try:
-    from nsepython import nsefetch as _nsefetch
-    _HAS_NSEPYTHON = True
-except Exception:
-    _HAS_NSEPYTHON = False
+
+# ─── Endpoints ─────────────────────────────────────────────────────────────
+# Two independent sets per exchange, kept on purpose: the single-day pair and
+# the range pair are separate services, so a deprecation on one side leaves a
+# working path on the other.
+BSE_DAY_API = {
+    "bulk": "https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w",
+    "block": "https://api.bseindia.com/BseIndiaAPI/api/BlockDeal_Beta/w",
+}
+BSE_RANGE_API = "https://api.bseindia.com/BseIndiaAPI/api/BulkblockDeal/w"
+BSE_RANGE_TYPE = {"bulk": "1", "block": "2"}
+
+NSE_SNAPSHOT_API = "https://www.nseindia.com/api/snapshot-capital-market-largedeal"
+NSE_RANGE_API = "https://www.nseindia.com/api/historicalOR/bulk-block-short-deals"
+# The root of nseindia.com answers 403 to a cold client; this report page does
+# not, and hands back the cookies the API calls need.
+NSE_WARMUP_URL = "https://www.nseindia.com/report-detail/display-bulk-and-block-deals"
+
+
+# ─── Column schemas ────────────────────────────────────────────────────────
+# Both BSE endpoints are folded onto one schema. They differ in exactly one
+# header — the day API spells it "ScripName", the range API "scripname" — and
+# that difference alone is enough to break the downstream filters.
+BSE_COL_MAP = {
+    "DEAL_DATE": "Deal Date",
+    "SCRIP_CODE": "Scrip Code",
+    "ScripName": "Scrip Name",
+    "scripname": "Scrip Name",
+    "CLIENT_NAME": "Client Name",
+    "TRANSACTION_TYPE": "Buy/Sell",
+    "QUANTITY": "Quantity",
+    "PRICE": "Price",
+}
+
+# NSE's CSV export is folded onto the snapshot's field names so the two can be
+# concatenated and filtered by the same code.
+NSE_CSV_COL_MAP = {
+    "Date": "date",
+    "Symbol": "symbol",
+    "Security Name": "name",
+    "Client Name": "clientName",
+    "Buy / Sell": "buySell",
+    "Quantity Traded": "qty",
+    "Trade Price / Wght. Avg. Price": "watp",
+    "Remarks": "remarks",
+}
+
+
+def _bse_normalise(df):
+    """Put either BSE endpoint's frame onto the shared column schema."""
+    df = df.rename(columns=BSE_COL_MAP)
+    return df.drop(columns=["SENDTOWEBSITE"], errors="ignore")
+
+
+def _parse_deal_dates(series):
+    """Parse a deal-date column without knowing which endpoint produced it.
+
+    The four feeds use four different formats: '04 Sep 2026' (BSE range),
+    '10/09/2026' (BSE day), '10-Sep-2026' (NSE snapshot) and '03-AUG-2026'
+    (NSE CSV).
+    """
+    s = series.astype(str).str.strip()
+    for fmt in ("%d %b %Y", "%d/%m/%Y", "%d-%b-%Y", "%d-%m-%Y"):
+        out = pd.to_datetime(s, format=fmt, errors="coerce")
+        if out.notna().any():
+            return out
+    return pd.to_datetime(s, errors="coerce", dayfirst=True)
+
+
+def _report_coverage(df, date_col, label, to_date=None):
+    """Print what a fetch actually covered, and shout if it falls short.
+
+    Silent short coverage is the specific failure mode these feeds exhibit —
+    NSE's block archive trails live by several sessions — so the gap is
+    surfaced rather than left for the reader to notice.
+    """
+    if df is None or df.empty:
+        print(f"  {label}: no rows")
+        return
+    dates = _parse_deal_dates(df[date_col]).dropna()
+    if dates.empty:
+        print(f"  {label}: {len(df)} rows (dates unparseable)")
+        return
+    print(f"  {label}: {len(df)} rows, {dates.dt.date.nunique()} day(s), "
+          f"{dates.min().date()} .. {dates.max().date()}")
+    if to_date is not None and dates.max().date() < to_date.date():
+        print(f"  WARNING: coverage ends {dates.max().date()}, requested "
+              f"through {to_date.date()} — the exchange has not published "
+              f"the tail of this window yet.")
+
+
+def _dedupe_deals(df):
+    """Drop rows duplicated across the NSE archive and snapshot feeds."""
+    key = pd.DataFrame({
+        "d": _parse_deal_dates(df["date"]).dt.date.astype(str),
+        "s": df["symbol"].map(_normalise_name),
+        "c": df["clientName"].map(_normalise_name),
+        "b": df["buySell"].map(_normalise_name),
+        "q": pd.to_numeric(df["qty"], errors="coerce"),
+        "p": pd.to_numeric(df["watp"], errors="coerce").round(2),
+    })
+    return df[~key.duplicated()].reset_index(drop=True)
+
+
+def _date_range(df):
+    """Span of deal dates in `df`, rendered for a status message."""
+    if df is None or df.empty:
+        return None
+    for c in df.columns:
+        if 'date' in str(c).lower():
+            try:
+                vals = {str(v).strip() for v in df[c].dropna() if str(v).strip()}
+            except Exception:
+                return None
+            if not vals:
+                return None
+            ordered = sorted(vals, key=lambda v: (
+                _parse_deal_dates(pd.Series([v])).iloc[0], v))
+            return ordered[0] if len(ordered) == 1 else f"{ordered[0]} to {ordered[-1]}"
+    return None
+
+
+# ─── Name matching ─────────────────────────────────────────────────────────
+def _normalise_name(value):
+    """Collapse a client name to a comparable form: upper case, single spaces.
+
+    Both exchanges emit names with inconsistent internal whitespace — BSE
+    returned 'SANDEEP  SINGH' where the watchlist carries 'SANDEEP SINGH', and
+    62 distinct NSE names have doubled spaces. An exact compare drops those
+    deals silently, which is the failure this function exists to prevent.
+    """
+    return re.sub(r"\s+", " ", str(value)).strip().upper()
+
+
+def _match_clients(df, column, names):
+    """Rows of `df` whose `column` matches `names`, whitespace/case-insensitive.
+
+    Shared by both exchanges and both run modes so the matching rule can never
+    drift between them.
+    """
+    if df is None or df.empty or column not in df.columns:
+        return pd.DataFrame()
+    wanted = {_normalise_name(n) for n in names}
+    return df[df[column].map(_normalise_name).isin(wanted)]
 
 
 # ─── Stock watchlist ───────────────────────────────────────────────────────
@@ -303,222 +498,6 @@ class BSEScraper:
             'Cache-Control': 'max-age=0',
         })
 
-    def scrape_bulk_deals(self, url, table_name):
-        """Scrape BULK deals - using multiple parsing methods"""
-        try:
-            print(f"\n{'='*100}")
-            print(f"Scraping: {table_name}")
-            print(f"URL: {url}")
-            print(f"{'='*100}\n")
-
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-
-            print(f"✓ Response Status: {response.status_code}")
-            print(f"✓ Content Length: {len(response.content)} bytes")
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Method 1: Try to find table with ID
-            table = soup.find('table', id='ContentPlaceHolder1_GridView1')
-
-            if table:
-                print("✓ Found table by ID: ContentPlaceHolder1_GridView1")
-                df = self._parse_bulk_html_table(table)
-                if df is not None and not df.empty:
-                    return df
-
-            # Method 2: Try to find any table with class
-            tables = soup.find_all('table')
-            print(f"✓ Found {len(tables)} table(s) in HTML")
-
-            for idx, tbl in enumerate(tables):
-                rows = tbl.find_all('tr')
-                if len(rows) > 5:
-                    print(f"  Trying table {idx+1} with {len(rows)} rows")
-                    df = self._parse_bulk_html_table(tbl)
-                    if df is not None and not df.empty:
-                        return df
-
-            # Method 3: Parse pipe-delimited text
-            print("✓ Trying pipe-delimited text parsing...")
-            text = soup.get_text()
-            lines = text.split('\n')
-
-            data_lines = []
-            for line in lines:
-                if '|' in line and line.strip():
-                    pipe_count = line.count('|')
-                    if pipe_count >= 6:
-                        data_lines.append(line.strip())
-
-            if data_lines:
-                print(f"✓ Found {len(data_lines)} lines with pipe delimiters")
-                return self._parse_pipe_delimited_bulk(data_lines)
-
-            print(f"⚠️  Could not extract table data for {table_name}")
-            return None
-
-        except Exception as e:
-            print(f"❌ Error scraping {table_name}: {e}")
-            traceback.print_exc()
-            return None
-
-    def _parse_bulk_html_table(self, table):
-        """Parse HTML table for BULK deals"""
-        try:
-            rows = table.find_all('tr')
-            if not rows:
-                return None
-
-            # Extract headers
-            headers = []
-            header_row = rows[0]
-            for th in header_row.find_all(['th', 'td']):
-                header_text = th.get_text(strip=True)
-                if header_text:
-                    headers.append(header_text)
-
-            # Extract data
-            data = []
-            for row in rows[1:]:
-                cols = row.find_all('td')
-                if cols:
-                    row_data = [col.get_text(strip=True) for col in cols]
-                    if any(row_data):
-                        data.append(row_data)
-
-            if not data:
-                return None
-
-            df = pd.DataFrame(data, columns=headers if headers else None)
-            df = df.loc[:, (df != '').any(axis=0)]
-
-            # Normalize column names
-            df.columns = [col.replace('Price **', 'Price') for col in df.columns]
-
-            print(f"✓ Parsed {len(df)} rows with {len(df.columns)} columns")
-            return df
-
-        except Exception as e:
-            print(f"Error parsing HTML table: {e}")
-            traceback.print_exc()
-            return None
-
-    def _parse_pipe_delimited_bulk(self, lines):
-        """Parse pipe-delimited text for BULK deals"""
-        try:
-            data_rows = []
-            headers = None
-
-            for line in lines:
-                parts = [p.strip() for p in line.split('|') if p.strip()]
-
-                if not parts:
-                    continue
-
-                if headers is None:
-                    headers = parts
-                    # Normalize column names
-                    headers = [h.replace('Price **', 'Price') for h in headers]
-                    print(f"✓ Headers: {headers}")
-                else:
-                    if len(parts) == len(headers):
-                        data_rows.append(parts)
-
-            if not data_rows:
-                return None
-
-            df = pd.DataFrame(data_rows, columns=headers)
-            print(f"✓ Parsed {len(df)} rows with {len(df.columns)} columns")
-            return df
-
-        except Exception as e:
-            print(f"Error parsing pipe-delimited data: {e}")
-            traceback.print_exc()
-            return None
-
-    def scrape_block_deals(self, url, table_name):
-        """Scrape BLOCK deals - using HTML table parser"""
-        try:
-            print(f"\n{'='*100}")
-            print(f"Scraping: {table_name}")
-            print(f"URL: {url}")
-            print(f"{'='*100}\n")
-
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-
-            print(f"✓ Response Status: {response.status_code}")
-            print(f"✓ Content Length: {len(response.content)} bytes")
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Find table by ID
-            table = soup.find('table', id='ContentPlaceHolder1_gvblock_deals')
-
-            if table:
-                print(f"✓ Found table by ID: ContentPlaceHolder1_gvblock_deals")
-                return self._parse_block_html_table(table)
-
-            print(f"⚠️  Could not find table for {table_name}")
-            return None
-
-        except Exception as e:
-            print(f"❌ Error scraping {table_name}: {e}")
-            traceback.print_exc()
-            return None
-
-    def _parse_block_html_table(self, table):
-        """Parse HTML table for BLOCK deals"""
-        try:
-            rows = table.find_all('tr')
-            if not rows:
-                return None
-
-            # Extract headers from row with class "TTHeader"
-            headers = []
-            header_row = None
-            for row in rows:
-                if 'TTHeader' in row.get('class', []):
-                    header_row = row
-                    break
-
-            if not header_row:
-                header_row = rows[0]
-
-            for th in header_row.find_all(['th', 'td']):
-                header_text = th.get_text(strip=True)
-                if header_text:
-                    headers.append(header_text)
-
-            # Extract data rows with class "TTRow"
-            data = []
-            for row in rows:
-                if 'TTRow' in row.get('class', []):
-                    cols = row.find_all('td')
-                    if cols:
-                        row_data = [col.get_text(strip=True) for col in cols]
-                        if row_data and any(row_data):
-                            data.append(row_data)
-
-            if not data:
-                return None
-
-            df = pd.DataFrame(data, columns=headers)
-
-            # Normalize column names
-            df.columns = [col.replace('Trade Price', 'Price') for col in df.columns]
-
-            print(f"✓ Parsed {len(df)} rows with {len(df.columns)} columns")
-            print(f"✓ Columns: {list(df.columns)}")
-            return df
-
-        except Exception as e:
-            print(f"❌ Error parsing HTML table: {e}")
-            traceback.print_exc()
-            return None
-
     def _nse_session(self):
         """Create/refresh a requests session with NSE cookies."""
         if not hasattr(self, '_nse_sess') or self._nse_sess is None:
@@ -527,14 +506,13 @@ class BSEScraper:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                               'AppleWebKit/537.36 (KHTML, like Gecko) '
                               'Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept': 'application/json, text/csv, */*; q=0.01',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Referer': 'https://www.nseindia.com/market-data/live-market-action/bulk-block-deals',
+                'Referer': NSE_WARMUP_URL,
             })
             for attempt in range(3):
                 try:
-                    r = s.get('https://www.nseindia.com', timeout=10)
+                    r = s.get(NSE_WARMUP_URL, timeout=20)
                     if r.status_code == 200:
                         self._nse_sess = s
                         return s
@@ -544,13 +522,16 @@ class BSEScraper:
         return self._nse_sess
 
     def nse_largedeals(self, mode="bulk_deals"):
-        """Fetch bulk/block deals from NSE API using direct requests (no nsepython)."""
-        url = 'https://www.nseindia.com/api/snapshot-capital-market-largedeal'
+        """Fetch the latest session's bulk/block deals from the NSE snapshot.
+
+        Verified complete against NSE's own CSV archive for the same session:
+        123 rows on both sides, matching row for row, nothing dropped.
+        """
         key = 'BULK_DEALS_DATA' if mode == 'bulk_deals' else 'BLOCK_DEALS_DATA'
         for attempt in range(3):
             try:
                 sess = self._nse_session()
-                r = sess.get(url, timeout=15)
+                r = sess.get(NSE_SNAPSHOT_API, timeout=15)
                 if r.status_code == 401:
                     # Cookie expired — refresh
                     self._nse_sess = None
@@ -574,77 +555,179 @@ class BSEScraper:
         return None
 
     def fetch_bse_deals_api(self, deal_type="bulk"):
-        """Fetch BSE bulk/block deals.
-        Primary: BSE JSON API.
-        Fallback: BSE HTML scraping.
+        """Latest BSE session's bulk/block deals.
+
+        Primary: the legacy per-deal-type JSON API, which always returns the
+        most recent session and ignores any date parameters.
+        Fallback: the range API over the trailing week, reduced to its newest
+        date. The week window rather than today's date is deliberate — it has
+        to behave like "latest session" on holidays and before the day's file
+        is published.
         """
-        api_map = {
-            "bulk": "https://api.bseindia.com/BseIndiaAPI/api/BulkDeal_Beta/w",
-            "block": "https://api.bseindia.com/BseIndiaAPI/api/BlockDeal_Beta/w",
-        }
-        html_map = {
-            "bulk": ("https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx",
-                     "scrape_bulk_deals"),
-            "block": ("https://www.bseindia.com/markets/equity/EQReports/block_deals.aspx",
-                      "scrape_block_deals"),
-        }
-        url = api_map.get(deal_type)
         label = f"BSE {deal_type.title()} Deals"
+        url = BSE_DAY_API.get(deal_type)
         try:
             print(f"\n{'='*100}")
-            print(f"Fetching: {label} (API)")
+            print(f"Fetching: {label} (day API)")
             print(f"URL: {url}")
             print(f"{'='*100}\n")
 
-            r = self.session.get(url, timeout=15, headers={
-                'Accept': 'application/json, text/plain, */*',
-                'Referer': 'https://www.bseindia.com/markets/equity/EQReports/bulk_deals.aspx',
-                'Origin': 'https://www.bseindia.com',
-            })
-            r.raise_for_status()
-            data = r.json()
-            rows = data.get("Table", [])
+            rows = self._bse_get(url)
             if not rows:
-                print(f"\u26a0\ufe0f  No data returned for {label}")
-                return None
-
-            df = pd.DataFrame(rows)
-            # Rename columns to match the filter expectations
-            col_map = {
-                "DEAL_DATE": "Deal Date",
-                "SCRIP_CODE": "Scrip Code",
-                "ScripName": "Scrip Name",
-                "CLIENT_NAME": "Client Name",
-                "TRANSACTION_TYPE": "Buy/Sell",
-                "QUANTITY": "Quantity",
-                "PRICE": "Price",
-            }
-            df.rename(columns=col_map, inplace=True)
-            # Drop internal columns if present
-            df.drop(columns=["SENDTOWEBSITE"], errors="ignore", inplace=True)
-            print(f"\u2713 Fetched {len(df)} {deal_type} deals from BSE API")
+                raise ValueError("day API returned no rows")
+            df = _bse_normalise(pd.DataFrame(rows))
+            print(f"\u2713 Fetched {len(df)} {deal_type} deals from BSE day API")
             print(f"\u2713 Columns: {list(df.columns)}")
             return df
-
         except Exception as e:
-            print(f"\u274c BSE API failed for {label}: {e}")
+            print(f"\u274c BSE day API failed for {label}: {e}")
 
-        # ── Fallback: BSE HTML scraping ──
-        html_url, scrape_method = html_map.get(deal_type, (None, None))
-        if html_url and scrape_method:
-            try:
-                print(f"  Trying BSE HTML scraping fallback for {label} ...")
-                scraper_fn = getattr(self, scrape_method, None)
-                if scraper_fn:
-                    df = scraper_fn(html_url, label)
-                    if df is not None and not df.empty:
-                        print(f"  \u2713 BSE {deal_type} deals: {len(df)} fetched (HTML fallback)")
-                        return df
-            except Exception as e2:
-                print(f"  \u26a0\ufe0f BSE HTML fallback also failed: {e2}")
+        try:
+            print(f"  Falling back to the BSE range API for {label} ...")
+            today = datetime.now()
+            df = self.fetch_bse_deals_range(
+                deal_type, today - pd.Timedelta(days=7), today, quiet=True)
+            if df is not None and not df.empty:
+                latest = _parse_deal_dates(df["Deal Date"]).max()
+                df = df[_parse_deal_dates(df["Deal Date"]) == latest]
+                print(f"  \u2713 BSE {deal_type} deals: {len(df)} fetched "
+                      f"(range API, {latest.date()})")
+                return df
+        except Exception as e2:
+            print(f"  \u26a0\ufe0f BSE range fallback also failed: {e2}")
 
         print(f"  \u26a0\ufe0f BSE {deal_type} deals: no data available")
         return None
+
+    def _bse_get(self, url, params=None, timeout=60):
+        """GET a BSE API and return its ``Table`` rows.
+
+        BSE answers an unknown endpoint with a 200-OK HTML error page, so a
+        body that will not parse as JSON has to be treated as a hard failure
+        rather than an empty result.
+        """
+        r = self.session.get(url, params=params, timeout=timeout, headers={
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.bseindia.com/markets/equity/EQReports/BulknBlockDeals',
+            'Origin': 'https://www.bseindia.com',
+        })
+        r.raise_for_status()
+        return r.json().get("Table", []) or []
+
+    def fetch_bse_deals_range(self, deal_type, from_date, to_date, quiet=False):
+        """BSE bulk/block deals across an inclusive date window.
+
+        One call covers the whole window: a 101-day request returned 5,009
+        bulk rows spanning every trading day in it, and the per-day counts
+        reconciled exactly against single-day queries, so there is no cap to
+        page around.
+        """
+        label = f"BSE {deal_type} {from_date:%d-%m-%Y}..{to_date:%d-%m-%Y}"
+        params = {
+            "fromdt": from_date.strftime("%d/%m/%Y"),
+            "todt": to_date.strftime("%d/%m/%Y"),
+            "type": BSE_RANGE_TYPE[deal_type],
+            "scripcode": "",
+        }
+        try:
+            rows = self._bse_get(BSE_RANGE_API, params=params)
+        except Exception as e:
+            print(f"  \u274c {label}: {e}")
+            return None
+        if not rows:
+            if not quiet:
+                print(f"  {label}: no rows")
+            return None
+
+        df = _bse_normalise(pd.DataFrame(rows))
+        if not quiet:
+            _report_coverage(df, "Deal Date", label, to_date)
+        return df
+
+    def nse_deals_range(self, mode, from_date, to_date):
+        """NSE bulk/block deals across an inclusive date window.
+
+        Always requests the CSV form. The JSON form of this same endpoint
+        silently caps at 70 rows and returns only the first day of whatever
+        window it is given, which would look like success.
+        """
+        opt = "bulk_deals" if mode == "bulk_deals" else "block_deals"
+        label = f"NSE {opt} {from_date:%d-%m-%Y}..{to_date:%d-%m-%Y}"
+        params = {
+            "optionType": opt,
+            "from": from_date.strftime("%d-%m-%Y"),
+            "to": to_date.strftime("%d-%m-%Y"),
+            "csv": "true",
+        }
+        for attempt in range(3):
+            try:
+                sess = self._nse_session()
+                r = sess.get(NSE_RANGE_API, params=params, timeout=90)
+                if r.status_code in (401, 403):
+                    self._nse_sess = None
+                    time.sleep(1 + attempt)
+                    continue
+                if r.status_code == 429:
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                # NSE ships these exports with a BOM and padded headers.
+                r.encoding = "utf-8-sig"
+                df = pd.read_csv(io.StringIO(r.text))
+                df.columns = [str(c).replace("\ufeff", "").strip()
+                              for c in df.columns]
+                df = df.rename(columns=NSE_CSV_COL_MAP)
+                if "date" not in df.columns or df.empty:
+                    print(f"  {label}: no rows")
+                    return None
+                # Warning is deferred to nse_deals_window, which can still
+                # close a tail gap from the snapshot.
+                _report_coverage(df, "date", label)
+                return df
+            except pd.errors.EmptyDataError:
+                print(f"  {label}: no rows")
+                return None
+            except Exception as e:
+                if attempt == 2:
+                    print(f"  \u274c {label}: {e}")
+        return None
+
+    def nse_deals_window(self, mode, from_date, to_date):
+        """Archive rows for the window, topped up from the live snapshot.
+
+        The archive is published with a delay, so a window ending today can
+        be missing deals the snapshot already shows. The two feeds were
+        verified to agree exactly where they overlap, so concatenating and
+        de-duplicating is safe — identical deals collapse to one row.
+        """
+        frames = []
+        arch = self.nse_deals_range(mode, from_date, to_date)
+        if arch is not None and not arch.empty:
+            frames.append(arch)
+
+        if to_date.date() >= datetime.now().date():
+            snap = self.nse_largedeals(mode=mode)
+            if snap is not None and not snap.empty:
+                snap = snap.copy()
+                snap.columns = snap.columns.str.strip()
+                frames.append(snap)
+
+        if not frames:
+            return None
+        merged = pd.concat(frames, ignore_index=True, sort=False)
+        # Both feeds ship Indian-format quantity strings ("3,81,000").
+        for col in ("qty", "watp"):
+            if col in merged.columns:
+                merged[col] = pd.to_numeric(
+                    merged[col].astype(str).str.replace(",", "", regex=False),
+                    errors="coerce")
+        before = len(merged)
+        merged = _dedupe_deals(merged)
+        if len(frames) > 1:
+            print(f"  merged archive + snapshot: {before} -> {len(merged)} "
+                  f"rows after de-duplication")
+        _report_coverage(merged, "date", f"NSE {mode} window", to_date)
+        return merged
 
     def save_to_excel(self, dataframes_dict, filename):
         """Save all dataframes to Excel with multiple sheets"""
@@ -844,6 +927,7 @@ class BSEScraper:
 
 'RITU BAPNA',
 'SANDEEP SINGH',
+'SANDEEP  SINGH',
 
 'Mukul Mahavir Agrawal',
 'SANSHI FUND-I',
@@ -860,26 +944,13 @@ class BSEScraper:
 'VALUEQUEST INVESTMENT ADVISORS PVT LTD',        # Valuequest entity
         ]
 
-        # Guard against empty NSE DataFrames (e.g. nsepython unavailable)
+        # Guard against empty NSE DataFrames (e.g. the fetch failed)
         pulled_str = f"Data pulled on {datetime.now().strftime('%d-%b-%Y %H:%M')}"
-
-        def _date_range(df):
-            if df is None or df.empty:
-                return None
-            for c in df.columns:
-                if 'date' in str(c).lower():
-                    try:
-                        vals = sorted({str(v).strip() for v in df[c].dropna() if str(v).strip()})
-                    except Exception:
-                        return None
-                    if not vals:
-                        return None
-                    return vals[0] if len(vals) == 1 else f"{vals[0]} to {vals[-1]}"
-            return None
 
         if nse_bulk_deals_df is not None and not nse_bulk_deals_df.empty:
             nse_bulk_deals_df.columns = nse_bulk_deals_df.columns.str.strip()
-            filtered_nse_bulk_df = nse_bulk_deals_df[nse_bulk_deals_df['clientName'].isin(client_names_to_filter)]
+            filtered_nse_bulk_df = _match_clients(
+                nse_bulk_deals_df, 'clientName', client_names_to_filter)
             if filtered_nse_bulk_df.empty:
                 dr = _date_range(nse_bulk_deals_df)
                 msg = f"No deals matched filter. Total deals fetched: {len(nse_bulk_deals_df)}."
@@ -892,7 +963,8 @@ class BSEScraper:
 
         if nse_block_deals_df is not None and not nse_block_deals_df.empty:
             nse_block_deals_df.columns = nse_block_deals_df.columns.str.strip()
-            filtered_nse_block_df = nse_block_deals_df[nse_block_deals_df['clientName'].isin(client_names_to_filter)]
+            filtered_nse_block_df = _match_clients(
+                nse_block_deals_df, 'clientName', client_names_to_filter)
             if filtered_nse_block_df.empty:
                 dr = _date_range(nse_block_deals_df)
                 msg = f"No deals matched filter. Total deals fetched: {len(nse_block_deals_df)}."
@@ -924,7 +996,8 @@ class BSEScraper:
 
         if bulk_df is not None and not bulk_df.empty:
             bulk_df.columns = bulk_df.columns.str.strip()
-            filtered_bulk_df = bulk_df[bulk_df['Client Name'].isin(client_names_to_filter)]
+            filtered_bulk_df = _match_clients(
+                bulk_df, 'Client Name', client_names_to_filter)
             if filtered_bulk_df.empty:
                 dr = _date_range(bulk_df)
                 msg = f"No deals matched filter. Total BSE bulk deals fetched: {len(bulk_df)}."
@@ -953,7 +1026,8 @@ class BSEScraper:
 
         if block_df is not None and not block_df.empty:
             block_df.columns = block_df.columns.str.strip()
-            filtered_block_df = block_df[block_df['Client Name'].isin(client_names_to_filter)]
+            filtered_block_df = _match_clients(
+                block_df, 'Client Name', client_names_to_filter)
             if filtered_block_df.empty:
                 dr = _date_range(block_df)
                 msg = f"No deals matched filter. Total BSE block deals fetched: {len(block_df)}."
@@ -984,6 +1058,63 @@ class BSEScraper:
         else:
             print("\n❌ No data was scraped from any endpoint.")
             print("="*100 + "\n")
+
+    def run_range(self, from_date, to_date, out_path=None):
+        """Dump every deal in an inclusive window, plus the watchlist views.
+
+        Unlike `run()` the four exchange sheets are RAW — no superstar-name
+        filter — because a historical pull is normally the input to ad-hoc
+        analysis rather than a daily alert. The four ``watchlist_*`` sheets
+        are built exactly as the daily job builds them.
+
+        Returns the sheet dict that was written, or None if nothing came back.
+        """
+        print(f"\n{'='*100}")
+        print(f"RANGE MODE  {from_date:%d-%b-%Y} .. {to_date:%d-%b-%Y}")
+        print(f"{'='*100}\n")
+
+        pulled_str = f"Data pulled on {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+        feeds = {}
+
+        print("NSE (historical CSV archive + live snapshot):")
+        feeds["nse_bulk"] = ("nse", "NSE bulk",
+                             self.nse_deals_window("bulk_deals", from_date, to_date))
+        feeds["nse_block"] = ("nse", "NSE block",
+                              self.nse_deals_window("block_deals", from_date, to_date))
+
+        print("\nBSE (range API):")
+        feeds["bse_bulk"] = ("bse", "BSE bulk",
+                             self.fetch_bse_deals_range("bulk", from_date, to_date))
+        time.sleep(1)
+        feeds["bse_block"] = ("bse", "BSE block",
+                              self.fetch_bse_deals_range("block", from_date, to_date))
+
+        sheets = {}
+        for key, (_exch, label, df) in feeds.items():
+            if df is not None and not df.empty:
+                sheets[key] = df
+            else:
+                sheets[key] = pd.DataFrame({"Status": [
+                    f"No {label} deals returned for "
+                    f"{from_date:%d-%b-%Y} to {to_date:%d-%b-%Y}. {pulled_str}."]})
+
+        for key, (exch, label, df) in feeds.items():
+            sheets[f"watchlist_{key}"] = _watchlist_sheet(
+                df, exch, label, pulled_str, _date_range)
+
+        hits = sum(len(v) for k, v in sheets.items()
+                   if k.startswith("watchlist_") and "Status" not in v.columns)
+        print(f"\n✓ Watchlist ({len(STOCK_WATCHLIST)} stocks): {hits} deal(s) matched")
+
+        if not any(k in sheets and "Status" not in sheets[k].columns
+                   for k in feeds):
+            print("\n❌ No deals returned for this window from either exchange.")
+            return None
+
+        filename = out_path or (f"BULK_BLOCK_Range_{from_date:%d%m%Y}_"
+                                f"{to_date:%d%m%Y}.xlsx")
+        self.save_to_excel(sheets, filename)
+        return sheets
 
 
 class BSEScraperWithEmail(BSEScraper):
@@ -1153,6 +1284,43 @@ tr:hover {{ background-color: #E8F0FE; }}
         print('='*80 + '\n')
 
 
+def _parse_cli_date(value):
+    """Parse a DD-MM-YYYY command-line date."""
+    try:
+        return datetime.strptime(value.strip(), "%d-%m-%Y")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected DD-MM-YYYY, got {value!r}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="NSE + BSE bulk and block deals. Daily by default; pass "
+                    "--from/--to for a historical range dump.")
+    parser.add_argument("--from", dest="from_date", type=_parse_cli_date,
+                        help="range start, DD-MM-YYYY (inclusive)")
+    parser.add_argument("--to", dest="to_date", type=_parse_cli_date,
+                        help="range end, DD-MM-YYYY (inclusive)")
+    parser.add_argument("--out", dest="out_path",
+                        help="output .xlsx path for range mode")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="daily mode: write an email preview, send nothing")
+    args = parser.parse_args(argv)
+
+    if bool(args.from_date) != bool(args.to_date):
+        parser.error("--from and --to must be given together")
+
+    if args.from_date:
+        if args.from_date > args.to_date:
+            parser.error("--from is later than --to")
+        if args.out_path and not args.out_path.lower().endswith(".xlsx"):
+            parser.error("--out must end in .xlsx")
+        # Range mode deliberately skips the email subclass: a backfill is an
+        # ad-hoc pull, not a daily alert.
+        BSEScraper().run_range(args.from_date, args.to_date, args.out_path)
+        return
+
+    BSEScraperWithEmail().run()
+
+
 if __name__ == '__main__':
-    scraper = BSEScraperWithEmail()
-    scraper.run()
+    main()

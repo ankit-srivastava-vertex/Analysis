@@ -14,9 +14,10 @@ WORKFLOW
    .NS, .BO, a manual SME-alias map, prefix-truncation heuristics, and
    yf.Search. The candidate with the most years of financials wins.
 2. Fetch financials (Balance Sheet, P&L, Cash Flow) via yfinance, then
-   universally backfill from Screener.in (HTML scrape) so even BSE-only /
-   SME / newly-listed stocks get 6-12 years of statements. Screener values
-   are in Rs. crore; converted to absolute INR (×1e7) for yfinance shape.
+   backfill from Tickertape (JSON, no login) and finally from Screener.in
+   (HTML scrape) so even BSE-only / SME / newly-listed stocks get 6-12 years
+   of statements. Both backfill sources report Rs. crore; converted to
+   absolute INR (×1e7) for yfinance shape.
 3. Compute forensic scores:
    - Beneish M-Score (earnings manipulation detection)
    - Altman Z-Score  (bankruptcy risk)
@@ -48,11 +49,17 @@ DATA SOURCES
 - yfinance          — Financial statements, historical prices, MF holders,
                       corporate actions (.NS = NSE, .BO = BSE; resolver auto-
                       picks the best variant including SME aliases).
+- Tickertape        — Middle-tier financials backfill (P&L, BS, CF, quarterly)
+                      over a public JSON API, no login. Covers ~5,900 NSE and
+                      BSE listings including SME, but only ~5-6 annual periods
+                      and 5 quarters. Tried before Screener so the common case
+                      never touches an authenticated scrape.
 - Screener.in       — Universal financials backfill (P&L, BS, CF, quarterly)
                       via HTML scrape of /company/<symbol-or-scripcode>/.
                       Works for NSE main-board, BSE main-board, and BSE-SME
-                      stocks where yfinance has 0-4 years of data. Values
-                      converted from Rs. crore to absolute INR.
+                      stocks where yfinance has 0-4 years of data. Deepest
+                      source (~12 years), so it runs last to add older years.
+                      Values converted from Rs. crore to absolute INR.
 - NSE APIs          — Credit ratings, shareholding, SAST, delivery data,
                       sector peers, concalls, investor presentations,
                       related-party filings, ESM status, promoter holding,
@@ -134,6 +141,13 @@ pd = _ensure("pandas")
 yf = _ensure("yfinance")
 requests = _ensure("requests")
 PyPDF2 = _ensure("PyPDF2")
+
+try:
+    import tickertape_client
+except Exception:
+    tickertape_client = None
+
+import screener_client
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -799,6 +813,25 @@ def fetch_financial_data(symbol):
         print("\n  NOTE: Only %d year(s) of annual data available — report will be generated" % data.years)
         print("  with whatever data could be sourced (newly-listed / SME / low-history stocks).")
 
+    # ── Tickertape backfill (no login, ~5,900 NSE+BSE listings incl. SME) ──
+    # Runs before Screener so the common case is served by an unauthenticated
+    # JSON API; Screener then only has to supply the older years Tickertape
+    # lacks. Merged with the same routine — the frames share one vocabulary.
+    tt_basis = ""
+    try:
+        tt = fetch_tickertape_financials(symbol)
+        if tt:
+            tt_basis = tt.get("reporting", "")
+            tt_years_before = data.years
+            _merge_screener_into_data(data, tt)
+            if data.years > tt_years_before:
+                print("  Tickertape backfill: years %d -> %d (added %d)" % (
+                    tt_years_before, data.years, data.years - tt_years_before))
+            elif data.years > 0:
+                print("  Tickertape backfill: rows augmented (years unchanged at %d)" % data.years)
+    except Exception as e:
+        print("  Tickertape backfill failed: %s" % e)
+
     # ── Screener.in backfill (universal source for NSE + BSE incl. SME) ──
     # Always attempt — when yfinance is rich, Screener just adds older years.
     # When yfinance is sparse (BSE-only / SME / new listing), Screener provides
@@ -813,6 +846,13 @@ def fetch_financial_data(symbol):
                     yf_years_before, data.years, data.years - yf_years_before))
             elif data.years > 0:
                 print("  Screener backfill: rows augmented (years unchanged at %d)" % data.years)
+            # Splicing a consolidated series onto a standalone one puts a step
+            # change in the history that reads as a real change in the business.
+            sc_basis = sc.get("view", "")
+            if tt_basis and sc_basis in ("consolidated", "standalone") and tt_basis != sc_basis:
+                print("  WARNING: reporting basis differs — Tickertape=%s, "
+                      "Screener=%s. Older years may not be comparable to recent ones."
+                      % (tt_basis, sc_basis))
     except Exception as e:
         print("  Screener backfill failed: %s" % e)
 
@@ -1069,7 +1109,12 @@ def fetch_esm_status(symbol):
 # ── Promoter Holding Fetcher ─────────────────────────────────────────────────
 
 def fetch_promoter_holding(symbol):
-    """Fetch promoter shareholding data from NSE."""
+    """Fetch promoter shareholding data from NSE.
+
+    Uses ``corporate-share-holdings-master``, which reports promoter and public
+    percentages per filed quarter. It carries no pledge figure, so the
+    quote-equity lookup below still runs whenever pledge is missing.
+    """
     print("\n  Fetching promoter shareholding data...")
     try:
         session = requests.Session()
@@ -1080,44 +1125,32 @@ def fetch_promoter_holding(symbol):
         })
         session.get("https://www.nseindia.com/", timeout=10)
 
-        # Try NSE corporate-shareholding API
         data = []
         try:
             resp = session.get(
-                "https://www.nseindia.com/api/corporate-shareholding",
+                "https://www.nseindia.com/api/corporate-share-holdings-master",
                 params={"symbol": symbol, "index": "equities"}, timeout=15)
             if resp.status_code == 200:
                 raw = resp.json()
+                if isinstance(raw, dict):
+                    for key in ("data", "shareholding", "results"):
+                        if isinstance(raw.get(key), list):
+                            raw = raw[key]
+                            break
                 if isinstance(raw, list):
                     for item in raw:
-                        entry = {
-                            "date": item.get("date", item.get("an_dt", "")),
-                            "promoter_pct": _parse_float(item.get("promoterAndPromoterGroup",
-                                                item.get("promoter", item.get("val1", "")))),
-                            "pledge_pct": _parse_float(item.get("pledgePercent",
-                                            item.get("promoterPledge", item.get("val4", "")))),
-                            "public_pct": _parse_float(item.get("public",
-                                            item.get("val2", ""))),
-                        }
-                        data.append(entry)
-                elif isinstance(raw, dict):
-                    for key in ["data", "shareholding", "results"]:
-                        if key in raw and isinstance(raw[key], list):
-                            for item in raw[key]:
-                                entry = {
-                                    "date": item.get("date", ""),
-                                    "promoter_pct": _parse_float(item.get("promoterAndPromoterGroup",
-                                                     item.get("promoter", ""))),
-                                    "pledge_pct": _parse_float(item.get("pledgePercent",
-                                                    item.get("promoterPledge", ""))),
-                                }
-                                data.append(entry)
-                            break
+                        data.append({
+                            "date": item.get("date", item.get("submissionDate", "")),
+                            "promoter_pct": _parse_float(item.get("pr_and_prgrp", "")),
+                            "public_pct": _parse_float(item.get("public_val", "")),
+                            "pledge_pct": float("nan"),
+                        })
         except Exception:
             pass
 
-        # Fallback: Try quote-equity for basic shareholding
-        if not data:
+        # quote-equity supplies the pledge percentage the master feed omits, and
+        # doubles as the whole source when the master feed returns nothing.
+        if not data or all(_nan(d.get("pledge_pct", float("nan"))) for d in data):
             try:
                 resp = session.get("https://www.nseindia.com/api/quote-equity",
                                    params={"symbol": symbol}, timeout=15)
@@ -1129,7 +1162,10 @@ def fetch_promoter_holding(symbol):
                                 sec_info.get("promoterPercentage", "")))
                     pledge = _parse_float(sec_info.get("promoterPledge",
                                  sec_info.get("pledgedPercentage", "")))
-                    if not _nan(prom):
+                    if data:
+                        if not _nan(pledge):
+                            data[0]["pledge_pct"] = pledge
+                    elif not _nan(prom):
                         data.append({
                             "date": "Latest",
                             "promoter_pct": prom,
@@ -1810,6 +1846,100 @@ def fetch_mutual_fund_data(symbol):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TICKERTAPE — middle-tier financials source (NSE + BSE incl. SME, no login)
+# Sits between yfinance and the Screener.in scrape. Covers ~5,900 listings with
+# no authentication and no ban risk, but only ~5-6 annual periods and 5
+# quarters, so Screener still runs afterwards to add the older years.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _tickertape_records_to_df(records):
+    """Convert normalized Tickertape records to a yfinance-shaped DataFrame.
+
+    Rows are line items, columns are period-end timestamps ordered newest-first
+    to match both yfinance and ``_screener_section_to_df``.
+    """
+    if not records:
+        return None
+    cols = {}
+    for rec in records:
+        try:
+            ts = pd.Timestamp(rec["date"])
+        except Exception:
+            continue
+        cols[ts] = rec["values"]
+    if not cols:
+        return None
+    df = pd.DataFrame(cols)
+    if df.empty:
+        return None
+    return df[sorted(df.columns, reverse=True)]
+
+
+def fetch_tickertape_financials(symbol):
+    """Fetch P&L, BS, CF and quarterly P&L from Tickertape.
+
+    Returns the same dict shape as :func:`fetch_screener_financials` so
+    :func:`_merge_screener_into_data` can consume either interchangeably.
+    Returns ``{}`` when the symbol is not on Tickertape or the client module is
+    unavailable.
+    """
+    if tickertape_client is None:
+        return {}
+    print("  [Tickertape] fetching financials...")
+
+    candidates = [symbol]
+    if symbol in _RESOLVED_TICKERS:
+        base = _RESOLVED_TICKERS[symbol][1].split(".")[0]
+        if base and base not in candidates:
+            candidates.append(base)
+
+    sid = None
+    for cand in candidates:
+        sid = tickertape_client.resolve_sid(cand)
+        if sid:
+            break
+    if not sid:
+        print("    Symbol not found in Tickertape universe")
+        return {}
+
+    try:
+        raw = tickertape_client.fetch_statements(sid)
+    except Exception as exc:
+        print("    Tickertape fetch failed: %s" % exc)
+        return {}
+
+    out = {"source_url": "https://www.tickertape.in/stocks/?s=%s" % sid,
+           "view": "tickertape"}
+    for key in ("income_annual", "balance_annual", "cashflow_annual",
+                "income_quarterly"):
+        df = _tickertape_records_to_df(raw.get(key))
+        if df is not None:
+            out[key] = df
+
+    bases = {r.get("reporting") for r in (raw.get("income_annual") or [])
+             if r.get("reporting")}
+    out["reporting"] = bases.pop() if len(bases) == 1 else "mixed"
+
+    if "income_annual" in out:
+        out["fy_labels"] = [_fy_label(c) for c in out["income_annual"].columns]
+    if "income_quarterly" in out:
+        out["q_labels"] = [c.strftime("%b-%Y") if hasattr(c, "strftime") else str(c)
+                           for c in out["income_quarterly"].columns]
+
+    if "income_annual" not in out and "balance_annual" not in out:
+        print("    Tickertape returned no statements")
+        return {}
+
+    print("    Tickertape (%s, %s): P&L=%d yrs, BS=%d yrs, CF=%d yrs, Qtr=%d" % (
+        sid, out["reporting"],
+        out["income_annual"].shape[1] if "income_annual" in out else 0,
+        out["balance_annual"].shape[1] if "balance_annual" in out else 0,
+        out["cashflow_annual"].shape[1] if "cashflow_annual" in out else 0,
+        out["income_quarterly"].shape[1] if "income_quarterly" in out else 0))
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SCREENER.IN FALLBACK — universal financials source (NSE + BSE incl. SME)
 # Used to backfill yfinance gaps. Screener publishes 6-10 years of P&L, BS, CF
 # in HTML form for every listed Indian stock (consolidated AND standalone).
@@ -1817,28 +1947,19 @@ def fetch_mutual_fund_data(symbol):
 # code that expects yfinance-shape numbers works unchanged.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _screener_session():
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0",
-        "Accept": "text/html,application/json,*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-    })
-    return s
-
-
 def _screener_resolve_url(symbol):
     """Resolve user symbol -> canonical screener.in /company/<slug>/ URL.
     Tries /company/<SYMBOL>/ directly, then any cached yfinance-resolved
     ticker (without exchange suffix), then the search API, then the
     company-info longName from the resolved yfinance Ticker.
+
+    Requests go through screener_client, so this shares one login, one pacer
+    and one cache with every other screener.in caller in the repo.
     """
     cache_key = "screener_url_%s" % symbol
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached or None
-    s = _screener_session()
 
     # Build a list of candidate query strings
     candidates = [symbol]
@@ -1858,9 +1979,9 @@ def _screener_resolve_url(symbol):
     # 1) Direct /company/<X>/ URL
     for q in candidates:
         try:
-            r = s.get("https://www.screener.in/company/%s/" % q.replace(" ", "%20"),
-                      timeout=15, allow_redirects=True)
-            if r.status_code == 200 and "Profit & Loss" in r.text:
+            r = screener_client.fetch(
+                "https://www.screener.in/company/%s/" % q.replace(" ", "%20"))
+            if r is not None and r.status_code == 200 and "Profit & Loss" in r.text:
                 url = r.url.rstrip("/") + "/"
                 _cache_set(cache_key, url)
                 return url
@@ -1870,16 +1991,14 @@ def _screener_resolve_url(symbol):
     # 2) Search API (try each candidate)
     for q in candidates:
         try:
-            r = s.get("https://www.screener.in/api/company/search/",
-                      params={"q": q, "v": 3}, timeout=15)
-            if r.status_code == 200:
-                hits = r.json() or []
-                if hits and isinstance(hits, list):
-                    rel = hits[0].get("url", "")
-                    if rel:
-                        url = "https://www.screener.in" + rel
-                        _cache_set(cache_key, url)
-                        return url
+            hits = screener_client.get_json(
+                "/api/company/search/", params={"q": q, "v": 3}, ttl_hours=0)
+            if hits and isinstance(hits, list):
+                rel = hits[0].get("url", "")
+                if rel:
+                    url = "https://www.screener.in" + rel
+                    _cache_set(cache_key, url)
+                    return url
         except Exception:
             pass
 
@@ -2053,24 +2172,14 @@ def fetch_screener_financials(symbol):
         print("    Could not resolve symbol on Screener")
         return {}
 
-    s = _screener_session()
     cache_key = "screener_html_%s" % symbol
     html = _cache_get(cache_key)
     if html is None:
         # Try consolidated first
         cons_url = url.rstrip("/") + "/consolidated/"
-        try:
-            r = s.get(cons_url, timeout=20)
-            html_cons = r.text if r.status_code == 200 else ""
-        except Exception:
-            html_cons = ""
+        html_cons = screener_client.get(cons_url, ttl_hours=0) or ""
         # Standalone
-        try:
-            r2 = s.get(url, timeout=20)
-            html_std = r2.text if r2.status_code == 200 else ""
-        except Exception:
-            html_std = ""
-        # Choose whichever has more populated data cells
+        html_std = screener_client.get(url, ttl_hours=0) or ""        # Choose whichever has more populated data cells
         cons_cells = html_cons.count('<td class="">') if html_cons else 0
         std_cells = html_std.count('<td class="">') if html_std else 0
         if cons_cells >= max(std_cells, 30):

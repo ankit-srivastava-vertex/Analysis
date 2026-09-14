@@ -16,6 +16,8 @@ A single universe is scanned:
     (default: https://www.screener.in/screens/2877406/52w-15/).
     Resolves screener slugs to .NS/.BO tickers for Angel One.
     Raw screener data is preserved as Sheet 1.
+    If screener.in is unavailable, the universe is rebuilt from Angel
+    batched quotes instead (see UNIVERSE below) and Sheet 1 records that.
 
 The breakout scan detects:
   - Horizontal resistance (fractal pivots clustered into bands)
@@ -43,7 +45,8 @@ SCORING (v4.3)
 OUTPUT (4-sheet Excel)
 ----------------------
   breakout_watchlist.xlsx:
-    Sheet 1: "Screener Data"      — Raw screener.in stock list
+    Sheet 1: "Screener Data"      — Raw screener.in stock list, or the Angel
+                                    fallback universe when screener.in failed
     Sheet 2: "Screener Breakouts" — Breakout candidates from the screener universe
     Sheet 3: "Energy Expansion"   — Observational volume/range tag
     Sheet 4: "MinerviniTrend"     — Names passing all 8 Trend Template criteria.
@@ -61,11 +64,30 @@ DATA SOURCE (OHLCV)
     - Full coverage: NSE main + NSE Emerge (SME) + BSE main + BSE SME
     - Scrip master (~25 MB) cached weekly
 
+UNIVERSE
+--------
+  Primary:  a screener.in screen (default "52w-15"), which needs a login.
+  Fallback: if screener.in fails for any reason, the universe is rebuilt from
+            Angel batched quotes (getMarketData, 50 symbols per request),
+            keeping names trading within --off-high-pct of their 52-week
+            high. Angel's 52-week levels are split/bonus adjusted. ETF and
+            fund units are removed using the NSE bhavcopy ISIN prefix, since
+            they share the EQ series with ordinary shares.
+            Coverage is all of NSE cash plus the BSE Emerge (SME) board,
+            identified by the BSE bhavcopy scrip group; pass --no-bse-sme to
+            drop it. The rest of BSE is skipped because it is overwhelmingly
+            dual listings of NSE names plus illiquid scrips that the scanner
+            has no turnover floor to reject.
+            SME names must also clear --sme-min-turnover (median 20d traded
+            value, default ₹0.5cr); NSE names are never turnover-filtered, so
+            that part of the universe is unaffected.
+
 PREREQS
 -------
   - Angel One demat account + SmartAPI app (free)
   - TOTP enabled → ANGEL_TOTP_SECRET (base32)
   - screener.in account → SCREENER_USER / SCREENER_PASS in .env
+    (optional: without it the scanner falls back to the Angel universe)
   - pip: pyotp python-dotenv pandas numpy openpyxl plotly
 
 USAGE
@@ -81,9 +103,12 @@ USAGE
 import os
 import sys
 import re
+import io
+import csv
 import glob
 import json
 import math
+import zipfile
 import hashlib
 import argparse
 import datetime
@@ -96,6 +121,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+
+import screener_client
 
 warnings.filterwarnings("ignore")
 
@@ -177,61 +204,19 @@ MINERVINI_HIGH_IDEAL_PCT = 15.0
 
 # ─── Screener.in universe fetch ──────────────────────────────────────────────
 
-def _screener_login():
-    """Log in to screener.in, return authenticated opener or None."""
-    load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
+def _screener_fetch_names(url: str) -> list:
+    """Fetch all pages of a screener.in screen, return list of (slug, name).
 
-    email = os.environ.get("SCREENER_USER", "")
-    password = os.environ.get("SCREENER_PASS", "")
-    if not email or not password:
-        print("  ERROR: SCREENER_USER / SCREENER_PASS not set in .env")
-        return None
-
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-    login_url = "https://www.screener.in/login/"
-    cj = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-
-    # GET login page for CSRF
-    req = urllib.request.Request(login_url, headers={"User-Agent": ua, "Accept": "text/html"})
-    html = opener.open(req, timeout=30).read().decode("utf-8", errors="ignore")
-    m = re.search(r'name="csrfmiddlewaretoken"\s+value="([^"]+)"', html)
-    if not m:
-        print("  ERROR: Could not find CSRF token on screener.in login page")
-        return None
-    csrf = m.group(1)
-
-    # POST login
-    data = urllib.parse.urlencode({
-        "csrfmiddlewaretoken": csrf,
-        "username": email,
-        "password": password,
-    }).encode("utf-8")
-    req2 = urllib.request.Request(login_url, data=data, headers={
-        "User-Agent": ua, "Referer": login_url,
-        "Content-Type": "application/x-www-form-urlencoded"})
-    resp = opener.open(req2, timeout=30)
-    body = resp.read().decode("utf-8", errors="ignore")
-    if "Please enter a correct" in body or "Invalid username" in body:
-        print("  ERROR: screener.in login failed — invalid credentials")
-        return None
-    print("  screener.in login OK")
-    return opener
-
-
-def _screener_fetch_names(opener, url: str) -> list:
-    """Fetch all pages of a screener.in screen, return list of stock names."""
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    Screen results are never served from cache: the universe has to reflect
+    today's market, not last week's.
+    """
     names = []
     page = 1
     while True:
         page_url = f"{url.rstrip('/')}/?page={page}" if page > 1 else url
-        req = urllib.request.Request(page_url, headers={
-            "User-Agent": ua, "Accept": "text/html",
-            "Referer": "https://www.screener.in/"})
-        html = opener.open(req, timeout=30).read().decode("utf-8", errors="ignore")
+        html = screener_client.get(page_url, ttl_hours=0)
+        if not html:
+            break
         pattern = r'href="/company/([^/]+)/[^"]*"[^>]*>\s*([^<]+?)\s*</a>'
         found = re.findall(pattern, html)
         if not found:
@@ -251,13 +236,20 @@ def fetch_screener_universe(url: str) -> list:
     Resolution strategy:
       1. screener.in URL slugs are usually NSE symbols → try SYM.NS directly
       2. Fall back to Angel scrip master name-match for any unresolved
+
+    Raises SystemExit when screener.in cannot be used at all; main() catches
+    that and falls back to the Angel-quote universe.
     """
-    opener = _screener_login()
-    if opener is None:
+    if not screener_client.have_credentials():
+        print("  ERROR: SCREENER_USER / SCREENER_PASS not set in .env")
         raise SystemExit("Cannot proceed without screener.in login")
+    if not screener_client.login_ok():
+        print("  ERROR: screener.in login failed")
+        raise SystemExit("Cannot proceed without screener.in login")
+    print("  screener.in login OK")
 
     print(f"  Fetching screen: {url}")
-    raw = _screener_fetch_names(opener, url)
+    raw = _screener_fetch_names(url)
     if not raw:
         raise SystemExit("No stocks found on screener.in (check URL or visibility)")
     print(f"  Found {len(raw)} stocks on screener.in")
@@ -283,6 +275,214 @@ def fetch_screener_universe(url: str) -> list:
     df.to_excel(out_path, index=False, engine="openpyxl")
     print(f"  Reference saved: {out_path}")
 
+    return tickers
+
+
+# ─── Fallback universe (Angel batched quotes) ──────────────────────────────
+
+# Mirrors the band of the default screener.in screen ("52w-15").
+ANGEL_UNIVERSE_OFF_HIGH_PCT = 0.15
+NSE_BHAVCOPY_URL = ("https://nsearchives.nseindia.com/content/cm/"
+                    "BhavCopy_NSE_CM_0_0_0_{date}_F_0000.csv.zip")
+BSE_BHAVCOPY_URL = ("https://www.bseindia.com/download/BhavCopy/Equity/"
+                    "BhavCopy_BSE_CM_0_0_0_{date}_F_0000.CSV")
+# BSE scrip groups that make up the SME (Emerge) board.
+BSE_SME_SERIES = {"M", "MT", "MS"}
+# SME turnover is ~54x thinner than NSE at the median (Rs 0.34cr vs Rs 18.4cr),
+# with a tail that trades a few thousand rupees a day. Rs 0.5cr admits the
+# genuinely tradeable Emerge names; the Minervini floor of Rs 1cr was measured
+# to be too tight here (it cuts SUNITATOOL at Rs 0.78cr).
+SME_MIN_TURNOVER = 5e6
+SME_TURNOVER_DAYS = 20
+
+
+def _archive_opener(referer: str = "") -> urllib.request.OpenerDirector:
+    """Cookie-aware urllib opener that the exchange archives will answer."""
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar))
+    opener.addheaders = [
+        ("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0.0.0 Safari/537.36"),
+        ("Accept", "*/*"),
+    ]
+    if referer:
+        opener.addheaders.append(("Referer", referer))
+    return opener
+
+
+def _nse_share_symbols() -> Optional[set]:
+    """NSE symbols whose ISIN marks them as ordinary shares.
+
+    ETF and fund units trade in the same EQ series as shares and are
+    indistinguishable in Angel's scrip master (both carry a blank
+    instrumenttype), but their ISIN starts with INF rather than INE/IN9.
+    Returns None when the bhavcopy cannot be read, letting the caller build an
+    unfiltered universe rather than fail outright.
+    """
+    opener = _archive_opener()
+    try:
+        # Best-effort: the archive host serves without a session cookie, and
+        # the www host answers 403 to urllib, so a failure here is not fatal.
+        opener.open("https://www.nseindia.com/", timeout=20).read()
+    except Exception:
+        pass
+
+    # The most recent session may be a holiday or not yet published.
+    for back in range(1, 8):
+        day = TODAY - datetime.timedelta(days=back)
+        url = NSE_BHAVCOPY_URL.format(date=day.strftime("%Y%m%d"))
+        try:
+            blob = opener.open(url, timeout=45).read()
+        except Exception:
+            continue
+        if not blob.startswith(b"PK"):
+            continue
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(blob))
+            reader = csv.DictReader(
+                io.TextIOWrapper(zf.open(zf.namelist()[0])))
+            out = {
+                row["TckrSymb"].strip().upper()
+                for row in reader
+                if not str(row.get("ISIN", "")).strip().upper().startswith("INF")
+            }
+        except Exception:
+            continue
+        if out:
+            print(f"  Share filter: {len(out)} NSE symbols from {day} bhavcopy")
+            return out
+    return None
+
+
+def _bse_sme_symbols() -> Optional[set]:
+    """BSE SME (Emerge) symbols, taken from the scrip group in the bhavcopy.
+
+    These names list only on BSE, so they are invisible to the NSE sweep that
+    builds the rest of the fallback universe. The bhavcopy's SctySrs column is
+    the authoritative marker (M / MT / MS); Angel's scrip master carries no
+    equivalent field. Fund units are dropped by ISIN as on the NSE side.
+    Returns None when the bhavcopy cannot be read.
+    """
+    opener = _archive_opener("https://www.bseindia.com/")
+    for back in range(1, 8):
+        day = TODAY - datetime.timedelta(days=back)
+        url = BSE_BHAVCOPY_URL.format(date=day.strftime("%Y%m%d"))
+        try:
+            blob = opener.open(url, timeout=45).read()
+        except Exception:
+            continue
+        try:
+            reader = csv.DictReader(
+                io.StringIO(blob.decode("utf-8", "replace")))
+            out = {
+                row["TckrSymb"].strip().upper()
+                for row in reader
+                if str(row.get("SctySrs", "")).strip().upper() in BSE_SME_SERIES
+                and not str(row.get("ISIN", "")).strip().upper().startswith("INF")
+            }
+        except Exception:
+            continue
+        if out:
+            print(f"  SME filter  : {len(out)} BSE SME symbols from {day} bhavcopy")
+            return out
+    return None
+
+
+def fetch_angel_universe(
+    off_high_pct: float = ANGEL_UNIVERSE_OFF_HIGH_PCT,
+    include_bse_sme: bool = True,
+    sme_min_turnover: float = SME_MIN_TURNOVER,
+) -> list:
+    """Build the universe from Angel batched quotes instead of screener.in.
+
+    Quotes every NSE cash symbol 50 at a time and keeps those trading within
+    `off_high_pct` of their 52-week high — the same criterion as the default
+    screener.in screen, but sourced from the broker feed so no login is
+    involved. Angel's 52-week levels are split/bonus adjusted, so unlike raw
+    bhavcopy prices they need no corporate-action repair.
+
+    With `include_bse_sme` the BSE Emerge board is swept as well. Those names
+    list only on BSE and would otherwise be missing entirely; the rest of BSE
+    is skipped because it is almost all dual listings of NSE names plus
+    illiquid scrips that the scanner has no turnover floor to reject. SME
+    names are additionally held to `sme_min_turnover` (median traded value
+    over SME_TURNOVER_DAYS sessions) because the board is thin enough that a
+    breakout signal there is often unfillable. NSE names are not filtered, so
+    the non-SME universe is unchanged.
+
+    Returns yfinance-style tickers ('RELIANCE.NS', 'SUNITATOOL.BO'), matching
+    the shape fetch_screener_universe returns.
+    """
+    from angel_client import angel_quotes, _load_scrip_master
+
+    master = _load_scrip_master()
+    nse = master[(master["exch_seg"] == "NSE")
+                 & (master["symbol"].astype(str).str.endswith("-EQ"))]
+    symbols = sorted({str(s).split("-", 1)[0].upper() for s in nse["symbol"]})
+    # NSE keeps dummy instruments live in the scrip master.
+    symbols = [s for s in symbols if "NSETEST" not in s]
+
+    shares = _nse_share_symbols()
+    if shares is None:
+        print("  WARNING: bhavcopy unavailable — ETF/fund units cannot be "
+              "excluded and may appear in results.")
+    else:
+        symbols = [s for s in symbols if s in shares]
+
+    requests_list = [f"{s}.NS" for s in symbols]
+
+    if include_bse_sme:
+        sme = _bse_sme_symbols()
+        if sme is None:
+            print("  WARNING: BSE bhavcopy unavailable — SME names skipped.")
+        else:
+            # Only keep the ones Angel can actually quote.
+            tradable = set(
+                master.loc[master["exch_seg"] == "BSE", "symbol"]
+                .astype(str).str.upper())
+            requests_list += [f"{s}.BO" for s in sorted(sme & tradable)]
+
+    print(f"  Quoting {len(requests_list)} symbols via Angel "
+          f"({-(-len(requests_list) // 50)} requests) ...")
+    quotes = angel_quotes(requests_list)
+    print(f"  Received {len(quotes)} quotes")
+
+    tickers = []
+    for ticker, rec in quotes.items():
+        try:
+            ltp = float(rec.get("ltp") or 0)
+            high52 = float(rec.get("52WeekHigh") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ltp <= 0 or high52 <= 0:
+            continue
+        if (high52 - ltp) / high52 <= off_high_pct:
+            tickers.append(ticker)
+
+    tickers = sorted(set(tickers))
+
+    if include_bse_sme and sme_min_turnover > 0:
+        sme_hits = [t for t in tickers if t.endswith(".BO")]
+        if sme_hits:
+            print(f"  Applying SME turnover floor "
+                  f"(median {SME_TURNOVER_DAYS}d >= "
+                  f"₹{sme_min_turnover / 1e7:.2f}cr) to {len(sme_hits)} names ...")
+            sme_ohlcv = fetch_ohlcv(sme_hits)
+            keep = set()
+            for sym, df in sme_ohlcv.items():
+                if df is None or len(df) < SME_TURNOVER_DAYS:
+                    continue
+                tail = df.tail(SME_TURNOVER_DAYS)
+                turnover = (tail["Close"] * tail["Volume"]).median()
+                if pd.notna(turnover) and turnover >= sme_min_turnover:
+                    keep.add(sym)
+            dropped = len(sme_hits) - len(keep)
+            tickers = [t for t in tickers if not t.endswith(".BO") or t in keep]
+            print(f"  Dropped {dropped} illiquid SME names, kept {len(keep)}")
+
+    print(f"  {len(tickers)} names within {off_high_pct:.0%} of the 52-week high")
     return tickers
 
 
@@ -1396,6 +1596,19 @@ def main():
     p.add_argument("--screener-url", type=str, default=SCREENER_URL_DEFAULT,
                    help="screener.in screen URL for the universe "
                         f"(default: {SCREENER_URL_DEFAULT})")
+    p.add_argument("--off-high-pct", type=float,
+                   default=ANGEL_UNIVERSE_OFF_HIGH_PCT,
+                   help="distance below the 52-week high used by the Angel "
+                        "fallback universe when screener.in is unavailable "
+                        f"(default: {ANGEL_UNIVERSE_OFF_HIGH_PCT})")
+    p.add_argument("--no-bse-sme", action="store_true",
+                   help="exclude the BSE Emerge board from the Angel fallback "
+                        "universe entirely, regardless of turnover")
+    p.add_argument("--sme-min-turnover", type=float,
+                   default=SME_MIN_TURNOVER / 1e7,
+                   help="minimum median 20d traded value, in ₹ crore, for BSE "
+                        "SME names in the Angel fallback universe; 0 disables "
+                        f"(default: {SME_MIN_TURNOVER / 1e7:.2f})")
     p.add_argument("--out-tag", type=str, default="",
                    help="suffix appended to output Excel filenames")
     p.add_argument("--minervini-universe", choices=("cache", "screener"),
@@ -1454,29 +1667,52 @@ def main():
     scr_rows = []     # breakout results from screener universe
     ohlcv_scr = {}    # candles fetched for the Screener universe
 
-    # ── Universe: Screener.in ──
+    # ── Universe: Screener.in, falling back to Angel quotes ──
     print("\n" + "=" * 70)
     print("  UNIVERSE: Screener.in")
     print("=" * 70)
+    scr_tickers = []
     try:
         scr_tickers = fetch_screener_universe(args.screener_url)
         # Save the raw screener reference DataFrame
         out_ref = os.path.join(OUTPUT_DIR, "screener_data.xlsx")
         if os.path.exists(out_ref):
             scr_raw_df = pd.read_excel(out_ref)
+    except (Exception, SystemExit) as e:
+        print(f"  Screener universe FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\n" + "=" * 70)
+        print("  UNIVERSE FALLBACK: Angel 52-week-high quotes")
+        print("=" * 70)
+        try:
+            scr_tickers = fetch_angel_universe(
+                args.off_high_pct, include_bse_sme=not args.no_bse_sme,
+                sme_min_turnover=args.sme_min_turnover * 1e7)
+            _scope = "NSE" if args.no_bse_sme else "NSE + BSE SME"
+            scr_raw_df = pd.DataFrame({
+                "Ticker": scr_tickers,
+                "Source": f"Angel 52w-high fallback, {_scope} "
+                          f"(within {args.off_high_pct:.0%})",
+            })
+        except Exception as e2:
+            print(f"  Angel universe FAILED: {e2}")
+            traceback.print_exc()
+
+    try:
         if args.max > 0:
             scr_tickers = scr_tickers[:args.max]
             print(f"  Universe capped to {len(scr_tickers)}")
         if scr_tickers:
             ohlcv_scr = fetch_ohlcv(scr_tickers, args.lookback)
-            print("\n  Scanning Screener universe ...")
+            print("\n  Scanning universe ...")
             scr_rows, scr_drops = scan(list(ohlcv_scr.keys()), ohlcv_scr,
                                        bench, effective_min_score, strict=strict)
             _print_scan_stats(scr_rows, scr_drops, effective_min_score)
         else:
-            print("  No tickers from Screener.in — skipping scan.")
+            print("  No tickers resolved — skipping scan.")
     except Exception as e:
-        print(f"  Screener universe FAILED: {e}")
+        print(f"  Universe scan FAILED: {e}")
         import traceback
         traceback.print_exc()
 

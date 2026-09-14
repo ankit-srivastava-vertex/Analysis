@@ -14,12 +14,13 @@ WORKFLOW
 --------
 1. **Data Fetch (Primary — Tickertape)**
    - POSTs to the Tickertape Screener API with filter `forInstHldng3M > 0`
-     to get all stocks where FII holding increased in the last quarter.
+     AND `mrktCapf > MIN_MARKET_CAP_CR` to get all stocks above the market-cap
+     floor where FII holding increased in the last quarter.
    - Paginates in batches of 200, with 0.3s delay between requests.
    - Fetches 19 data fields per stock (price, PE, PB, EPS, ROE, ROCE,
      D/E, revenue growth, EPS growth 5Y, 1M return vs Nifty, 200D SMA,
      pledged %, face value, market cap, FII holding %, QoQ & 6M changes).
-   - Typically returns ~3,400 stocks covering all listed equities.
+   - Returns ~900 stocks at the ₹500 Cr floor (~3,400 unfiltered).
 
 2. **Data Fetch (Fallback — Screener.in)**
    - Activates automatically if Tickertape API fails (HTTP error, timeout,
@@ -34,51 +35,100 @@ WORKFLOW
      D/E, Revenue Growth, EPS Growth 5Y, 1M Return vs Nifty, 200D SMA,
      Change 6M, Sector.
 
-3. **Classification**
-   Each stock is categorized by examining its FII holding history:
-   - "New Entry" — previous quarter FII stake was near zero (< 0.05%).
-     Detected when current FII % minus QoQ change ≈ 0.
-   - "Multi-Quarter Increasing" — FII has been increasing for 2+ quarters.
-     Detected when 6M change > 3M change and both are positive.
-     (Not available from Screener.in fallback since 6M data is missing.)
-   - "Increased Stake" — FII increased this quarter but not necessarily
-     in prior quarters. Default category for all other positive changes.
+3. **Streak History (Tickertape holdings)**
+   - The screener query only carries 3M and 6M deltas (9M/12M exist as
+     fields but are always null), giving just Q0, Q-1, Q-2. That caps a
+     derived streak at 2.
+   - To resolve longer streaks, every candidate already at 2+ is looked up
+     on `GET /stocks/holdings/<sid>`, which returns 6 quarters of the full
+     shareholding pattern; `fiPctT` is the FII percentage. The `sid` comes
+     free from the screener response (item-level `sid`, falling back to the
+     `slug` tail: '/stocks/20-microns-MICR' -> 'MICR').
+   - Cached 7 days in `.cache/tickertape_shp/`. Empty results are never
+     cached, so a transient failure is retried rather than masked for a week.
+   - 6 quarters means 5 is the deepest provable streak. Set
+     DEEP_HISTORY_VIA_SCREENER = True to top up streak-capped stocks from
+     Screener.in (~12 quarters), at the cost of ~1s/stock and ban risk.
+   - All snapshots are upserted into `.cache/fii_stake_history.csv`
+     (Ticker, AsOf, FII_Pct), which accumulates depth across runs.
 
-4. **Sorting**
-   Results are sorted by category priority (New Entry → Multi-Quarter
-   Increasing → Increased Stake), then by QoQ change descending within
-   each category.
+4. **Classification**
+   Each stock is categorized from its FII holding history:
+   - "New Entry"                — prior-quarter stake < 0.05%.
+   - "4-Quarter Increasing"     — 4+ consecutive QoQ increases.
+   - "3-Quarter Increasing"     — exactly 3.
+   - "Multi-Quarter Increasing" — exactly 2.
+   - "Increased Stake"          — this quarter only.
 
-5. **Excel Export**
-   Produces a multi-sheet Excel workbook with auto-fitted column widths:
-   - Sheet 1: "Summary" — count of stocks per category + total.
-   - Sheet 2: "FII Stake Increase" — all stocks, full detail.
-   - Sheet 3: "New_Entry" — only new FII entries.
-   - Sheet 4: "Multi-Quarter_Increasing" — only multi-quarter risers.
-   - Sheet 5: "Increased_Stake" — only single-quarter increases.
+5. **HNI / Superstar Holdings**
+   Scrapes 33 Screener.in `/people/` pages (Kacholia, Kedia, Mukul Agrawal,
+   Malabar, Steadview ...), comparing the latest two quarters per holding to
+   flag "New Entry" / "Increased" / "Decreased" / "Exited"; holdings left
+   unchanged are skipped. These pages only carry stakes above the 1% SEBI
+   disclosure threshold, so "New Entry" means "crossed 1%" and "Exited" means
+   "fell below 1%", not necessarily a full buy or sale. Requires login. Runs
+   FIRST, before any bulk fetching, so throttling later in the run cannot cost
+   this sheet. Exempt from the market-cap floor — the point of the sheet is
+   what a named investor traded, at any size.
+
+6. **Market-cap floor**
+   The FII sheets are restricted to stocks above MIN_MARKET_CAP_CR (₹500 Cr).
+   Tickertape applies it server-side; the Screener.in fallback is filtered
+   client-side. A stock whose market cap is unknown is dropped rather than
+   kept, because the floor cannot be proven for it. The HNIs sheet is not
+   filtered.
+
+7. **Sorting**
+   By category priority (New Entry -> 4Q -> 3Q -> 2Q -> 1Q), then by QoQ
+   change descending within each category.
+
+8. **Excel Export**
+   Multi-sheet workbook with auto-fitted column widths. The FII sheets are
+   restricted to Market Cap > ₹500 Cr and are EXCLUSIVE — each stock appears
+   in exactly one bucket:
+   - "Summary"              — classification rules + per-sheet counts.
+   - "New_Entry"            — Category = New Entry AND FII stake > 1%
+                              (the >1% floor drops thousands of sub-0.05%
+                              rounding-noise entries).
+   - "1-Quarter_Increasing" — Category = Increased Stake.
+   - "2-Quarter_Increasing" — Streak = 2.
+   - "3-Quarter_Increasing" — Streak = 3.
+   - "4-Quarter_Increasing" — Streak >= 4.
+   - "HNIs"                 — superstar buys and sells, when the scrape
+                              succeeded. No market-cap filter.
 
 DATA SOURCES
 ------------
-Primary:
-- Tickertape Screener API — https://api.tickertape.in/screener/query
-  Undocumented public JSON API (stable 3+ years). Covers all NSE/BSE
-  listed equities including SME. Provides latest quarterly shareholding
-  pattern data as filed with exchanges. No authentication required.
-  Note: Premium fields (RSI, 200D EMA) return 403; 200D SMA is used instead.
+Primary (Tickertape, no authentication):
+- Screener query — https://api.tickertape.in/screener/query
+  Undocumented public JSON API. Covers all NSE/BSE listed equities including
+  SME (~5,900 tickers; ~2,000 above ₹500 Cr). Note: `forInstHldng9M` /
+  `forInstHldng12M` are accepted but return null for every stock; only 3M and
+  6M are real. Premium fields (RSI, 200D EMA) return 403; 200D SMA is used
+  instead. `count` is not capped, so the full universe fits in one request.
+- Holdings history — https://api.tickertape.in/stocks/holdings/<sid>
+  6 quarters of shareholding pattern per stock. ~0.07s/call, no rate limit
+  observed.
 
-Fallback (if Tickertape fails):
-- Screener.in saved screen — https://www.screener.in/screens/3192887/fii-0/
-  Query: "Change in FII holding > 0". Requires login (credentials from
-  .env: SCREENER_USER / SCREENER_PASS). Returns ~960 stocks across ~20
-  HTML pages. Fewer columns; no sector info or 6M holding change.
+Screener.in (requires login; SCREENER_USER / SCREENER_PASS in .env):
+- HNI pages — https://www.screener.in/people/<id>/<slug>/
+  33 hardcoded investors. No Tickertape equivalent exists.
+- Deep shareholding history — https://www.screener.in/company/<ticker>/
+  ~12 quarters, public. Opt-in only (DEEP_HISTORY_VIA_SCREENER); bans by IP
+  at the TCP level on burst traffic, so requests are spaced >=1s.
+- Fallback screen — https://www.screener.in/screens/3192887/fii-0/
+  Used only if the Tickertape screener query fails outright. ~960 stocks,
+  fewer columns (no PB, D/E, 6M change, sector).
 
-OUTPUT COLUMNS (21)
--------------------
+OUTPUT COLUMNS
+--------------
   Stock Name | Ticker | Price (₹) | Market Cap (₹ Cr) | Face Value |
   PE (TTM) | PB | EPS (₹) | ROE (%) | ROCE (%) | D/E |
   Revenue Growth (%) | EPS Growth 5Y (%) | 1M Return vs Nifty (%) |
-  200D SMA | Pledged (%) | FII Stake (%) | Change QoQ (pp) |
-  Change 6M (pp) | Category | Sector
+  200D SMA | Pledged (%) | No. of Shareholders | FII Stake (%) |
+  Change QoQ (pp) | Change 6M (pp) | Change 9M (pp) | Change 12M (pp) |
+  Streak (Qtrs) | Category | Sector
+  (9M/12M are derived from the accumulated history CSV, not from the API.)
 
 USAGE
 -----
@@ -94,7 +144,7 @@ CADENCE
 
 ENVIRONMENT
 -----------
-.env file (required only for Screener.in fallback):
+.env file (required for the HNI sheet and the Screener.in fallback):
     SCREENER_USER='your_email@example.com'
     SCREENER_PASS='your_password'
 
@@ -108,11 +158,14 @@ import sys
 import time
 import argparse
 import datetime
+import json
 import re
 
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
+
+import screener_client
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -120,6 +173,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_URL = "https://api.tickertape.in/screener/query"
 PAGE_SIZE = 200          # max results per API call
 RATE_LIMIT_DELAY = 0.3   # seconds between paginated requests
+
+# Market-cap floor (₹ Cr) applied to every sheet in the workbook. Stocks whose
+# market cap is unknown are dropped too: the floor cannot be proven for them.
+MIN_MARKET_CAP_CR = 500
 
 HEADERS = {
     "User-Agent": (
@@ -206,42 +263,34 @@ def _fetch_all(session, match, sort_by="forInstHldng3M", sort_order=-1):
     return all_results
 
 
+def _apply_mcap_filter(df, label="rows"):
+    """Drop rows below MIN_MARKET_CAP_CR. Unknown market cap is treated as fail."""
+    col = "Market Cap (₹ Cr)"
+    if df.empty or col not in df.columns:
+        return df
+    before = len(df)
+    keep = pd.to_numeric(df[col], errors="coerce") > MIN_MARKET_CAP_CR
+    out = df[keep].reset_index(drop=True)
+    dropped = before - len(out)
+    if dropped:
+        print(f"  Market cap filter (> ₹{MIN_MARKET_CAP_CR} Cr): "
+              f"dropped {dropped} of {before} {label}")
+    return out
+
+
 # ─── Screener.in fallback ────────────────────────────────────────────────────
 
 SCREENER_LOGIN_URL = "https://www.screener.in/login/"
 SCREENER_SCREEN_URL = "https://www.screener.in/screens/3192887/fii-0/"
-SCREENER_RATE_DELAY = 0.5  # seconds between page requests
 
 
 def _load_screener_creds():
-    """Load Screener.in credentials from .env file."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
-    except ImportError:
-        pass
-    user = (os.getenv("SCREENER_USER") or "").strip("'\" ")
-    pwd = (os.getenv("SCREENER_PASS") or "").strip("'\" ")
-    if not user or not pwd:
+    """Load Screener.in credentials. Kept as a thin wrapper so callers can still
+    report "credentials missing" before any network work is attempted; the
+    actual login is owned by screener_client."""
+    if not screener_client.have_credentials():
         return None, None
-    return user, pwd
-
-
-def _screener_login(session, user, pwd):
-    """Login to Screener.in, return True on success."""
-    r = session.get(SCREENER_LOGIN_URL, timeout=15)
-    soup = BeautifulSoup(r.text, "html.parser")
-    csrf_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
-    if not csrf_input:
-        return False
-    csrf = csrf_input["value"]
-    r2 = session.post(
-        SCREENER_LOGIN_URL,
-        data={"csrfmiddlewaretoken": csrf, "username": user, "password": pwd},
-        headers={"Referer": SCREENER_LOGIN_URL},
-        timeout=15,
-    )
-    return "/login/" not in r2.url
+    return "configured", "configured"
 
 
 def _parse_screener_number(text):
@@ -255,14 +304,16 @@ def _parse_screener_number(text):
         return None
 
 
-def _scrape_screener_page(session, page_num):
-    """Scrape one page of the saved Screener.in screen. Returns list of row dicts."""
-    url = SCREENER_SCREEN_URL
-    params = {"page": page_num} if page_num > 1 else {}
-    r = session.get(url, params=params, timeout=20)
-    if r.status_code != 200:
+def _scrape_screener_page(page_num):
+    """Scrape one page of the saved Screener.in screen. Returns list of row dicts.
+
+    Never cached: the screen has to reflect the latest filings.
+    """
+    params = {"page": page_num} if page_num > 1 else None
+    text = screener_client.get(SCREENER_SCREEN_URL, ttl_hours=0, params=params)
+    if not text:
         return []
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(text, "html.parser")
     table = soup.find("table")
     if not table:
         return []
@@ -333,17 +384,8 @@ def fetch_fii_stake_data_screener():
         print("  Screener.in credentials not found in .env — skipping fallback.")
         return pd.DataFrame()
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-    })
-
     print("  Logging in to Screener.in ...")
-    if not _screener_login(session, user, pwd):
+    if not screener_client.login_ok():
         print("  Screener.in login failed.")
         return pd.DataFrame()
     print("  Login successful.")
@@ -353,7 +395,7 @@ def fetch_fii_stake_data_screener():
     first_page_count = None
     while True:
         print(f"  Fetching page {page} ...", end="", flush=True)
-        rows = _scrape_screener_page(session, page)
+        rows = _scrape_screener_page(page)
         print(f" {len(rows)} rows")
         if not rows:
             break
@@ -364,7 +406,6 @@ def fetch_fii_stake_data_screener():
         elif len(rows) < first_page_count:
             break
         page += 1
-        time.sleep(SCREENER_RATE_DELAY)
 
     if not all_rows:
         print("  No data from Screener.in.")
@@ -409,7 +450,16 @@ def fetch_fii_stake_data_screener():
 HISTORY_CSV = os.path.join(SCRIPT_DIR, ".cache", "fii_stake_history.csv")
 SHP_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache", "screener_shp")
 SHP_CACHE_TTL_DAYS = 7
-SHP_REQUEST_DELAY = 0.4
+# Request pacing for screener.in now lives in screener_client, which holds every
+# caller in this repo to one shared, process-wide gap.
+
+HOLDINGS_URL = "https://api.tickertape.in/stocks/holdings/{sid}"
+HOLDINGS_CACHE_DIR = os.path.join(SCRIPT_DIR, ".cache", "tickertape_shp")
+HOLDINGS_REQUEST_DELAY = 0.1
+# Tickertape returns 6 quarters, so 5 is the deepest streak it can prove.
+HOLDINGS_MAX_STREAK = 5
+# screener.in carries ~12 quarters but bans on burst traffic; opt-in only.
+DEEP_HISTORY_VIA_SCREENER = False
 
 _QTR_MONTH = {"Mar": (3, 31), "Jun": (6, 30), "Sep": (9, 30), "Dec": (12, 31)}
 
@@ -427,13 +477,89 @@ def _parse_qtr_label(label):
         return None
 
 
-def _fetch_screener_shp(ticker, session):
+def _sid_from_slug(slug):
+    """Extract the Tickertape security id from a slug ('/stocks/20-microns-MICR' → 'MICR')."""
+    if not slug:
+        return None
+    tail = str(slug).rstrip("/").rsplit("/", 1)[-1]
+    return tail.rsplit("-", 1)[-1] if "-" in tail else tail or None
+
+
+def _snap_to_quarter_end(d):
+    """Map a filing date onto the calendar quarter end it belongs to.
+
+    Tickertape occasionally reports an off-cycle date (e.g. 2025-10-31 for an
+    interim filing); the streak logic keys strictly on quarter ends.
+    """
+    mm, dd = _QTR_MONTH[("Mar", "Jun", "Sep", "Dec")[(d.month - 1) // 3]]
+    return datetime.date(d.year, mm, dd)
+
+
+def _fetch_tickertape_holdings(sid, session):
+    """Quarterly FII shareholding history for one stock, from Tickertape.
+
+    Returns dict {quarter_end_date: fii_pct} (6 quarters). Cached on disk for
+    7 days. Empty results are NOT cached — a transient failure and a genuine
+    "no FII" both look like {}, and caching the former hides the stock for a
+    week.
+    """
+    if not sid:
+        return {}
+    cache_path = os.path.join(HOLDINGS_CACHE_DIR, f"{sid}.json")
+    if os.path.exists(cache_path):
+        age = time.time() - os.path.getmtime(cache_path)
+        if age < SHP_CACHE_TTL_DAYS * 86400:
+            try:
+                with open(cache_path) as f:
+                    raw = json.load(f)
+                return {datetime.date.fromisoformat(k): float(v)
+                        for k, v in raw.items()}
+            except Exception:
+                pass
+
+    out = {}
+    try:
+        r = session.get(HOLDINGS_URL.format(sid=sid), timeout=15)
+        if r.status_code == 200:
+            exact = set()
+            for entry in (r.json().get("data") or []):
+                raw_date = (entry.get("date") or "")[:10]
+                val = (entry.get("data") or {}).get("fiPctT")
+                if not raw_date or val is None:
+                    continue
+                try:
+                    d = datetime.date.fromisoformat(raw_date)
+                except ValueError:
+                    continue
+                qe = _snap_to_quarter_end(d)
+                # A true quarter-end filing always beats a snapped interim one.
+                if d == qe:
+                    exact.add(qe)
+                elif qe in exact:
+                    continue
+                out[qe] = float(val)
+    except Exception:
+        return {}
+
+    if out:
+        try:
+            os.makedirs(HOLDINGS_CACHE_DIR, exist_ok=True)
+            with open(cache_path, "w") as f:
+                json.dump({k.isoformat(): v for k, v in out.items()}, f)
+        except Exception:
+            pass
+    return out
+
+
+def _fetch_screener_shp(ticker):
     """Fetch full quarterly FII shareholding history for a ticker from Screener.in.
 
-    Returns dict: {quarter_end_date: fii_pct}. Cached on disk for 7 days.
-    No login required — company pages are public.
+    Returns dict: {quarter_end_date: fii_pct}. The parsed result is cached on
+    disk for 7 days; the raw HTML is not, because caching a 200KB company page
+    per ticker would dwarf the data extracted from it. Deeper than Tickertape
+    (~12 quarters vs 6) but heavy, so this is opt-in via
+    DEEP_HISTORY_VIA_SCREENER. Pacing is handled by screener_client.
     """
-    import json
     if not ticker:
         return {}
     cache_path = os.path.join(SHP_CACHE_DIR, f"{ticker}.json")
@@ -450,10 +576,10 @@ def _fetch_screener_shp(ticker, session):
     out = {}
     for path in (f"/company/{ticker}/consolidated/", f"/company/{ticker}/"):
         try:
-            r = session.get(f"https://www.screener.in{path}", timeout=15)
-            if r.status_code != 200:
+            text = screener_client.get(f"https://www.screener.in{path}", ttl_hours=0)
+            if not text:
                 continue
-            soup = BeautifulSoup(r.text, "html.parser")
+            soup = BeautifulSoup(text, "html.parser")
             sec = soup.find(id="quarterly-shp")
             if not sec:
                 continue
@@ -488,12 +614,13 @@ def _fetch_screener_shp(ticker, session):
         except Exception:
             continue
 
-    try:
-        os.makedirs(SHP_CACHE_DIR, exist_ok=True)
-        with open(cache_path, "w") as f:
-            json.dump({k.isoformat(): v for k, v in out.items()}, f)
-    except Exception:
-        pass
+    if out:
+        try:
+            os.makedirs(SHP_CACHE_DIR, exist_ok=True)
+            with open(cache_path, "w") as f:
+                json.dump({k.isoformat(): v for k, v in out.items()}, f)
+        except Exception:
+            pass
     return out
 
 
@@ -629,13 +756,16 @@ def fetch_fii_stake_data():
     Primary: Tickertape Screener API.
     Fallback: Screener.in saved screen (if Tickertape fails).
 
+    Only stocks above MIN_MARKET_CAP_CR are returned. Tickertape applies that
+    floor server-side; the Screener.in fallback is filtered here instead.
+
     Returns a pandas DataFrame with classified FII stake changes.
     """
     # ── Primary: Tickertape ──
     try:
         df = _fetch_fii_tickertape()
         if not df.empty:
-            return df
+            return _apply_mcap_filter(df, "stocks")
     except Exception as e:
         print(f"  Tickertape failed: {e}")
 
@@ -645,7 +775,7 @@ def fetch_fii_stake_data():
         df = fetch_fii_stake_data_screener()
         if not df.empty:
             print(f"  Screener.in returned {len(df)} records.")
-            return df
+            return _apply_mcap_filter(df, "stocks")
     except Exception as e:
         print(f"  Screener.in fallback also failed: {e}")
 
@@ -658,8 +788,13 @@ def _fetch_fii_tickertape():
 
     print("Fetching stocks where FII increased stake (last quarter) ...")
     print("  Source: Tickertape Screener API")
-    # Filter: FII holding change in last 3 months > 0
-    match = {"forInstHldng3M": {"g": 0}}
+    # Filter: FII holding rose over the last 3 months, above the market-cap floor.
+    # Applying the floor server-side keeps the streak-enrichment loop small.
+    match = {
+        "forInstHldng3M": {"g": 0},
+        "mrktCapf": {"g": MIN_MARKET_CAP_CR},
+    }
+    print(f"  Market cap floor: > ₹{MIN_MARKET_CAP_CR} Cr")
     results = _fetch_all(session, match)
     print(f"  Fetched {len(results)} stock records.")
 
@@ -677,6 +812,7 @@ def _fetch_fii_tickertape():
         name = info.get("name", "")
         ticker = info.get("ticker", "")
         sector = info.get("sector", "")
+        sid = item.get("sid") or _sid_from_slug(stock.get("slug"))
 
         fii_pct = ratios.get("forInstHldng", 0) or 0
         chg_3m = ratios.get("forInstHldng3M", 0) or 0
@@ -728,6 +864,7 @@ def _fetch_fii_tickertape():
             "Sector": sector,
             "_raw": {
                 "ticker": ticker,
+                "sid": sid,
                 "fii_pct": fii_pct,
                 "chg_3m": chg_3m,
                 "chg_6m": chg_6m,
@@ -768,38 +905,44 @@ def _enrich_with_streaks(df):
     history = _load_history()
     merged = _merge_history(history, new_snaps)
 
+    df["_sid"] = df["_raw"].apply(lambda r: r.get("sid"))
+
     # First-pass streak (using only Tickertape-derived snapshots + prior history)
     streaks = _build_streak_lookup(merged, asof_q0)
     df["Streak (Qtrs)"] = df["Ticker"].map(streaks).fillna(0).astype(int)
 
-    # For candidates with streak >= 2, fetch full quarterly FII history from
-    # Screener.in to determine whether the streak actually extends to 3 or 4+.
+    # For candidates with streak >= 2, fetch full quarterly FII history to
+    # determine whether the streak actually extends further.
     extend_targets = (
-        df.loc[df["Streak (Qtrs)"] >= 2, "Ticker"].dropna().unique().tolist()
+        df.loc[df["Streak (Qtrs)"] >= 2, ["Ticker", "_sid"]]
+        .dropna(subset=["Ticker"]).drop_duplicates("Ticker")
+        .itertuples(index=False, name=None)
     )
+    extend_targets = [(t, s) for t, s in extend_targets if s]
     if extend_targets:
         print(
-            f"  Fetching Screener.in shareholding history for "
+            f"  Fetching Tickertape shareholding history for "
             f"{len(extend_targets)} multi-quarter candidates ..."
         )
         shp_session = requests.Session()
-        shp_session.headers.update({"User-Agent": HEADERS["User-Agent"]})
+        shp_session.headers.update({"User-Agent": HEADERS["User-Agent"],
+                                    "Accept": "application/json"})
         extra_snaps = []
         cached_hits = 0
-        for i, ticker in enumerate(extend_targets, 1):
-            cache_path = os.path.join(SHP_CACHE_DIR, f"{ticker}.json")
+        for i, (ticker, sid) in enumerate(extend_targets, 1):
+            cache_path = os.path.join(HOLDINGS_CACHE_DIR, f"{sid}.json")
             was_cached = (
                 os.path.exists(cache_path)
                 and (time.time() - os.path.getmtime(cache_path)) < SHP_CACHE_TTL_DAYS * 86400
             )
-            shp = _fetch_screener_shp(ticker, shp_session)
+            shp = _fetch_tickertape_holdings(sid, shp_session)
             if was_cached:
                 cached_hits += 1
             else:
-                time.sleep(SHP_REQUEST_DELAY)
+                time.sleep(HOLDINGS_REQUEST_DELAY)
             for qe, v in shp.items():
                 extra_snaps.append((ticker, qe, v))
-            if i % 50 == 0 or i == len(extend_targets):
+            if i % 100 == 0 or i == len(extend_targets):
                 print(f"    {i}/{len(extend_targets)}  (cache hits: {cached_hits})")
         if extra_snaps:
             merged = _merge_history(
@@ -808,6 +951,28 @@ def _enrich_with_streaks(df):
             )
             streaks = _build_streak_lookup(merged, asof_q0)
             df["Streak (Qtrs)"] = df["Ticker"].map(streaks).fillna(0).astype(int)
+
+        # Stocks pinned at Tickertape's 6-quarter ceiling may run deeper;
+        # only screener.in can prove it, and only if explicitly enabled.
+        if DEEP_HISTORY_VIA_SCREENER:
+            capped = df.loc[df["Streak (Qtrs)"] >= HOLDINGS_MAX_STREAK,
+                            "Ticker"].dropna().unique().tolist()
+            if capped:
+                print(f"  Deep history via Screener.in for {len(capped)} "
+                      f"streak-capped stocks ...")
+                deep_snaps = []
+                for ticker in capped:
+                    for qe, v in _fetch_screener_shp(ticker).items():
+                        deep_snaps.append((ticker, qe, v))
+                if deep_snaps:
+                    merged = _merge_history(
+                        merged,
+                        pd.DataFrame(deep_snaps,
+                                     columns=["Ticker", "AsOf", "FII_Pct"]),
+                    )
+                    streaks = _build_streak_lookup(merged, asof_q0)
+                    df["Streak (Qtrs)"] = (
+                        df["Ticker"].map(streaks).fillna(0).astype(int))
 
     _save_history(merged)
 
@@ -832,7 +997,7 @@ def _enrich_with_streaks(df):
         ),
         axis=1,
     )
-    df = df.drop(columns=["_raw"])
+    df = df.drop(columns=["_raw", "_sid"])
     print(
         f"  History snapshots stored: {len(merged)} "
         f"({merged['Ticker'].nunique()} tickers, "
@@ -847,40 +1012,58 @@ def _enrich_with_streaks(df):
 
 # Logged-in Screener.in "People" pages. Each page lists a single investor's
 # quarter-by-quarter stake in every company they hold >1%. We compare the
-# latest two quarters per row to flag "New Entry" / "Increased".
+# latest two quarters per row to flag "New Entry" / "Increased" / "Decreased" /
+# "Exited".  Only stakes above the 1% disclosure threshold appear at all.
+HNI_PAGE_TTL_HOURS = 12  # these pages only change when a filing lands
 HNI_PEOPLE_URLS = [
     "https://www.screener.in/people/127736/ashish-kacholia/",
     "https://www.screener.in/people/148535/bengal-finance-and-investment-pvt-ltd/",
+    "https://www.screener.in/people/64/bengal-finance-and-ninvestment-private-limited/",
+    "https://www.screener.in/people/19205/suryavanshi-commotrade-private-limited/",
+    "https://www.screener.in/people/133451/bengal-finance-investment-p-ltd/",
+    "https://www.screener.in/people/153475/rba-finance-investment-co-partnership-firm/",
+    "https://www.screener.in/people/2350/suresh-kumar-agarwal/",
     "https://www.screener.in/people/163158/vijay-kishanlal-kedia/",
+    "https://www.screener.in/people/134160/vijay-kedia/",
+    "https://www.screener.in/people/7379/kedia-secuirities-private-limited/",
     "https://www.screener.in/people/123054/venkata-nagaraju-padala/",
     "https://www.screener.in/people/33390/rohan-gupta/",
     "https://www.screener.in/people/21712/ajay-kumar-aggarwal/",
     "https://www.screener.in/people/71485/nibe-ganesh-ramesh/",
     "https://www.screener.in/people/108142/laroia-mona/",
     "https://www.screener.in/people/174015/india-equity-fund-1/",
-    "https://www.screener.in/people/168570/sanshi-fund-i/",
     "https://www.screener.in/people/131338/shalu-aggarwal/",
     "https://www.screener.in/people/170071/akash-bhanshali/",
+    "https://www.screener.in/people/30960/madhuri-madhusudan-kela/",
+    "https://www.screener.in/people/86419/madhusudhan-murlidhar-kela/",
+    "https://www.screener.in/people/32876/madhusudan-murlidhar-kela/",
+    "https://www.screener.in/people/154329/mahi-madhusudan-kela/",
+    "https://www.screener.in/people/35415/cohesion-mk-best-ideas-sub-trust/",
     "https://www.screener.in/people/150091/singularity-equity-fund-i/",
     "https://www.screener.in/people/126373/chartered-finance-leasing-limited/",
     "https://www.screener.in/people/162189/vq-fastercap-fund/",
     "https://www.screener.in/people/21426/steadview-capital-mauritius-limited/",
     "https://www.screener.in/people/141932/valuequest-s-c-a-l-e-fund/",
+    "https://www.screener.in/people/6066/asha-mukul-agrawal/",
+    "https://www.screener.in/people/168570/sanshi-fund-i/",
     "https://www.screener.in/people/98486/ms-param-capital/",
     "https://www.screener.in/people/127829/mukul-mahavir-agrawal/",
     "https://www.screener.in/people/116773/bijal-pritesh-vora/",
     "https://www.screener.in/people/180470/ritu-bapna/",
+    "https://www.screener.in/people/119660/manish-grover/",
+    "https://www.screener.in/people/78663/nalanda-india-fund-limited/",
+    "https://www.screener.in/people/73618/nalanda-india-equity-fund-limited/",
+    "https://www.screener.in/people/23593/sandeep-singh/",
     "https://www.screener.in/people/161937/reina-ra-jaisinghani/",
     "https://www.screener.in/people/78665/kunjal-lalitkumar-patel/",
-    "https://www.screener.in/people/64/bengal-finance-and-ninvestment-private-limited/",
     "https://www.screener.in/people/679/ajay-upadhyaya/",
-    "https://www.screener.in/people/2350/suresh-kumar-agarwal/",
-    "https://www.screener.in/people/134160/vijay-kedia/",
     "https://www.screener.in/people/392/vanjana-sundar-iyer/",
     "https://www.screener.in/people/126875/malabar-india-fund-limited/",
-    "https://www.screener.in/people/150899/nav-capital-vcc-nav-capital-emerging-star-fund/",
-    "https://www.screener.in/people/169381/mansi-share-and-stock-broking-private-limited/",
-    "https://www.screener.in/people/74548/amansa-holdings-private-limited/",
+    "https://www.screener.in/people/131169/goldman-sachs-funds-goldman-sachs-asia-equity-portfolio/",
+    "https://www.screener.in/people/129685/goldman-sachc-funds-goldman-sachs-india-equity-portfolio/",
+    "https://www.screener.in/people/19335/goldman-sachs-funds-goldman-sachsindia-equity-p/",
+    "https://www.screener.in/people/98375/goldman-sachs-investments-mauritius-i-limited/",
+    "https://www.screener.in/people/181599/goldman-sachs-bank-europe-se/",
     "https://www.screener.in/people/149987/massachusetts-institute-of-techno/",
 ]
 
@@ -904,22 +1087,27 @@ def _extract_ticker_from_href(href):
     return m.group(1) if m else ""
 
 
-def _fetch_hni_page(session, url):
-    """Fetch one Screener.in /people/<id>/ page. Returns list of dicts where
-    the investor newly entered OR increased stake in the latest quarter."""
+def _fetch_hni_page(url):
+    """Fetch one Screener.in /people/<id>/ page. Returns a list of dicts, one per
+    holding the investor moved between the last two quarters on the page, flagged
+    "New Entry", "Increased", "Decreased" or "Exited". Unchanged holdings are
+    skipped.
+
+    Caveat on "Exited": these pages only list stakes above the 1% disclosure
+    threshold, so an exit here means "fell below 1%", not necessarily a full sale
+    — and a company that has not yet filed its latest shareholding will look the
+    same as one that was sold.
+
+    Cached for HNI_PAGE_TTL_HOURS. The page only moves when a shareholding
+    filing lands, so a same-day repeat run costs no screener.in requests.
+    """
     rows_out = []
     try:
-        r = None
-        for attempt in range(3):
-            r = session.get(url, timeout=20)
-            if r.status_code == 429:
-                time.sleep(3 * (attempt + 1))
-                continue
-            break
-        if r is None or r.status_code != 200:
-            print(f"    {url} -> HTTP {r.status_code if r else 'no-response'}")
+        text = screener_client.get(url, ttl_hours=HNI_PAGE_TTL_HOURS)
+        if not text:
+            print(f"    {url} -> no response")
             return rows_out
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(text, "html.parser")
 
         h1 = soup.find("h1")
         hni_name = h1.get_text(strip=True) if h1 else url.rstrip("/").rsplit("/", 1)[-1]
@@ -954,23 +1142,29 @@ def _fetch_hni_page(session, url):
             vals = [c.get_text(strip=True) for c in cells[1:]]
             if len(vals) < 2:
                 continue
-            latest = _parse_pct(vals[-1])
-            prev = _parse_pct(vals[-2])
-            if latest is None or latest == 0:
-                continue  # not held in latest quarter
-            if prev is None or prev == 0:
+            # A blank cell means "not disclosed above 1%", which is how both an
+            # entry and an exit show up on these pages.
+            latest = _parse_pct(vals[-1]) or 0.0
+            prev = _parse_pct(vals[-2]) or 0.0
+            if latest == 0 and prev == 0:
+                continue  # not held in either quarter
+            if prev == 0:
                 flag = "New Entry"
+            elif latest == 0:
+                flag = "Exited"
             elif latest > prev:
                 flag = "Increased"
+            elif latest < prev:
+                flag = "Decreased"
             else:
-                continue  # held but flat / decreased
+                continue  # held, unchanged
             rows_out.append({
                 "HNI": hni_name,
                 "Stock Name": stock_name,
                 "Ticker": ticker,
                 "Latest %": latest,
-                "Previous %": prev if prev is not None else 0.0,
-                "Change (pp)": round(latest - (prev or 0.0), 2),
+                "Previous %": prev,
+                "Change (pp)": round(latest - prev, 2),
                 "Flag": flag,
                 "Latest Quarter": latest_qtr,
                 "Previous Quarter": prev_qtr,
@@ -981,39 +1175,45 @@ def _fetch_hni_page(session, url):
 
 
 def fetch_hni_holdings():
-    """Login to Screener.in, scrape each HNI /people/ page, return a DataFrame
-    of new-entry / increased holdings in the latest quarter."""
+    """Login to Screener.in, scrape each HNI /people/ page, return a DataFrame of
+    every holding that moved in the latest quarter — bought (New Entry,
+    Increased) and sold (Decreased, Exited).
+
+    Deliberately exempt from MIN_MARKET_CAP_CR: the point of this sheet is what
+    a named investor traded, at any size.
+    """
     user, pwd = _load_screener_creds()
     if not user:
         print("HNI scrape skipped: Screener.in credentials missing in .env")
         return pd.DataFrame()
 
-    session = requests.Session()
-    session.headers.update({"User-Agent": HEADERS["User-Agent"]})
     print(f"\nFetching HNI / superstar holdings ({len(HNI_PEOPLE_URLS)} investors)...")
-    if not _screener_login(session, user, pwd):
+    if not screener_client.login_ok():
         print("  Screener.in login failed; HNI sheet skipped.")
         return pd.DataFrame()
 
     all_rows = []
     for i, url in enumerate(HNI_PEOPLE_URLS, 1):
-        rows = _fetch_hni_page(session, url)
+        rows = _fetch_hni_page(url)
         slug = url.rstrip("/").rsplit("/", 1)[-1]
-        print(f"  [{i}/{len(HNI_PEOPLE_URLS)}] {slug[:40]:40s} +{len(rows)} buys")
+        print(f"  [{i}/{len(HNI_PEOPLE_URLS)}] {slug[:40]:40s} {len(rows)} moves")
         all_rows.extend(rows)
-        time.sleep(SCREENER_RATE_DELAY)
 
     if not all_rows:
         return pd.DataFrame()
 
     df = pd.DataFrame(all_rows)
-    flag_order = {"New Entry": 0, "Increased": 1}
+    flag_order = {"New Entry": 0, "Increased": 1, "Decreased": 2, "Exited": 3}
     df["_o"] = df["Flag"].map(flag_order).fillna(99).astype(int)
-    df = df.sort_values(["_o", "Change (pp)"], ascending=[True, False])
-    df = df.drop(columns=["_o"]).reset_index(drop=True)
-    print(f"  HNI buys total: {len(df)} "
-          f"({(df['Flag'] == 'New Entry').sum()} new, "
-          f"{(df['Flag'] == 'Increased').sum()} increased)")
+    # Rank by size of the move, so the sell blocks lead with the biggest cuts.
+    df["_mag"] = df["Change (pp)"].abs()
+    df = df.sort_values(["_o", "_mag"], ascending=[True, False])
+    df = df.drop(columns=["_o", "_mag"]).reset_index(drop=True)
+    counts = df["Flag"].value_counts()
+    print(f"  HNI moves total: {len(df)} ("
+          + ", ".join(f"{counts.get(f, 0)} {f.lower()}"
+                      for f in ("New Entry", "Increased", "Decreased", "Exited"))
+          + ")")
     return df
 
 
@@ -1054,6 +1254,9 @@ def save_to_excel(df, output_prefix, hni_df=None):
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
         # Summary: classification rules + per-sheet counts
         summary_rows = [
+            ("Universe filter:", f"Market Cap > ₹{MIN_MARKET_CAP_CR} Cr "
+                                 f"(FII sheets; HNIs exempt)"),
+            ("", ""),
             ("Classification rules (applied in order):", ""),
             ("  if prev_qtr < 0.05", '-> "New Entry"'),
             ("  elif streak >= 4", '-> "4-Quarter Increasing"'),
@@ -1067,6 +1270,12 @@ def save_to_excel(df, output_prefix, hni_df=None):
             ("  2-Quarter_Increasing", "Streak = 2 AND Category != New Entry"),
             ("  3-Quarter_Increasing", "Streak = 3 AND Category != New Entry"),
             ("  4-Quarter_Increasing", "Streak >= 4 AND Category != New Entry"),
+            ("", ""),
+            ("HNIs sheet flags (latest quarter vs previous):", ""),
+            ("  New Entry", "not disclosed before, held now (crossed 1%)"),
+            ("  Increased", "stake up"),
+            ("  Decreased", "stake down, still above 1%"),
+            ("  Exited", "held before, no longer disclosed (fell below 1%)"),
             ("", ""),
             ("Sheet counts:", ""),
         ]
@@ -1090,7 +1299,7 @@ def save_to_excel(df, output_prefix, hni_df=None):
             sub = sub.drop(columns=drop)
             sub.to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
-        # HNI / superstar buys (new entry + increased in latest quarter)
+        # HNI / superstar activity in the latest quarter, buys and sells
         if hni_df is not None and not hni_df.empty:
             hni_df.to_excel(writer, sheet_name="HNIs", index=False)
 
@@ -1131,6 +1340,13 @@ def get_sheets():
             []),
     ]
 
+    # HNI pages first — see run() for why.
+    hni_df = pd.DataFrame()
+    try:
+        hni_df = fetch_hni_holdings()
+    except Exception as e:
+        print(f"  HNI fetch failed: {e}")
+
     df = fetch_fii_stake_data()
     if df.empty:
         return {}
@@ -1151,13 +1367,8 @@ def get_sheets():
         sub = sub.drop(columns=drop)
         sheets[sheet_name] = sub.reset_index(drop=True)
 
-    # HNI holdings
-    try:
-        hni_df = fetch_hni_holdings()
-        if hni_df is not None and not hni_df.empty:
-            sheets["HNIs"] = hni_df
-    except Exception as e:
-        print(f"  HNI fetch failed: {e}")
+    if hni_df is not None and not hni_df.empty:
+        sheets["HNIs"] = hni_df
 
     return sheets
 
@@ -1167,6 +1378,14 @@ def run(output_prefix="fii_stake_tracker"):
 
     Returns (df, excel_path).
     """
+    # HNI pages first: they need a logged-in screener.in session, and any
+    # later bulk fetching is the thing most likely to get the IP throttled.
+    try:
+        hni_df = fetch_hni_holdings()
+    except Exception as e:
+        print(f"HNI fetch failed: {e}")
+        hni_df = pd.DataFrame()
+
     df = fetch_fii_stake_data()
 
     if df.empty:
@@ -1188,13 +1407,6 @@ def run(output_prefix="fii_stake_tracker"):
         print(f"  {cat:30s}: {count:>5}")
     print(f"  {'Total':30s}: {len(df):>5}")
     print(f"{'='*60}")
-
-    # Fetch HNI / superstar holdings (Screener.in /people/ pages)
-    try:
-        hni_df = fetch_hni_holdings()
-    except Exception as e:
-        print(f"HNI fetch failed: {e}")
-        hni_df = pd.DataFrame()
 
     excel_path = save_to_excel(df, output_prefix, hni_df=hni_df)
     return df, excel_path
