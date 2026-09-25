@@ -1,0 +1,935 @@
+<title>LLM Enhancement Audit</title>
+<meta name="color-scheme" content="light dark">
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap">
+
+<style>
+  :root {
+    --bg: #F7F6F3;
+    --surface: #FFFFFF;
+    --surface-alt: #EFEEE9;
+    --border: #D8D5CC;
+    --text-primary: #1A1A18;
+    --text-secondary: #5C5A52;
+    --text-muted: #8A877D;
+    --accent: #2D6A4F;
+    --accent-light: #D8F3DC;
+    --accent-dark: #1B4332;
+    --tier1: #D62828;
+    --tier1-bg: #FDE8E8;
+    --tier2: #E76F51;
+    --tier2-bg: #FEF0E8;
+    --tier3: #457B9D;
+    --tier3-bg: #E8F0F5;
+    --tier4: #6C757D;
+    --tier4-bg: #F0F0F0;
+    --tag-green: #2D6A4F;
+    --tag-green-bg: #D8F3DC;
+    --tag-amber: #B5651D;
+    --tag-amber-bg: #FFF3E0;
+    --tag-red: #C62828;
+    --tag-red-bg: #FFEBEE;
+    --chart-1: #2D6A4F;
+    --chart-2: #457B9D;
+    --chart-3: #E76F51;
+    --chart-4: #6C757D;
+    --shadow-sm: 0 1px 3px rgba(26,26,24,0.06);
+    --shadow-md: 0 4px 12px rgba(26,26,24,0.08);
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413;
+      --surface: #1E1E1C;
+      --surface-alt: #282826;
+      --border: #3A3A36;
+      --text-primary: #E8E6E1;
+      --text-secondary: #A8A59D;
+      --text-muted: #706D65;
+      --accent: #52B788;
+      --accent-light: #1B3D2B;
+      --accent-dark: #95D5B2;
+      --tier1: #FF6B6B;
+      --tier1-bg: #3D1F1F;
+      --tier2: #FF9F6B;
+      --tier2-bg: #3D2A1F;
+      --tier3: #6BA3C7;
+      --tier3-bg: #1F2D3D;
+      --tier4: #9CA3AF;
+      --tier4-bg: #2A2A2A;
+      --tag-green: #52B788;
+      --tag-green-bg: #1B3D2B;
+      --tag-amber: #E8A84C;
+      --tag-amber-bg: #3D2A1F;
+      --tag-red: #FF6B6B;
+      --tag-red-bg: #3D1F1F;
+      --chart-1: #52B788;
+      --chart-2: #6BA3C7;
+      --chart-3: #FF9F6B;
+      --chart-4: #9CA3AF;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413;
+    --surface: #1E1E1C;
+    --surface-alt: #282826;
+    --border: #3A3A36;
+    --text-primary: #E8E6E1;
+    --text-secondary: #A8A59D;
+    --text-muted: #706D65;
+    --accent: #52B788;
+    --accent-light: #1B3D2B;
+    --accent-dark: #95D5B2;
+    --tier1: #FF6B6B;
+    --tier1-bg: #3D1F1F;
+    --tier2: #FF9F6B;
+    --tier2-bg: #3D2A1F;
+    --tier3: #6BA3C7;
+    --tier3-bg: #1F2D3D;
+    --tier4: #9CA3AF;
+    --tier4-bg: #2A2A2A;
+    --tag-green: #52B788;
+    --tag-green-bg: #1B3D2B;
+    --tag-amber: #E8A84C;
+    --tag-amber-bg: #3D2A1F;
+    --tag-red: #FF6B6B;
+    --tag-red-bg: #3D1F1F;
+    --chart-1: #52B788;
+    --chart-2: #6BA3C7;
+    --chart-3: #FF9F6B;
+    --chart-4: #9CA3AF;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+    color-scheme: dark;
+  }
+
+  body {
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding-inline: 16px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Fraunces', Georgia, serif;
+    text-wrap: balance;
+    line-height: 1.2;
+  }
+
+  .hero {
+    padding-block: 40px 24px;
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: 32px;
+  }
+  .hero h1 {
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700;
+    margin: 0 0 8px;
+    color: var(--text-primary);
+  }
+  .hero .subtitle {
+    font-size: 1.05rem;
+    color: var(--text-secondary);
+    margin: 0 0 20px;
+    max-width: 65ch;
+  }
+  .hero .meta {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .hero .meta span { white-space: nowrap; }
+
+  /* KPI tiles */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+  }
+  .kpi .num {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .kpi .label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .kpi.accent .num { color: var(--accent); }
+  .kpi.t1 .num { color: var(--tier1); }
+  .kpi.t2 .num { color: var(--tier2); }
+
+  /* Section headers */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 40px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-header h2 {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin: 0;
+  }
+  .tier-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .tier-badge.t1 { background: var(--tier1-bg); color: var(--tier1); }
+  .tier-badge.t2 { background: var(--tier2-bg); color: var(--tier2); }
+  .tier-badge.t3 { background: var(--tier3-bg); color: var(--tier3); }
+  .tier-badge.t4 { background: var(--tier4-bg); color: var(--tier4); }
+
+  /* Opportunity cards */
+  .opp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--accent);
+  }
+  .opp-card.t1 { border-left-color: var(--tier1); }
+  .opp-card.t2 { border-left-color: var(--tier2); }
+  .opp-card.t3 { border-left-color: var(--tier3); }
+  .opp-card.t4 { border-left-color: var(--tier4); }
+
+  .opp-card .card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .opp-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    flex: 1;
+    min-width: 200px;
+  }
+  .opp-card .file-ref {
+    font-family: 'DM Sans', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: var(--surface-alt);
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .opp-card .current {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .opp-card .current strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+  .opp-card .llm-use {
+    background: var(--accent-light);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    margin-top: 12px;
+  }
+  .opp-card .llm-use .llm-label {
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  .opp-card .impact-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+  .tag.accuracy { background: var(--tag-green-bg); color: var(--tag-green); }
+  .tag.speed { background: var(--tag-amber-bg); color: var(--tag-amber); }
+  .tag.coverage { background: var(--tier3-bg); color: var(--tier3); }
+  .tag.resilience { background: var(--tag-red-bg); color: var(--tag-red); }
+
+  /* Priority table */
+  .priority-table-wrap {
+    overflow-x: auto;
+    margin: 24px 0 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background: var(--surface);
+    font-variant-numeric: tabular-nums;
+  }
+  thead { background: var(--surface-alt); }
+  th {
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  .rank-cell {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 700;
+    font-size: 1rem;
+    text-align: center;
+    width: 40px;
+  }
+
+  /* Don't-use section */
+  .dont-use {
+    background: var(--surface-alt);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 24px 0;
+  }
+  .dont-use h3 {
+    font-size: 1rem;
+    margin: 0 0 8px;
+    color: var(--tag-red);
+  }
+  .dont-use ul {
+    margin: 0;
+    padding-left: 20px;
+  }
+  .dont-use li {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+  }
+
+  /* Architecture box */
+  .arch-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 24px 0;
+    box-shadow: var(--shadow-sm);
+  }
+  .arch-box h3 {
+    font-size: 1rem;
+    margin: 0 0 12px;
+  }
+  .arch-flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+  }
+  .arch-node {
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .arch-arrow {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+  }
+
+  /* Status chart */
+  .status-chart {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 24px 0;
+  }
+  .status-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 40px;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.82rem;
+  }
+  .status-row .file-name {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bar-track {
+    height: 20px;
+    background: var(--surface-alt);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s ease;
+  }
+  .status-row .count {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    text-align: right;
+    font-size: 0.78rem;
+  }
+
+  .footer {
+    margin-top: 48px;
+    padding: 20px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  @media (max-width: 600px) {
+    .status-row { grid-template-columns: 100px 1fr 32px; }
+    .opp-card .card-head { flex-direction: column; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<!-- Hero -->
+<div class="hero">
+  <h1>LLM Enhancement Audit</h1>
+  <p class="subtitle">Where LLMs can make the Analysis project more accurate, efficient, and resilient — without being embedded in the runtime code.</p>
+  <div class="meta">
+    <span>46 Python files analyzed</span>
+    <span>49,300 lines of code</span>
+    <span>14 opportunities identified</span>
+    <span>25 Sep 2026</span>
+  </div>
+</div>
+
+<!-- KPIs -->
+<div class="kpi-row">
+  <div class="kpi accent">
+    <div class="num">14</div>
+    <div class="label">Opportunities</div>
+  </div>
+  <div class="kpi t1">
+    <div class="num">4</div>
+    <div class="label">High Impact</div>
+  </div>
+  <div class="kpi t2">
+    <div class="num">4</div>
+    <div class="label">Medium Impact</div>
+  </div>
+  <div class="kpi">
+    <div class="num">3</div>
+    <div class="label">Already Use LLM</div>
+  </div>
+  <div class="kpi">
+    <div class="num">6</div>
+    <div class="label">Quick Wins</div>
+  </div>
+</div>
+
+<!-- LLM Usage Bar Chart -->
+<div class="section-header">
+  <h2>Current LLM Coverage</h2>
+</div>
+<p style="font-size:0.88rem; color:var(--text-secondary); margin-bottom: 16px;">
+  Number of LLM integration points per file. Only 3 of 46 Python files use LLMs today — the rest are pure rule-based.
+</p>
+<div class="status-chart">
+  <div class="status-row">
+    <div class="file-name">breakout_tracker</div>
+    <div class="bar-track"><div class="bar-fill" style="width:100%; background:var(--chart-1);"></div></div>
+    <div class="count">7</div>
+  </div>
+  <div class="status-row">
+    <div class="file-name">stock_autopsy</div>
+    <div class="bar-track"><div class="bar-fill" style="width:28%; background:var(--chart-2);"></div></div>
+    <div class="count">2</div>
+  </div>
+  <div class="status-row">
+    <div class="file-name">runner_predictor</div>
+    <div class="bar-track"><div class="bar-fill" style="width:28%; background:var(--chart-3);"></div></div>
+    <div class="count">2</div>
+  </div>
+  <div class="status-row">
+    <div class="file-name">breakout_v5</div>
+    <div class="bar-track"><div class="bar-fill" style="width:14%; background:var(--chart-4);"></div></div>
+    <div class="count">1</div>
+  </div>
+  <div class="status-row">
+    <div class="file-name" style="color:var(--text-muted); font-style:italic">42 other files</div>
+    <div class="bar-track"><div class="bar-fill" style="width:0%;"></div></div>
+    <div class="count">0</div>
+  </div>
+</div>
+
+<!-- TIER 1 -->
+<div class="section-header">
+  <span class="tier-badge t1">Tier 1</span>
+  <h2>High Impact — Transform Existing Workflows</h2>
+</div>
+
+<div class="opp-card t1">
+  <div class="card-head">
+    <h3>1. Forensic Report — Narrative Synthesis</h3>
+    <span class="file-ref">forensic_accounting.py · 9,300 lines</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Computes 14 forensic scores (Beneish M-Score, Altman Z-Score, Piotroski F-Score, DuPont, etc.) and dumps them into a 40+ page PDF. The recommendation (BUY/HOLD/SELL/AVOID) is a hardcoded threshold. Annual report analysis uses pure regex to count pattern matches for related-party transactions, auditor concerns, and governance red flags. Scoring thresholds are sector-blind — a 20% operating margin is scored the same for IT vs Steel.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Feed all computed scores, ratios, shareholding trends, insider trades, credit ratings, and concall text to the LLM post-generation. Generate a 1-page executive summary that connects dots between deteriorating M-Score + rising pledge % + declining promoter holding. Replace regex-based annual report NLP with LLM extraction that understands context and severity. Add sector-aware scoring interpretation.
+  </div>
+  <div class="impact-tags">
+    <span class="tag accuracy">Accuracy</span>
+    <span class="tag coverage">Coverage</span>
+    <span class="tag speed">Readability</span>
+  </div>
+</div>
+
+<div class="opp-card t1">
+  <div class="card-head">
+    <h3>2. Position Health — Context-Aware Action Brief</h3>
+    <span class="file-ref">portfolio/position_health.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Binary rule-based flags: ACTION if close &lt; 200-DMA OR drawdown &gt; 25%; WATCH if close &lt; 50-DMA. Rules are rigid and context-free — doesn't know if the sector is declining, if results are due in 3 days, or if correlated positions amplify the risk.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    For each ACTION/WATCH position, feed: technical signals + events_calendar data (upcoming results?) + stage_analysis (is the whole sector declining?) + correlation_clusters (systemic or stock-specific?) + pledge data. Instead of "ACTION: below 200-DMA", output: "SUZLON is below 200-DMA but the entire Power sector just rotated to Stage 3. FII stake declining 2 quarters. Board meeting for Q2 results in 4 days — consider waiting for earnings before acting."
+  </div>
+  <div class="impact-tags">
+    <span class="tag accuracy">Accuracy</span>
+    <span class="tag coverage">Cross-Module Synthesis</span>
+  </div>
+</div>
+
+<div class="opp-card t1">
+  <div class="card-head">
+    <h3>3. Breakout V5 — Failure Pattern Mining</h3>
+    <span class="file-ref">breakout_v5.py · breakout_daily_tracker.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> 90.5% backtest success rate with 3 hard gates + 4 score boosters. LLM patches exist but failure analysis is mostly single-variable. Multi-factor interaction effects (e.g., "squeeze + no institutional signal = 80% fail") are not systematically detected.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Feed batches of 50 failed picks with full technical profiles and post-scan price action. Ask the LLM to identify non-obvious failure clusters and interaction effects: "78% of failures had base_range &gt; 25% AND weekly RSI &gt; 68 — extended bases, not fresh ones." Could push success rate from 90.5% toward 93-95%.
+  </div>
+  <div class="impact-tags">
+    <span class="tag accuracy">+3-5% Accuracy</span>
+    <span class="tag speed">Self-Improving</span>
+  </div>
+</div>
+
+<div class="opp-card t1">
+  <div class="card-head">
+    <h3>4. IPO Anchor Investor — Structured Extraction</h3>
+    <span class="file-ref">ipo_listing_gainers.py · 6,200 lines</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> A 4-pass OCR pipeline at different DPI/PSM settings, followed by complex regex parsing, arithmetic verification (amount/price = shares), and fuzzy name matching. 6,200 lines of code where a huge chunk is text extraction plumbing. Name normalization uses token-level fuzzy matching with first-two-words keying.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Feed OCR'd text (or page images) to LLM for structured anchor table extraction. Collapse 2,000+ lines of extraction code. Use LLM for entity resolution: "HDFC Mutual Fund", "HDFC MF", "HDFC AMC Trustee Company Ltd" → same entity. Generate forward signal: profile each anchor's selectivity and hit rate.
+  </div>
+  <div class="impact-tags">
+    <span class="tag accuracy">Accuracy</span>
+    <span class="tag resilience">Resilience</span>
+    <span class="tag speed">Code Reduction</span>
+  </div>
+</div>
+
+<!-- TIER 2 -->
+<div class="section-header">
+  <span class="tier-badge t2">Tier 2</span>
+  <h2>Medium Impact — Add Intelligence to Data-Rich Modules</h2>
+</div>
+
+<div class="opp-card t2">
+  <div class="card-head">
+    <h3>5. Stage Analysis — Transition Narrative</h3>
+    <span class="file-ref">stage_analysis.py · 2,100 lines</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Classifies stocks/sectors into Weinstein's 4 stages mechanically. Reports transitions as raw data. The "top_quality" function tries to distinguish a Stage 3 pause from a terminal top using 6 mechanical checks.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Cross-reference sector transitions with FII sector flows, sector breadth, and RRG quadrant positions. Generate weekly narrative: "Capital Markets entered Stage 2, confirmed by RRG Leading quadrant + FII flows turning positive for 3 fortnights + breadth jumping from 42% to 68%. Historical pattern: sustains 8-12 weeks." Flag divergences where stage label and internals disagree.
+  </div>
+  <div class="impact-tags">
+    <span class="tag coverage">Cross-Module</span>
+    <span class="tag speed">Saves 30 min/week</span>
+  </div>
+</div>
+
+<div class="opp-card t2">
+  <div class="card-head">
+    <h3>6. Bulk/Block Deal Intelligence</h3>
+    <span class="file-ref">BulkBlock.py · investor_registry.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Scrapes deals, matches against a manually curated superstar list with 33 investors and their name variants. Name matching is exact (normalized string comparison). No deal interpretation — just "who traded what."
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Fuzzy matching for new investor name variants without manual registry updates. Deal interpretation: "Kacholia bought 2L shares of ZAGGLE at ₹412 — new entry. This stock is on breakout watchlist (score 67). Kacholia's last 5 entries: 4/5 ran 20%+ within 3 months." Cross-reference with autopsy database for thematic baskets.
+  </div>
+  <div class="impact-tags">
+    <span class="tag accuracy">Accuracy</span>
+    <span class="tag coverage">Coverage</span>
+  </div>
+</div>
+
+<div class="opp-card t2">
+  <div class="card-head">
+    <h3>7. FII Stake Tracker — Conviction Scoring</h3>
+    <span class="file-ref">fii_stake_tracker.py · 1,530 lines</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Identifies ~900 stocks with increasing FII, classifies by streak length (new entry, 2Q, 3Q, 4Q+). Output is a raw spreadsheet with no prioritization or interpretation.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Feed batches with Weinstein stage, sector RS rank, breakout watchlist status, and forensic score. Generate curated shortlist: "These 15 stocks have strongest FII conviction: new entry + Stage 2 + top-quartile sector RS + breakout forming." Reduces 900 rows to 15 actionable picks.
+  </div>
+  <div class="impact-tags">
+    <span class="tag speed">900 → 15 rows</span>
+    <span class="tag accuracy">Accuracy</span>
+  </div>
+</div>
+
+<div class="opp-card t2">
+  <div class="card-head">
+    <h3>8. India Macro — Economic Narrative</h3>
+    <span class="file-ref">india_macro.py · 2,200 lines</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Fetches 28 indicators from 10+ government sources. Uses 12 fragile regex-based PDF parsers tuned to specific government document formats — breaks silently when layouts change. Output is raw numbers with MoM/YoY rates, zero interpretation.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Replace brittle PDF regex parsers with LLM extraction (format-change resilient). Generate monthly narrative: "Cement +11% YoY, electricity +8%, SIP inflows at ATH. Domestic investment cycle strong, export-linked neutral. Favours infra, cap goods, BFSI longs." Classify macro regime by historical pattern matching.
+  </div>
+  <div class="impact-tags">
+    <span class="tag resilience">Resilience</span>
+    <span class="tag accuracy">Accuracy</span>
+    <span class="tag coverage">Coverage</span>
+  </div>
+</div>
+
+<!-- TIER 3 -->
+<div class="section-header">
+  <span class="tier-badge t3">Tier 3</span>
+  <h2>Targeted Improvements</h2>
+</div>
+
+<div class="opp-card t3">
+  <div class="card-head">
+    <h3>9. Premarket Dashboard — Morning Brief</h3>
+    <span class="file-ref">portfolio/premarket_dashboard.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Computes global cues + breadth metrics. No narrative synthesis.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Generate a 5-sentence pre-market brief: "SGX Nifty +0.6%, global risk-on. DXY weakening (positive for metals). Breadth: 68% above 50-EMA. Your positions to watch: RVNL has board meeting, ZAGGLE near breakout resistance."
+  </div>
+  <div class="impact-tags"><span class="tag speed">Daily Value</span></div>
+</div>
+
+<div class="opp-card t3">
+  <div class="card-head">
+    <h3>10. Sector Breadth — Divergence Alerts</h3>
+    <span class="file-ref">sector_breadth.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Renders % above EMAs, new highs, A-D line. Fixed thresholds for health. No divergence detection.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Spot divergences: "Nifty at ATH but only 3/20 sectors have &gt;60% above 50-EMA. Narrowest since Oct 2024, which preceded a 7% correction."
+  </div>
+  <div class="impact-tags"><span class="tag accuracy">Pattern Detection</span></div>
+</div>
+
+<div class="opp-card t3">
+  <div class="card-head">
+    <h3>11. MF Overlap — Crowding Narrative</h3>
+    <span class="file-ref">portfolio/mf_overlap.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Computes crowding scores (FundCount × AvgWeight%). Raw numbers, no interpretation.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    Interpret crowding risk: "ZAGGLE held by 47 MF schemes. High crowding = institutional validation + outflow risk. Monitor Quant MF (concentrated, high-turnover strategy)."
+  </div>
+  <div class="impact-tags"><span class="tag coverage">Insight</span></div>
+</div>
+
+<div class="opp-card t3">
+  <div class="card-head">
+    <h3>12. Email Report — Executive Summary</h3>
+    <span class="file-ref">run_all.py · email_sender.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> Orchestrates 9 scenarios, consolidates into Excel + HTML. Email body has no narrative — just file attachments.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">LLM Enhancement</div>
+    After all 9 scenarios complete, generate 1-paragraph email summary: "FII sold ₹2,300 Cr (4th day). Capital Goods entered Stage 2. V5.1 flagged 4 breakouts. Portfolio: 93% Stage 2, no Action flags, 2 Watch flags."
+  </div>
+  <div class="impact-tags"><span class="tag speed">Quick Win</span></div>
+</div>
+
+<!-- TIER 4 -->
+<div class="section-header">
+  <span class="tier-badge t4">Tier 4</span>
+  <h2>Architecture Recommendations</h2>
+</div>
+
+<div class="opp-card t4">
+  <div class="card-head">
+    <h3>13. Unified LLM Client</h3>
+    <span class="file-ref">New: llm_client.py</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> 3 files duplicate the Azure OpenAI client code — each has its own <code>_load_llm_config()</code>, <code>llm_call()</code>, <code>llm_json()</code>.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">Recommendation</div>
+    Extract to shared module with centralized config, token counting, cost tracking, response caching (same prompt within 24h), structured output schemas, and rate limit management. <strong>Do this first</strong> — every other enhancement depends on it.
+  </div>
+  <div class="impact-tags"><span class="tag speed">Foundation</span></div>
+</div>
+
+<div class="opp-card t4">
+  <div class="card-head">
+    <h3>14. Daily Synthesis Pipeline</h3>
+    <span class="file-ref">run_all.py — Scenario 10</span>
+  </div>
+  <div class="current">
+    <strong>Current state:</strong> 9 scenarios produce independent outputs. No cross-module synthesis except what you do mentally. runner_predictions.json has empty LLM fields (llm_conviction, thesis, risk, entry_zone) — designed but never filled.
+  </div>
+  <div class="llm-use">
+    <div class="llm-label">Recommendation</div>
+    Add a 10th scenario to run_all.py: reads key outputs from all 9 scenarios, cross-references portfolio data and breakout watchlists, generates a structured daily market intelligence brief as the first Excel sheet and the email body. Also activate runner_predictor's empty LLM fields.
+  </div>
+  <div class="impact-tags"><span class="tag coverage">Cross-Module</span><span class="tag speed">Daily Value</span></div>
+</div>
+
+<!-- Recommended architecture flow -->
+<div class="arch-box">
+  <h3>Proposed Architecture — LLM as Post-Processing Layer</h3>
+  <div class="arch-flow">
+    <span class="arch-node">Data Fetchers</span>
+    <span class="arch-arrow">→</span>
+    <span class="arch-node">Technical Analysis</span>
+    <span class="arch-arrow">→</span>
+    <span class="arch-node">Rule-Based Scoring</span>
+    <span class="arch-arrow">→</span>
+    <span class="arch-node" style="background:var(--tier1-bg); color:var(--tier1);">LLM Synthesis</span>
+    <span class="arch-arrow">→</span>
+    <span class="arch-node">Reports & Alerts</span>
+  </div>
+  <p style="font-size: 0.82rem; color: var(--text-secondary); margin: 12px 0 0;">
+    The LLM sits <strong>after</strong> computation, not inside it. All technical indicators, scores, and data remain deterministic. The LLM adds narrative synthesis, cross-module intelligence, and context-aware interpretation.
+  </p>
+</div>
+
+<!-- DON'T USE -->
+<div class="dont-use">
+  <h3>Where NOT to Use LLMs</h3>
+  <ul>
+    <li><strong>Technical indicator computation</strong> — RSI, ATR, Bollinger, etc. are faster and correct in NumPy</li>
+    <li><strong>Data fetching / parsing</strong> — your scraper logic is already robust with retries, caching, fallbacks</li>
+    <li><strong>Hard gate logic in breakout_v5</strong> — deterministic gates are backtestable; LLMs introduce non-reproducibility</li>
+    <li><strong>Score computation</strong> — weighted linear scoring is transparent and tunable; an LLM black box is worse</li>
+    <li><strong>Anything real-time</strong> — LLM latency (1-5s) is fine for daily analysis but not intraday scanning</li>
+  </ul>
+</div>
+
+<!-- PRIORITY TABLE -->
+<div class="section-header">
+  <h2>Priority Ranking</h2>
+</div>
+
+<div class="priority-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Module</th>
+        <th>LLM Use</th>
+        <th>Impact</th>
+        <th>Effort</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier1)">1</td>
+        <td>forensic_accounting</td>
+        <td>Narrative synthesis of 40-page PDF</td>
+        <td><span class="tier-badge t1">Massive</span></td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier1)">2</td>
+        <td>position_health + cross-module</td>
+        <td>Context-aware daily action brief</td>
+        <td><span class="tier-badge t1">Massive</span></td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier1)">3</td>
+        <td>breakout_v5 failures</td>
+        <td>Multi-factor failure pattern mining</td>
+        <td><span class="tier-badge t1">High</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier1)">4</td>
+        <td>ipo_listing_gainers</td>
+        <td>Anchor extraction + investor profiling</td>
+        <td><span class="tier-badge t1">High</span></td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier2)">5</td>
+        <td>stage_analysis + cross-module</td>
+        <td>Weekly regime narrative</td>
+        <td><span class="tier-badge t2">Medium</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier2)">6</td>
+        <td>BulkBlock</td>
+        <td>Fuzzy matching + deal interpretation</td>
+        <td><span class="tier-badge t2">Medium</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier2)">7</td>
+        <td>fii_stake_tracker</td>
+        <td>Conviction scoring + shortlisting</td>
+        <td><span class="tier-badge t2">Medium</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier2)">8</td>
+        <td>india_macro</td>
+        <td>Macro regime narrative + PDF resilience</td>
+        <td><span class="tier-badge t2">Medium</span></td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier3)">9</td>
+        <td>run_all email</td>
+        <td>Executive summary</td>
+        <td><span class="tier-badge t3">Quick Win</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier3)">10</td>
+        <td>premarket_dashboard</td>
+        <td>Morning brief</td>
+        <td><span class="tier-badge t3">Quick Win</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier3)">11</td>
+        <td>sector_breadth</td>
+        <td>Divergence alerts</td>
+        <td><span class="tier-badge t3">Targeted</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier3)">12</td>
+        <td>mf_overlap</td>
+        <td>Crowding narrative</td>
+        <td><span class="tier-badge t3">Targeted</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier4)">13</td>
+        <td>llm_client.py (new)</td>
+        <td>Deduplicate 3 LLM clients</td>
+        <td><span class="tier-badge t4">Foundation</span></td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td class="rank-cell" style="color:var(--tier4)">14</td>
+        <td>run_all.py + runner_predictor</td>
+        <td>Daily synthesis pipeline + activate empty fields</td>
+        <td><span class="tier-badge t4">Foundation</span></td>
+        <td>Medium</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<p style="font-size: 0.88rem; color: var(--text-secondary); max-width: 65ch;">
+  <strong>Key insight:</strong> Your data collection and technical analysis are already excellent. The gap is always at the synthesis layer — connecting isolated outputs from 27 different modules into coherent, actionable intelligence. That is exactly where LLMs excel.
+</p>
+
+<div class="footer">
+  LLM Enhancement Audit — Analysis Project · Generated 25 Sep 2026
+</div>

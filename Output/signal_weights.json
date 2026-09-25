@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "updated": "2026-09-25",
+  "sample_size": 7343,
+  "base_rate": 0.6138,
+  "features": {
+    "vol_trend_rising": {
+      "weight": 12.6,
+      "lift": 1.238,
+      "coverage": 0.472
+    },
+    "near_30d_high": {
+      "weight": 14.7,
+      "lift": 1.437,
+      "coverage": 0.334
+    },
+    "rs_strong": {
+      "weight": 14.7,
+      "lift": 1.378,
+      "coverage": 0.093
+    },
+    "atr_compression": {
+      "weight": 9.5,
+      "lift": 0.852,
+      "coverage": 0.124
+    },
+    "vol_dry_up": {
+      "weight": 12.6,
+      "lift": 1.159,
+      "coverage": 0.318
+    },
+    "price_tight_range": {
+      "weight": 11.6,
+      "lift": 1.062,
+      "coverage": 0.41
+    },
+    "high_vol_ratio": {
+      "weight": 12.6,
+      "lift": 1.209,
+      "coverage": 0.071
+    },
+    "delivery_rising": {
+      "weight": 11.6,
+      "lift": 1.142,
+      "coverage": 0.508
+    }
+  },
+  "combination_bonuses": {
+    "near_30d_high+vol_trend_rising": 10,
+    "delivery_rising+near_30d_high+vol_trend_rising": 11,
+    "near_30d_high+rs_strong+vol_trend_rising": 11,
+    "delivery_rising+near_30d_high+rs_strong+vol_trend_rising": 11,
+    "atr_compression+near_30d_high+vol_trend_rising": 10
+  }
+}

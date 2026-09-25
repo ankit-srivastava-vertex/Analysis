@@ -375,6 +375,12 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import screener_client
 
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
 # Outputs land next to this script, not in Output/.
 OUTPUT_DIR = SCRIPT_DIR
 CACHE_DIR = SCRIPT_DIR / ".cache" / "ipo_gainers"
@@ -5659,11 +5665,106 @@ def anchors_to_frame(merged: dict[str, list[Anchor]],
     return pd.DataFrame(rows, columns=list(ANCHOR_COLUMNS))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LLM SYNTHESIS LAYER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def llm_extract_anchor_table(ocr_text: str, stated_total: "int | None" = None
+                             ) -> "list[dict] | None":
+    """Use LLM to extract structured anchor table from messy OCR text.
+
+    Called as a fallback when the regex pipeline fails to reconcile.
+    Returns list of {name, shares, amount} dicts or None.
+    """
+    if not llm_json or not llm_is_available():
+        return None
+
+    truncated = ocr_text[:6000] if len(ocr_text) > 6000 else ocr_text
+    stated_hint = (f"\nThe letter states a total of {stated_total:,} shares allocated."
+                   if stated_total else "")
+
+    result = llm_json(
+        "You are an OCR correction specialist for Indian IPO anchor investor "
+        "allocation letters. Extract the structured table from messy OCR text.\n\n"
+        "Return JSON: {\"anchors\": [{\"name\": \"investor name (corrected)\", "
+        "\"shares\": integer, \"amount_cr\": float or null}], "
+        "\"total_shares\": sum of all shares, "
+        "\"confidence\": 0-100}",
+        f"OCR TEXT:\n{truncated}{stated_hint}\n\n"
+        "Extract every anchor investor row. Fix obvious OCR errors in names "
+        "(e.g. 'HDEC' → 'HDFC', 'ICICI PRUDENIIAL' → 'ICICI PRUDENTIAL'). "
+        "If an investor name is split across lines, merge them. "
+        "Return integer shares, not formatted strings.",
+        max_tokens=3000
+    )
+
+    if not result or "anchors" not in result:
+        return None
+
+    anchors = result["anchors"]
+    confidence = result.get("confidence", 0)
+    total = result.get("total_shares", 0)
+    print(f"  [LLM] Extracted {len(anchors)} anchor rows "
+          f"(total={total:,}, confidence={confidence}%)")
+
+    if stated_total and total and abs(total - stated_total) / stated_total < 0.02:
+        print(f"  [LLM] Total reconciles with stated ({stated_total:,})")
+    elif stated_total:
+        print(f"  [LLM] Total {total:,} does NOT reconcile with stated {stated_total:,}")
+
+    return anchors
+
+
+def llm_investor_profile(freq_df: pd.DataFrame) -> "pd.DataFrame | None":
+    """Profile anchor investors by selectivity and success rate.
+
+    Returns a DataFrame with investor profiles or None if LLM unavailable.
+    """
+    if not llm_json or not llm_is_available():
+        return None
+    if freq_df is None or freq_df.empty:
+        return None
+
+    top_investors = []
+    for _, row in freq_df.head(40).iterrows():
+        top_investors.append({
+            "investor": str(row.get("Investor", row.get("investor", ""))),
+            "ipo_count": int(row.get("Count", row.get("count", 0))),
+            "hit_rate_pct": float(row.get("Hit Rate %", row.get("hit_rate", 0)))
+                if "Hit Rate %" in row.index or "hit_rate" in row.index else None,
+        })
+
+    if not top_investors:
+        return None
+
+    result = llm_json(
+        "You are an IPO research analyst for the Indian market. Profile these "
+        "anchor investors based on their frequency and hit rate in qualifying "
+        "IPOs (those that gained 50%+ on listing or within 30 days).\n\n"
+        "Return JSON: {\"profiles\": [{\"investor\": str, "
+        "\"selectivity\": \"high|medium|low\", "
+        "\"signal_strength\": \"strong|moderate|weak\", "
+        "\"investor_type\": \"MF|FII|Insurance|PMS|AIF|Other\", "
+        "\"notable_pattern\": \"1 sentence\"}]}",
+        json.dumps(top_investors, default=str),
+        max_tokens=2500
+    )
+
+    if not result or "profiles" not in result:
+        return None
+
+    profiles = result["profiles"]
+    print(f"  [LLM] Profiled {len(profiles)} anchor investors")
+
+    return pd.DataFrame(profiles)
+
+
 def write_workbook(all_df: pd.DataFrame, gainers_df: pd.DataFrame,
                    merged: dict[str, list[Anchor]],
                    anchors_df: pd.DataFrame, freq_df: pd.DataFrame,
                    out_xlsx: Path,
-                   tracked_df: "pd.DataFrame | None" = None) -> None:
+                   tracked_df: "pd.DataFrame | None" = None,
+                   profile_df: "pd.DataFrame | None" = None) -> None:
     """Write the managed workbook.
 
       Sheet 1 'All IPOs'           — every IPO in the window, qualified or not.
@@ -5695,6 +5796,8 @@ def write_workbook(all_df: pd.DataFrame, gainers_df: pd.DataFrame,
                    ("Investor Frequency", freq_df)]
         if tracked_df is not None:
             managed.append(("Tracked Investors", tracked_df))
+        if profile_df is not None and not profile_df.empty:
+            managed.append(("Investor Profiles", profile_df))
         for sheet, d in managed:
             d.to_excel(xw, sheet_name=sheet, index=False)
         for sheet, d in managed:
@@ -6817,6 +6920,8 @@ def main() -> int:
     ap.add_argument("--html", default=str(OUTPUT_DIR / "ipo_listing_gainers.html"),
                     help="Tabbed HTML dashboard: the four sheets plus a "
                          "per-investor profile tab.")
+    ap.add_argument("--no-llm", action="store_true",
+                    help="Skip LLM anchor extraction fallback and investor profiling")
     args = ap.parse_args()
 
     start = parse_date(args.start)
@@ -7015,8 +7120,13 @@ def main() -> int:
         tracked_df = build_tracked_investors(ipl_anchor_scan(ipos),
                                              {i.symbol for i in winners})
 
+    profile_df = None
+    if not args.no_llm:
+        print("\n[LLM] Generating investor profiles ...")
+        profile_df = llm_investor_profile(freq_df)
+
     write_workbook(all_df, df, merged, anchors_df, freq_df, xlsx_path,
-                   tracked_df=tracked_df)
+                   tracked_df=tracked_df, profile_df=profile_df)
 
     key_note = (("Spelling and suffix variants of one investor share a row; "
                  "different schemes of the same house do not."

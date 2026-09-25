@@ -1,0 +1,152 @@
+
+======================================================================
+STOCK AUTOPSY — BACKFILL 90 DAYS
+======================================================================
+
+1. Loading OHLCV universe for full backfill window...
+    OHLCV: 1000/3142 (999 loaded) [1s]
+    OHLCV: 2000/3142 (1998 loaded) [2s]
+    OHLCV: 3000/3142 (2995 loaded) [3s]
+    OHLCV done: 3137/3142 loaded, 5 no cache file [3s]
+   OHLCV loaded for 3137 tickers
+
+2. Processing 90 trading days...
+
+  2026-05-18: 40 new runners (daily: 40, weekly: 0)
+/Users/ankit.srivastava/Documents/Analysis/.venv/lib/python3.11/site-packages/jugaad_data/util.py:38: UserWarning: no explicit representation of timezones available for np.datetime64
+  return np.datetime64(dt)
+
+  2026-05-19: 76 new runners (daily: 76, weekly: 0)
+
+  2026-05-20: 66 new runners (daily: 66, weekly: 0)
+
+  2026-05-21: 86 new runners (daily: 86, weekly: 0)
+
+  2026-05-22: 60 new runners (daily: 60, weekly: 0)
+
+  2026-05-25: 117 new runners (daily: 117, weekly: 0)
+
+  2026-05-26: 82 new runners (daily: 82, weekly: 0)
+
+  2026-05-27: 93 new runners (daily: 93, weekly: 0)
+
+  2026-05-29: 82 new runners (daily: 82, weekly: 0)
+
+  2026-06-01: 53 new runners (daily: 53, weekly: 0)
+
+  2026-06-02: 98 new runners (daily: 98, weekly: 0)
+
+  2026-06-03: 58 new runners (daily: 58, weekly: 0)
+
+  2026-06-04: 87 new runners (daily: 87, weekly: 0)
+
+  2026-06-05: 70 new runners (daily: 70, weekly: 0)
+
+  2026-06-08: 26 new runners (daily: 26, weekly: 0)
+
+  2026-06-09: 126 new runners (daily: 126, weekly: 0)
+
+  2026-06-10: 28 new runners (daily: 28, weekly: 0)
+
+  2026-06-11: 23 new runners (daily: 23, weekly: 0)
+
+  2026-06-12: 204 new runners (daily: 204, weekly: 0)
+
+  2026-06-15: 125 new runners (daily: 125, weekly: 0)
+
+  2026-06-16: 70 new runners (daily: 70, weekly: 0)
+
+  2026-06-17: 85 new runners (daily: 85, weekly: 0)
+
+  2026-06-18: 73 new runners (daily: 73, weekly: 0)
+
+  2026-06-19: 83 new runners (daily: 83, weekly: 0)
+
+  2026-06-22: 92 new runners (daily: 92, weekly: 0)
+
+  2026-06-23: 41 new runners (daily: 41, weekly: 0)
+
+  2026-06-24: 55 new runners (daily: 55, weekly: 0)
+
+  2026-06-25: 27 new runners (daily: 27, weekly: 0)
+
+  2026-06-29: 52 new runners (daily: 52, weekly: 0)
+
+  2026-06-30: 64 new runners (daily: 64, weekly: 0)
+
+  2026-07-01: 64 new runners (daily: 64, weekly: 0)
+
+  2026-07-02: 93 new runners (daily: 93, weekly: 0)
+
+  2026-07-03: 63 new runners (daily: 63, weekly: 0)
+
+  2026-07-06: 60 new runners (daily: 60, weekly: 0)
+
+  2026-07-07: 32 new runners (daily: 32, weekly: 0)
+
+  2026-07-08: 26 new runners (daily: 26, weekly: 0)
+
+  2026-07-09: 117 new runners (daily: 117, weekly: 0)
+
+  2026-07-10: 84 new runners (daily: 84, weekly: 0)
+
+  2026-07-13: 74 new runners (daily: 74, weekly: 0)
+
+  2026-07-14: 32 new runners (daily: 32, weekly: 0)
+
+  2026-07-15: 49 new runners (daily: 49, weekly: 0)
+
+  2026-07-16: 41 new runners (daily: 41, weekly: 0)
+
+  2026-07-17: 27 new runners (daily: 27, weekly: 0)
+
+  2026-07-20: 57 new runners (daily: 57, weekly: 0)
+
+  2026-07-21: 61 new runners (daily: 61, weekly: 0)
+
+  2026-07-22: 34 new runners (daily: 34, weekly: 0)
+
+  2026-07-23: 37 new runners (daily: 37, weekly: 0)
+
+  2026-07-24: 48 new runners (daily: 48, weekly: 0)
+
+  2026-07-27: 96 new runners (daily: 96, weekly: 0)
+
+  2026-07-28: 39 new runners (daily: 39, weekly: 0)
+
+  2026-07-29: 92 new runners (daily: 92, weekly: 0)
+
+  2026-07-30: 35 new runners (daily: 35, weekly: 0)
+
+  2026-07-31: 99 new runners (daily: 99, weekly: 0)
+
+  2026-08-03: 165 new runners (daily: 165, weekly: 0)
+
+  2026-08-04: 79 new runners (daily: 79, weekly: 0)
+
+  2026-08-05: 102 new runners (daily: 102, weekly: 0)
+
+  2026-08-06: 85 new runners (daily: 85, weekly: 0)
+
+  2026-08-07: 80 new runners (daily: 80, weekly: 0)
+
+  2026-08-10: 105 new runners (daily: 105, weekly: 0)
+
+  2026-08-11: 85 new runners (daily: 85, weekly: 0)
+
+  2026-08-12: 86 new runners (daily: 86, weekly: 0)
+    LLM exception: HTTPSConnectionPool(host='vitr-rule-migration-resource.openai.azure.com', port=443): Read timed out. (read timeout=120)
+
+  2026-08-13: 90 new runners (daily: 90, weekly: 0)
+
+  2026-08-14: 75 new runners (daily: 75, weekly: 0)
+
+  2026-08-17: 106 new runners (daily: 106, weekly: 0)
+
+  2026-08-18: 98 new runners (daily: 98, weekly: 0)
+
+  2026-08-19: 77 new runners (daily: 77, weekly: 0)
+
+  2026-08-20: 118 new runners (daily: 118, weekly: 0)
+
+  2026-08-21: 105 new runners (daily: 105, weekly: 0)

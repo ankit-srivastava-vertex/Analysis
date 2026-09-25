@@ -388,6 +388,12 @@ import data_provider  # noqa: E402
 from custom_sector_index import calculate_equal_weight_index  # noqa: E402
 from portfolio.premarket_dashboard import _fetch_all_sectors  # noqa: E402
 
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
 # ─── Tunables ────────────────────────────────────────────────────────────────
 
 MA_WEEKS = 30          # Weinstein's 30-week SMA — the spine of the whole method
@@ -2050,16 +2056,87 @@ def stage_for(symbol: str, lookback_days: int = LOOKBACK_DAYS) -> dict:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LLM SYNTHESIS LAYER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def llm_regime_narrative(sector_df, trans_df):
+    """Generate a weekly market regime narrative from stage data.
+
+    Returns dict with narrative, regime classification, and key transitions,
+    or None if LLM unavailable.
+    """
+    if not llm_json or not llm_is_available():
+        return None
+
+    import json as _json
+
+    sector_data = []
+    for _, row in sector_df.iterrows():
+        sector_data.append({
+            "sector": str(row.get("Sector", "")),
+            "stage": int(row.get("Stage", 0)) if pd.notna(row.get("Stage")) else 0,
+            "sub_stage": str(row.get("Sub", "")),
+            "rs_rank": int(row.get("Rank", 0)) if pd.notna(row.get("Rank")) else 0,
+            "rs_vs_nifty": float(row.get("RS Week 0", 0)) if pd.notna(row.get("RS Week 0")) else 0,
+            "action": str(row.get("Action", "")),
+        })
+
+    transitions = []
+    if trans_df is not None and not trans_df.empty:
+        for _, row in trans_df.head(15).iterrows():
+            transitions.append({
+                "entity": str(row.get("Entity", row.get("Sector", ""))),
+                "type": str(row.get("Type", "")),
+                "signal": str(row.get("Signal", "")),
+            })
+
+    user_data = _json.dumps({
+        "sectors": sector_data,
+        "transitions": transitions,
+        "total_sectors": len(sector_data),
+        "stage2_count": sum(1 for s in sector_data if s["stage"] == 2),
+        "stage3_count": sum(1 for s in sector_data if s["stage"] == 3),
+        "stage4_count": sum(1 for s in sector_data if s["stage"] == 4),
+    }, default=str)
+
+    system_prompt = (
+        "You are a Weinstein stage analysis expert for Indian equity markets. "
+        "Generate a weekly regime narrative from sector stage data.\n\n"
+        "Return JSON with:\n"
+        "- narrative: 5-8 sentence market regime summary. Mention specific sectors "
+        "by name. Note divergences, rotation direction, breadth of advance/decline.\n"
+        "- regime: one of broad_advance, narrow_advance, rotation, distribution, "
+        "broad_decline\n"
+        "- key_transitions: list of {sector, from_stage, to_stage, significance} "
+        "for the most important transitions this week\n"
+        "- actionable: 2-3 sentence recommendation for a positional trader"
+    )
+
+    print("  [LLM] Generating regime narrative …")
+    try:
+        result = llm_json(system_prompt, user_data, max_tokens=2000)
+        if result:
+            regime = result.get("regime", "unknown")
+            print(f"  [LLM] Regime: {regime} | Narrative: {len(result.get('narrative', ''))} chars")
+        return result
+    except Exception as e:
+        print(f"  [LLM] Regime narrative failed: {e}")
+        return None
+
+
 def run(output_prefix: str | None = None,
         lookback_days: int = LOOKBACK_DAYS,
         min_stocks: int = MIN_SECTOR_STOCKS,
         write_excel: bool = True,
-        verbose: bool = True):
+        verbose: bool = True,
+        use_llm: bool = True):
     """Build the stage report. Returns (sheets_dict, html_path).
 
-    `sheets_dict` holds the three Excel sheets (Stage Sectors, Stage Stocks,
-    Stage Transitions) so run_all can fold them into the unified workbook;
-    `write_excel=True` additionally drops a standalone `<prefix>.xlsx`.
+    `sheets_dict` holds the Excel sheets (Stage Sectors, Stage Stocks,
+    Stage Transitions, and optionally Stage Narrative) so run_all can fold
+    them into the unified workbook; `write_excel=True` additionally drops a
+    standalone `<prefix>.xlsx`.
     Returns ``({}, None)`` when there is not enough data, so the caller can
     skip the tab without failing the pipeline.
     """
@@ -2088,6 +2165,23 @@ def run(output_prefix: str | None = None,
         "Stage Transitions": trans_df,
     }
 
+    if use_llm:
+        narrative = llm_regime_narrative(sector_df, trans_df)
+        if narrative:
+            rows = [
+                {"Field": "Regime", "Value": narrative.get("regime", "")},
+                {"Field": "Narrative", "Value": narrative.get("narrative", "")},
+                {"Field": "Actionable", "Value": narrative.get("actionable", "")},
+            ]
+            for kt in narrative.get("key_transitions", []):
+                rows.append({
+                    "Field": f"Transition: {kt.get('sector', '')}",
+                    "Value": f"Stage {kt.get('from_stage', '?')} → "
+                             f"{kt.get('to_stage', '?')}: "
+                             f"{kt.get('significance', '')}",
+                })
+            sheets["Stage Narrative"] = pd.DataFrame(rows)
+
     prefix = output_prefix or os.path.join(SCRIPT_DIR, "stage_analysis")
     if prefix.endswith(".html"):
         prefix = prefix[:-5]
@@ -2114,9 +2208,12 @@ def main():
                         help="Output prefix (default: stage_analysis)")
     parser.add_argument("--lookback", type=int, default=LOOKBACK_DAYS,
                         help="Calendar days of daily history to pull")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Skip LLM narrative generation")
     args = parser.parse_args()
 
-    sheets, html = run(output_prefix=args.output, lookback_days=args.lookback)
+    sheets, html = run(output_prefix=args.output, lookback_days=args.lookback,
+                       use_llm=not args.no_llm)
     if not sheets:
         return 1
     sec = sheets["Stage Sectors"]

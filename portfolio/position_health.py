@@ -77,6 +77,17 @@ if str(PROJECT_ROOT) not in sys.path:
 import data_provider  # noqa: E402
 from portfolio.holdings_loader import load_holdings  # noqa: E402
 
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
+try:
+    from stage_analysis import stage_for as _stage_for
+except ImportError:
+    _stage_for = None
+
 LOOKBACK_DAYS = 380       # ~14 months — enough for 200-DMA + 1y high
 BENCHMARK = "^CRSLDX"     # NIFTY 500 Total Returns proxy on yfinance
 RS_BENCH_FALLBACK = "^NSEI"  # Nifty 50 if 500 fails
@@ -239,7 +250,7 @@ def _notes_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["Flag", "Rule"])
 
 
-def run(verbose: bool = True) -> dict:
+def run(verbose: bool = True, use_llm: bool = True) -> dict:
     holdings = load_holdings(verbose=verbose)
     if holdings.empty:
         if verbose:
@@ -294,6 +305,11 @@ def run(verbose: bool = True) -> dict:
               f"WATCH={counts.get('WATCH', 0)}  "
               f"ACTION={counts.get('ACTION', 0)}")
 
+    # LLM briefs for flagged positions
+    if use_llm:
+        health_df = _add_llm_briefs(health_df, verbose=verbose)
+        action_df = health_df[health_df["Flag"] == "ACTION"].reset_index(drop=True)
+
     return {"sheets": {
         "Position Health": health_df,
         "Action List": action_df,
@@ -301,19 +317,113 @@ def run(verbose: bool = True) -> dict:
     }}
 
 
+# ─────────────────── LLM synthesis layer ──────────────────────────────────
+
+def _add_llm_briefs(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
+    """Add an 'LLM Brief' column with context-aware narratives for flagged positions."""
+    df["LLM Brief"] = ""
+
+    if not llm_json or not llm_is_available():
+        return df
+
+    flagged = df[df["Flag"].isin(["ACTION", "WATCH"])].copy()
+    if flagged.empty:
+        return df
+
+    positions = []
+    for _, row in flagged.iterrows():
+        pos = {
+            "symbol": row.get("Symbol", ""),
+            "company": row.get("Company", ""),
+            "sector": row.get("Sector", ""),
+            "flag": row.get("Flag", ""),
+            "close": row.get("LastClose"),
+            "avg_cost": row.get("AvgCost"),
+            "from_cost_pct": row.get("FromCost%"),
+            "vs50dma": row.get("vs50DMA%"),
+            "vs100dma": row.get("vs100DMA%"),
+            "vs200dma": row.get("vs200DMA%"),
+            "from_52w_hi": row.get("From52wHi%"),
+            "rs3m": row.get("RS3M"),
+            "vol_spike": row.get("VolSpike"),
+            "down_day_vol": row.get("DownDayVolFlag"),
+        }
+
+        if _stage_for:
+            try:
+                stage_data = _stage_for(row.get("Symbol", ""))
+                cur = stage_data.get("current", {})
+                pos["weinstein_stage"] = cur.get("stage")
+                pos["sub_stage"] = cur.get("sub")
+                pos["stage_action"] = cur.get("action")
+            except Exception:
+                pass
+
+        positions.append(pos)
+
+    import json as _json
+    batch_data = _json.dumps(positions[:15], default=str)
+
+    system_prompt = (
+        "You are a portfolio risk analyst for an Indian equity positional trader "
+        "(3-9 month holding period). For each flagged position, generate a 2-3 "
+        "sentence contextual brief explaining WHY it is flagged and WHAT to "
+        "consider before acting.\n\n"
+        "If Weinstein stage data is available, incorporate it (e.g. 'entire "
+        "sector is Stage 3'). Connect multiple signals when they converge.\n\n"
+        "Return JSON: {\"briefs\": [{\"symbol\": \"...\", \"brief\": \"...\", "
+        "\"urgency\": \"immediate|this_week|monitor\"}]}"
+    )
+
+    if verbose:
+        print(f"  [LLM] Generating briefs for {len(positions[:15])} flagged positions …")
+
+    try:
+        result = llm_json(system_prompt, batch_data, max_tokens=3000)
+    except Exception as e:
+        if verbose:
+            print(f"  [LLM] Position brief failed: {e}")
+        return df
+
+    if not result or "briefs" not in result:
+        return df
+
+    brief_map = {}
+    for b in result["briefs"]:
+        sym = b.get("symbol", "").strip().upper()
+        if sym:
+            urgency = b.get("urgency", "")
+            text = b.get("brief", "")
+            if urgency:
+                text = f"[{urgency.upper()}] {text}"
+            brief_map[sym] = text
+
+    for idx, row in df.iterrows():
+        sym = row.get("Symbol", "").strip().upper()
+        if sym in brief_map:
+            df.at[idx, "LLM Brief"] = brief_map[sym]
+
+    if verbose:
+        print(f"  [LLM] Briefs generated for {len(brief_map)} positions")
+
+    return df
+
+
 def main():
     ap = argparse.ArgumentParser(description="Position Health — daily technical scan")
     ap.add_argument("--out", default=str(PORTFOLIO_DIR / "position_health.xlsx"))
+    ap.add_argument("--no-llm", action="store_true",
+                    help="Skip LLM contextual briefs")
     args = ap.parse_args()
 
-    result = run()
+    result = run(use_llm=not args.no_llm)
     sheets = result["sheets"]
     if not sheets:
         return
     with pd.ExcelWriter(args.out, engine="openpyxl") as w:
         for name, df in sheets.items():
             df.to_excel(w, sheet_name=name[:31], index=False)
-    print(f"\n  ✓ Wrote {args.out}")
+    print(f"\n  Wrote {args.out}")
 
 
 if __name__ == "__main__":

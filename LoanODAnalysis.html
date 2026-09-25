@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loan & OD Analysis</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-card: #1a1d27;
+      --bg-card-alt: #15171f;
+      --bg-table-head: #252836;
+      --bg-table-row: #1a1d27;
+      --bg-table-row-alt: #1f2230;
+      --bg-code: #252836;
+      --bg-callout: #1e2233;
+      --bg-callout-warn: #2a2215;
+      --bg-callout-good: #152a1e;
+      --bg-callout-danger: #2a1515;
+      --bg-badge: #2d3348;
+      --text: #e4e6ed;
+      --text-dim: #9ca0ae;
+      --text-bright: #ffffff;
+      --accent: #6c8aff;
+      --accent-glow: rgba(108, 138, 255, 0.12);
+      --green: #4ade80;
+      --green-dim: rgba(74, 222, 128, 0.12);
+      --red: #f87171;
+      --red-dim: rgba(248, 113, 113, 0.12);
+      --yellow: #fbbf24;
+      --yellow-dim: rgba(251, 191, 36, 0.12);
+      --orange: #fb923c;
+      --border: #2a2d3a;
+      --border-accent: #3d4566;
+      --shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 0;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1d2e 0%, #252a40 50%, #1a2235 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+
+    .page-header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .page-header .subtitle {
+      color: var(--text-dim);
+      font-size: 1rem;
+      margin-bottom: 16px;
+    }
+
+    .page-header .meta {
+      display: inline-flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .page-header .meta span {
+      background: var(--bg-badge);
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .toc {
+      max-width: 900px;
+      margin: 32px auto;
+      padding: 0 24px;
+    }
+
+    .toc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 32px;
+    }
+
+    .toc-card h2 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+
+    .toc-list {
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .toc-list li a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.92rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      transition: background 0.15s;
+    }
+
+    .toc-list li a:hover {
+      background: var(--accent-glow);
+    }
+
+    .toc-list li a .num {
+      background: var(--bg-badge);
+      color: var(--accent);
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    .section {
+      margin-top: 48px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 24px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--border);
+    }
+
+    .section-num {
+      background: var(--accent);
+      color: #fff;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      flex-shrink: 0;
+    }
+
+    .section-header h2 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin: 28px 0 12px;
+    }
+
+    h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 20px 0 8px;
+    }
+
+    p {
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+
+    strong { color: var(--text-bright); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px;
+      font-size: 0.88rem;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    thead th {
+      background: var(--bg-table-head);
+      color: var(--text-bright);
+      font-weight: 600;
+      padding: 12px 14px;
+      text-align: left;
+      white-space: nowrap;
+      border-bottom: 2px solid var(--border-accent);
+    }
+
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    tbody tr:nth-child(even) { background: var(--bg-table-row-alt); }
+    tbody tr:nth-child(odd) { background: var(--bg-table-row); }
+    tbody tr:hover { background: var(--accent-glow); }
+
+    .callout {
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 16px 0;
+      border-left: 4px solid;
+      font-size: 0.92rem;
+    }
+
+    .callout-info {
+      background: var(--bg-callout);
+      border-color: var(--accent);
+    }
+
+    .callout-warn {
+      background: var(--bg-callout-warn);
+      border-color: var(--yellow);
+    }
+
+    .callout-good {
+      background: var(--bg-callout-good);
+      border-color: var(--green);
+    }
+
+    .callout-danger {
+      background: var(--bg-callout-danger);
+      border-color: var(--red);
+    }
+
+    .callout-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .callout-info .callout-title { color: var(--accent); }
+    .callout-warn .callout-title { color: var(--yellow); }
+    .callout-good .callout-title { color: var(--green); }
+    .callout-danger .callout-title { color: var(--red); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-green { background: var(--green-dim); color: var(--green); }
+    .badge-red { background: var(--red-dim); color: var(--red); }
+    .badge-yellow { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-accent { background: var(--accent-glow); color: var(--accent); }
+
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 12px 0 20px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.82rem;
+      color: var(--text);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.8;
+    }
+
+    .winner-card {
+      background: linear-gradient(135deg, #152a1e 0%, #1a2e20 100%);
+      border: 2px solid var(--green);
+      border-radius: 14px;
+      padding: 24px 28px;
+      margin: 24px 0;
+      box-shadow: 0 0 30px rgba(74, 222, 128, 0.06);
+    }
+
+    .winner-card h3 {
+      color: var(--green);
+      margin-top: 0;
+    }
+
+    .action-plan {
+      counter-reset: step;
+    }
+
+    .action-step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      padding: 14px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .action-step::before {
+      counter-increment: step;
+      content: counter(step);
+      background: var(--accent);
+      color: #fff;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .action-step-content strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .action-step-content span {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .compare-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .compare-card.recommended {
+      border-color: var(--green);
+      box-shadow: 0 0 20px rgba(74, 222, 128, 0.05);
+    }
+
+    .compare-card h4 {
+      margin-top: 0;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 32px 0;
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0 16px;
+    }
+
+    .formula {
+      background: var(--bg-code);
+      border: 1px solid var(--border-accent);
+      border-radius: 8px;
+      padding: 14px 20px;
+      margin: 12px 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--accent);
+      text-align: center;
+    }
+
+    ul, ol {
+      padding-left: 20px;
+      margin: 8px 0 16px;
+    }
+
+    li {
+      margin-bottom: 6px;
+      font-size: 0.92rem;
+    }
+
+    .sources {
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 2px solid var(--border);
+    }
+
+    .sources h2 {
+      font-size: 1.1rem;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .sources a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.85rem;
+    }
+
+    .sources a:hover { text-decoration: underline; }
+
+    .sources ul { list-style: none; padding: 0; }
+    .sources li { margin-bottom: 8px; padding-left: 16px; position: relative; }
+    .sources li::before { content: "→"; position: absolute; left: 0; color: var(--text-dim); }
+
+    @media (max-width: 700px) {
+      .toc-list { grid-template-columns: 1fr; }
+      .comparison-grid { grid-template-columns: 1fr; }
+      .page-header h1 { font-size: 1.6rem; }
+      table { font-size: 0.8rem; }
+      thead th, tbody td { padding: 8px 10px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- PAGE HEADER -->
+<!-- ============================================================ -->
+<div class="page-header">
+  <h1>Loan &amp; Overdraft (OD) — Complete Analysis</h1>
+  <p class="subtitle">A deep-dive into Overdraft mechanics, Home Loan OD, Term Loans, charges, and a personalised recommendation</p>
+  <div class="meta">
+    <span>CIBIL 790</span>
+    <span>Loan ₹1.5 Cr</span>
+    <span>20 Years</span>
+    <span>SBI &amp; BOB</span>
+    <span>Last updated: 21 Sep 2026 (v5)</span>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TABLE OF CONTENTS -->
+<!-- ============================================================ -->
+<div class="toc">
+  <div class="toc-card">
+    <h2>Contents</h2>
+    <ul class="toc-list">
+      <li><a href="#s1"><span class="num">1</span> How Overdraft Works</a></li>
+      <li><a href="#s2"><span class="num">2</span> Interest Calculation</a></li>
+      <li><a href="#s3"><span class="num">3</span> Repayment Mechanics</a></li>
+      <li><a href="#s4"><span class="num">4</span> Types of OD Facilities</a></li>
+      <li><a href="#s5"><span class="num">5</span> Smart Strategies</a></li>
+      <li><a href="#s6"><span class="num">6</span> Complete OD Charges List</a></li>
+      <li><a href="#s7"><span class="num">7</span> OD on Home Loan</a></li>
+      <li><a href="#s8"><span class="num">8</span> Term Loan vs OD</a></li>
+      <li><a href="#s9"><span class="num">9</span> Is OD Worth the Premium?</a></li>
+      <li><a href="#s10"><span class="num">10</span> CIBIL 790 → 800+ Strategy</a></li>
+      <li><a href="#s11"><span class="num">11</span> Score Projection &amp; Action Plan</a></li>
+      <li><a href="#s12"><span class="num">12</span> Car Loan: Part Pay or Not?</a></li>
+      <li><a href="#s13"><span class="num">13</span> AU Zenith+ Upgrade Impact</a></li>
+      <li><a href="#s14"><span class="num">14</span> 2 New Credit Cards — Yes or No?</a></li>
+    </ul>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ============================================================ -->
+<!-- SECTION 1: HOW OVERDRAFT WORKS -->
+<!-- ============================================================ -->
+<div class="section" id="s1">
+  <div class="section-header">
+    <div class="section-num">1</div>
+    <h2>How Overdraft Works</h2>
+  </div>
+
+  <p>An overdraft is a <strong>credit facility linked to your bank account</strong> that lets you withdraw more money than your account balance — up to a pre-approved limit. Think of it as a flexible loan that sits on top of your bank account.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Example</div>
+    Your account has ₹50,000. Your OD limit is ₹5,00,000. You can spend up to ₹5,50,000 total (your money + borrowed money).
+  </div>
+
+  <h3>How It Works — Step by Step</h3>
+  <ol>
+    <li><strong>Sanction</strong> — The bank approves an OD limit based on collateral (FD, property, shares, salary) or your creditworthiness.</li>
+    <li><strong>Drawing Power</strong> — You can withdraw any amount up to the limit, any number of times.</li>
+    <li><strong>Repayment</strong> — Any money deposited back into the account automatically reduces the outstanding OD amount.</li>
+    <li><strong>Revolving</strong> — Unlike a term loan, you can draw and repay repeatedly. The limit stays available as long as the facility is active.</li>
+  </ol>
+
+  <div class="callout callout-good">
+    <div class="callout-title">Key Difference from a Loan</div>
+    With a ₹10L loan, you get ₹10L upfront and pay interest on the full amount from day 1. With a ₹10L OD, you only draw what you need, when you need it — and pay interest only on what you've actually used.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: INTEREST CALCULATION -->
+<!-- ============================================================ -->
+<div class="section" id="s2">
+  <div class="section-header">
+    <div class="section-num">2</div>
+    <h2>How Interest is Charged</h2>
+  </div>
+
+  <h3>Daily Reducing Balance Method</h3>
+  <p>Interest is calculated <strong>daily</strong> on the <strong>outstanding amount at end of each day</strong>, then debited monthly.</p>
+
+  <div class="formula">Daily Interest = Outstanding Amount × (Annual Rate ÷ 365)<br>Monthly Interest = Sum of all daily interest charges in that month</div>
+
+  <h3>Worked Example</h3>
+  <table>
+    <thead><tr><th>Day</th><th>Outstanding</th><th>Rate</th><th>Daily Interest</th></tr></thead>
+    <tbody>
+      <tr><td>Day 1–10</td><td>₹5,00,000</td><td>10%</td><td>₹5,00,000 × 10% ÷ 365 = <strong>₹136.99/day</strong></td></tr>
+      <tr><td colspan="4" style="text-align:center; color:var(--accent);">Day 11: You deposit ₹3,00,000 → balance drops to ₹2,00,000</td></tr>
+      <tr><td>Day 11–30</td><td>₹2,00,000</td><td>10%</td><td>₹2,00,000 × 10% ÷ 365 = <strong>₹54.79/day</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="code-block">Monthly interest = (10 × ₹136.99) + (20 × ₹54.79)
+                 = ₹1,369.90 + ₹1,095.80
+                 = ₹2,465.70
+
+Compare: Term loan of ₹5L at 10% → ~₹4,109/month regardless of repayment timing.</div>
+
+  <h3>Key Interest Rules</h3>
+  <ul>
+    <li><strong>Interest-only payments</strong> — Most ODs require you to pay only the interest monthly. Principal repayment is flexible.</li>
+    <li><strong>No prepayment penalty</strong> — Since it's revolving, depositing money back is expected, not penalised.</li>
+    <li><strong>Minimum usage</strong> — Some banks charge a small commitment fee (0.5–1%) if you don't use the facility at all.</li>
+    <li><strong>Penal interest</strong> — If you exceed the limit or miss interest payments, expect 2–4% additional penal interest.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: REPAYMENT MECHANICS -->
+<!-- ============================================================ -->
+<div class="section" id="s3">
+  <div class="section-header">
+    <div class="section-num">3</div>
+    <h2>Repayment Mechanics</h2>
+  </div>
+
+  <h3>Interest Payment</h3>
+  <ul>
+    <li><strong>Auto-debited</strong> from the same OD account on the 1st of each month (or a specified date).</li>
+    <li>If your OD account doesn't have sufficient credit, the interest gets added to the outstanding — compounding the problem.</li>
+  </ul>
+
+  <h3>Principal Repayment</h3>
+  <ul>
+    <li><strong>No EMI</strong> — This is the biggest advantage. You repay when you have surplus cash.</li>
+    <li><strong>Any deposit = repayment</strong> — Salary credits, business receipts, transfers — all automatically reduce your outstanding.</li>
+    <li><strong>Full repayment</strong> — Required at renewal (usually annually) or at facility closure.</li>
+  </ul>
+
+  <h3>Renewal</h3>
+  <ul>
+    <li>Most ODs are sanctioned for <strong>1 year</strong> and renewed annually.</li>
+    <li>At renewal, the bank may ask you to bring the balance to zero briefly ("flush out"), reassess your financials, and renew.</li>
+    <li>Property-backed ODs (LAP-OD) can have longer tenures (10–15 years).</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: TYPES OF OD -->
+<!-- ============================================================ -->
+<div class="section" id="s4">
+  <div class="section-header">
+    <div class="section-num">4</div>
+    <h2>Types of Overdraft Facilities</h2>
+  </div>
+
+  <table>
+    <thead><tr><th>Type</th><th>Collateral</th><th>Typical Limit</th><th>Rate</th><th>Best For</th></tr></thead>
+    <tbody>
+      <tr><td><strong>OD against FD</strong></td><td>Fixed Deposit</td><td>75–90% of FD value</td><td>FD rate + 1–2%</td><td>Safe, cheapest OD</td></tr>
+      <tr><td><strong>OD against Property (LAP-OD)</strong></td><td>Residential / Commercial property</td><td>50–70% of property value</td><td>8.5–11%</td><td>Business owners, large limits</td></tr>
+      <tr><td><strong>OD against Shares/MF</strong></td><td>Demat holdings</td><td>50–70% of portfolio value</td><td>9–12%</td><td>Investors, traders</td></tr>
+      <tr><td><strong>OD against Salary</strong></td><td>Salary account relationship</td><td>2–3x monthly salary</td><td>12–16%</td><td>Salaried individuals, quick access</td></tr>
+      <tr><td><strong>Business OD / CC</strong></td><td>Business financials + collateral</td><td>Based on turnover</td><td>9–14%</td><td>Working capital for businesses</td></tr>
+      <tr><td><strong>Pre-approved OD</strong></td><td>Existing bank relationship</td><td>₹25K – ₹25L</td><td>10–16%</td><td>Emergency cash, no paperwork</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: BEST OD PRODUCTS -->
+<!-- ============================================================ -->
+<!-- SECTION 5: SMART STRATEGIES -->
+<!-- ============================================================ -->
+<div class="section" id="s5">
+  <div class="section-header">
+    <div class="section-num">5</div>
+    <h2>Smart Strategies to Minimise OD Interest</h2>
+  </div>
+
+  <ol>
+    <li><strong>Park surplus cash in the OD account</strong> — Even parking money for 5 days reduces interest for those 5 days. Route your salary, business receipts, rental income into the OD account first.</li>
+    <li><strong>Use OD against FD instead of breaking the FD</strong> — You keep earning FD interest (say 7%) while paying only 8–9% on the amount you use. Net cost is just 1–2%. Breaking the FD would cost you a penalty + loss of the higher rate.</li>
+    <li><strong>Sweep-in FD</strong> — Some banks offer sweep-in FDs where surplus balance auto-converts to FD and auto-breaks when needed. Good complementary tool.</li>
+    <li><strong>Flush-out strategy</strong> — Before annual renewal, bring the OD balance to zero for a day or two. Banks like this, and it can help you get better renewal terms.</li>
+  </ol>
+
+  <h3>When to Use OD vs. Other Credit</h3>
+  <table>
+    <thead><tr><th>Need</th><th>Best Option</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Short-term cash gap (1–3 months)</td><td><strong>OD against FD</strong></td><td>Cheapest, no EMI, pay only for days used</td></tr>
+      <tr><td>Working capital for business</td><td><strong>Business OD / CC</strong></td><td>Revolving, flexible, tax-deductible interest</td></tr>
+      <tr><td>Emergency, no collateral</td><td><strong>Salary OD or Credit Card</strong></td><td>Quick access, but expensive</td></tr>
+      <tr><td>Large, long-term funding</td><td><strong>Term Loan</strong></td><td>Fixed EMI structure, lower rates for long tenures</td></tr>
+      <tr><td>Already have investments</td><td><strong>OD against Shares/MF</strong></td><td>Don't sell investments, borrow against them</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 6: COMPLETE OD CHARGES LIST -->
+<!-- ============================================================ -->
+<div class="section" id="s6">
+  <div class="section-header">
+    <div class="section-num">6</div>
+    <h2>Complete OD Charges — What to Watch For</h2>
+  </div>
+
+  <div class="callout callout-danger">
+    <div class="callout-title">Warning</div>
+    Many of these charges are buried in the fine print. Ask about every one of them before signing.
+  </div>
+
+  <h3>1. Processing Fee <span class="badge badge-yellow">One-time, Upfront</span></h3>
+  <p>Charged when the OD is sanctioned. <strong>Not refundable</strong> even if you never use the facility.</p>
+  <table>
+    <thead><tr><th>Bank Type</th><th>Typical Range</th></tr></thead>
+    <tbody>
+      <tr><td>PSU Banks (SBI, BOB, Canara)</td><td>0.25% – 0.50% of limit</td></tr>
+      <tr><td>Private Banks (HDFC, ICICI, Axis)</td><td>0.50% – 1.00% of limit</td></tr>
+      <tr><td>NBFCs (Aditya Birla, Tata Capital)</td><td>1.00% – 2.00% of limit</td></tr>
+      <tr><td>OD against FD</td><td>Usually <strong>NIL</strong> or minimal (₹100–500)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2. Penal Interest <span class="badge badge-red">Triggered by Violations</span></h3>
+  <p>Extra interest on top of your regular rate, charged when you break the rules.</p>
+  <table>
+    <thead><tr><th>Violation</th><th>SBI (2026)</th><th>General Range</th></tr></thead>
+    <tbody>
+      <tr><td>Account irregular for <strong>up to 60 days</strong></td><td>+2.40% p.a.</td><td>+2% to +3% p.a.</td></tr>
+      <tr><td>Account irregular for <strong>beyond 60 days</strong></td><td>+5.00% p.a.</td><td>+3% to +5% p.a.</td></tr>
+      <tr><td>Exceeding sanctioned OD limit</td><td>+2% to +5% p.a.</td><td>+2% to +5% p.a.</td></tr>
+      <tr><td>Default / NPA</td><td>+2.00% p.a.</td><td>Varies</td></tr>
+      <tr><td>ICICI OD against FD — default</td><td colspan="2">+5% p.a. on overdue amount</td></tr>
+    </tbody>
+  </table>
+
+  <h3>3. Commitment / Non-Utilisation Fee</h3>
+  <table>
+    <thead><tr><th>Bank</th><th>Charge</th></tr></thead>
+    <tbody>
+      <tr><td>Jana Small Finance Bank</td><td>Up to 0.25% per quarter on shortfall amount</td></tr>
+      <tr><td>General practice</td><td>0.50% – 1.00% p.a. on unused portion</td></tr>
+      <tr><td>Many PSU banks</td><td>NIL (especially for OD against FD)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4. Renewal Fee <span class="badge badge-yellow">Annual</span></h3>
+  <table>
+    <thead><tr><th>Component</th><th>Typical Charge</th></tr></thead>
+    <tbody>
+      <tr><td>Renewal processing fee</td><td>0.25% – 0.50% of limit, or flat ₹500 – ₹5,000</td></tr>
+      <tr><td>Fresh documentation charges</td><td>₹500 – ₹2,000</td></tr>
+      <tr><td>Valuation charges (property OD)</td><td>₹2,000 – ₹10,000</td></tr>
+      <tr><td>Legal charges (property OD)</td><td>₹1,000 – ₹5,000</td></tr>
+    </tbody>
+  </table>
+
+  <h3>5. Documentation / Stamping Charges</h3>
+  <table>
+    <thead><tr><th>Charge</th><th>Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Documentation charges (IOB, 2026)</td><td>0.25% of limit, min ₹500</td></tr>
+      <tr><td>Stamp duty</td><td>Varies by state (0.1% – 0.5%)</td></tr>
+      <tr><td>Franking charges</td><td>₹100 – ₹500</td></tr>
+      <tr><td>CERSAI registration</td><td>₹50 – ₹100</td></tr>
+    </tbody>
+  </table>
+
+  <h3>6. Prepayment / Foreclosure Charges</h3>
+  <table>
+    <thead><tr><th>Scenario</th><th>Charge</th></tr></thead>
+    <tbody>
+      <tr><td>OD against FD</td><td>Usually <strong>NIL</strong></td></tr>
+      <tr><td>OD against Property (floating rate)</td><td>NIL for individuals (RBI mandate)</td></tr>
+      <tr><td>OD against Property (fixed rate)</td><td>2% – 4% of outstanding</td></tr>
+      <tr><td>Inform bank before renewal</td><td>Usually <strong>NIL</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h3>7. Other Charges</h3>
+  <table>
+    <thead><tr><th>Charge</th><th>Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Cheque / ECS / NACH bounce</td><td>₹250 – ₹750 per instance</td></tr>
+      <tr><td>Stock statement non-submission (first 15 days, SBI)</td><td>Flat ₹5,000</td></tr>
+      <tr><td>Stock statement delay beyond 15 days (SBI)</td><td>0.50% p.a., min ₹5,000</td></tr>
+      <tr><td>Duplicate NOC / closure letter</td><td>₹200 – ₹500</td></tr>
+      <tr><td>Property insurance (if mandatory)</td><td>₹2,000 – ₹10,000/year</td></tr>
+      <tr><td>Credit life insurance (often bundled)</td><td>0.3% – 0.5% of outstanding/year</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Master Checklist Before Signing</h3>
+  <div class="callout callout-warn">
+    <div class="callout-title">Ask These Questions</div>
+    <ol>
+      <li>Processing fee — is it refundable if I don't draw?</li>
+      <li>Interest rate — fixed or floating? Linked to which benchmark?</li>
+      <li>Penal interest — what triggers it? What's the rate?</li>
+      <li>Non-utilisation fee — is there a minimum drawdown requirement?</li>
+      <li>Renewal fee — what's the annual renewal cost?</li>
+      <li>Stamp duty — what's the state-specific amount?</li>
+      <li>Foreclosure charges — can I close anytime without penalty?</li>
+      <li>Bounce charges — what's the per-instance charge?</li>
+      <li>Insurance — is it mandatory or optional? Can I get my own?</li>
+      <li>Valuation / Legal (property OD) — how often? Who pays?</li>
+    </ol>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 7: OD ON HOME LOAN -->
+<!-- ============================================================ -->
+<div class="section" id="s7">
+  <div class="section-header">
+    <div class="section-num">7</div>
+    <h2>OD on Home Loan — Yes, It Exists</h2>
+  </div>
+
+  <div class="callout callout-good">
+    <div class="callout-title">One of the Smartest Financial Products in India</div>
+    A home loan where the loan account functions like an overdraft. You can park surplus money in it and withdraw anytime — interest is charged only on the net outstanding.
+  </div>
+
+  <h3>How It Works</h3>
+  <div class="code-block">Loan sanctioned:     ₹50,00,000 at 8.50% for 20 years
+EMI:                 ₹43,391/month
+
+Month 6:  Park ₹5,00,000 surplus in the OD account
+          Interest now on: ₹50L - ₹5L = ₹45,00,000 (not ₹50L)
+
+Month 9:  Need ₹3L for emergency → withdraw it
+          Interest now on: ₹50L - ₹2L = ₹48,00,000 (remaining parked: ₹2L)
+
+Your EMI stays the same, but you save lakhs in interest.</div>
+
+  <h3>Annual Savings Example</h3>
+  <table>
+    <thead><tr><th>Parked Amount</th><th>Annual Interest Saved (at 8.5%)</th><th>Over 20 Years</th></tr></thead>
+    <tbody>
+      <tr><td>₹5,00,000</td><td>~₹42,500</td><td><strong>~₹8.5 Lakh</strong></td></tr>
+      <tr><td>₹10,00,000</td><td>~₹85,000</td><td><strong>~₹17 Lakh</strong></td></tr>
+      <tr><td>₹20,00,000</td><td>~₹1,70,000</td><td><strong>~₹34 Lakh</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Tax-Free Savings</div>
+    Unlike FD interest which is taxable, the interest you <em>save</em> by parking in a home loan OD is effectively tax-free. Parking ₹5L gives you 8.5% tax-free effective return.
+  </div>
+
+  <h3>Best Home Loan OD Products</h3>
+
+  <h4>SBI MaxGain <span class="badge badge-green">Best in Class</span></h4>
+  <table>
+    <thead><tr><th>Feature</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td>Interest Rate</td><td>Same as regular SBI home loan + 0.05–0.25% premium</td></tr>
+      <tr><td>Min parked amount</td><td>No minimum</td></tr>
+      <tr><td>Withdrawal</td><td>Unlimited, anytime, no charges</td></tr>
+      <tr><td>Debit card for OD</td><td>Available</td></tr>
+      <tr><td>Online management</td><td>Via YONO app</td></tr>
+    </tbody>
+  </table>
+
+  <h4>HDFC Home Saver</h4>
+  <table>
+    <thead><tr><th>Feature</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td>Interest Rate</td><td>Regular rate + 0.05% to 0.10% premium</td></tr>
+      <tr><td>Withdrawal</td><td>Unlimited</td></tr>
+      <tr><td>Linked account</td><td>Savings account linked to loan</td></tr>
+    </tbody>
+  </table>
+
+  <h4>ICICI Money Saver</h4>
+  <table>
+    <thead><tr><th>Feature</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td>Interest Rate</td><td>Regular rate + small premium</td></tr>
+      <tr><td>Withdrawal</td><td>Unlimited via dedicated debit card</td></tr>
+      <tr><td>Balance transfer</td><td>Can transfer existing loan + add OD</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 8: TERM LOAN EXPLAINED -->
+<!-- ============================================================ -->
+<!-- SECTION 8: TERM LOAN vs OD -->
+<!-- ============================================================ -->
+<div class="section" id="s8">
+  <div class="section-header">
+    <div class="section-num">8</div>
+    <h2>Term Loan vs Overdraft — Head to Head</h2>
+  </div>
+
+  <table>
+    <thead><tr><th>Parameter</th><th>Term Loan</th><th>Overdraft</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Disbursement</strong></td><td>Full amount, once</td><td>Draw as needed, repeatedly</td></tr>
+      <tr><td><strong>Repayment</strong></td><td>Fixed EMI, every month</td><td>Flexible — pay when you can</td></tr>
+      <tr><td><strong>Interest on</strong></td><td>Full outstanding from day 1</td><td>Only on amount actually used</td></tr>
+      <tr><td><strong>Re-draw</strong></td><td>Not possible</td><td>Yes — repay and draw again</td></tr>
+      <tr><td><strong>Tenure</strong></td><td>Fixed (1–30 years)</td><td>Usually 1 year, renewed annually</td></tr>
+      <tr><td><strong>Rate</strong></td><td>Generally lower</td><td>Generally slightly higher</td></tr>
+      <tr><td><strong>Best for</strong></td><td>Known, one-time large expense</td><td>Fluctuating, unpredictable needs</td></tr>
+      <tr><td><strong>Discipline required</strong></td><td>Low — EMI is forced savings</td><td>High — you must self-manage</td></tr>
+      <tr><td><strong>Total interest paid</strong></td><td>Higher (interest on full amount)</td><td>Lower (if managed well)</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 11: YOUR PROFILE -->
+<!-- ============================================================ -->
+<!-- SECTION 10: RATE COMPARISON -->
+<!-- ============================================================ -->
+<!-- SECTION 9: IS OD WORTH IT? -->
+<!-- ============================================================ -->
+<div class="section" id="s9">
+  <div class="section-header">
+    <div class="section-num">9</div>
+    <h2>Is the OD Facility Worth the Premium?</h2>
+  </div>
+
+  <h3>SBI MaxGain (10 bps premium) — Cost vs Benefit</h3>
+  <div class="code-block">Extra cost of 10 bps premium over 20 years:
+₹1,65,00,000 - ₹1,62,48,000 = ₹2,52,000 total extra interest</div>
+
+  <table>
+    <thead><tr><th>Parked Amount</th><th>20-yr Saving</th><th>Minus Premium Cost</th><th>Net Benefit</th></tr></thead>
+    <tbody>
+      <tr><td>₹1,50,000</td><td>₹2,55,000</td><td>-₹2,52,000</td><td><span class="badge badge-yellow">Breakeven</span></td></tr>
+      <tr><td>₹3,00,000</td><td>₹5,10,000</td><td>-₹2,52,000</td><td><span class="badge badge-green">+₹2,58,000</span></td></tr>
+      <tr><td>₹5,00,000</td><td>₹8,50,000</td><td>-₹2,52,000</td><td><span class="badge badge-green">+₹5,98,000</span></td></tr>
+      <tr><td>₹10,00,000</td><td>₹17,00,000</td><td>-₹2,52,000</td><td><span class="badge badge-green">+₹14,48,000</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-good">
+    <div class="callout-title">SBI MaxGain Verdict</div>
+    You need to park just <strong>~₹1,50,000 consistently</strong> to break even on the premium. Anything above that is pure profit. This is an easy yes.
+  </div>
+
+  <h3>BOB Home Advantage (50 bps premium) — Cost vs Benefit</h3>
+  <div class="code-block">Extra cost of 50 bps premium over 20 years:
+₹1,72,92,000 - ₹1,59,96,000 = ₹12,96,000 total extra interest</div>
+
+  <table>
+    <thead><tr><th>Parked Amount</th><th>20-yr Saving</th><th>Minus Premium Cost</th><th>Net Benefit</th></tr></thead>
+    <tbody>
+      <tr><td>₹5,00,000</td><td>₹8,50,000</td><td>-₹12,96,000</td><td><span class="badge badge-red">-₹4,46,000 (LOSS)</span></td></tr>
+      <tr><td>₹7,60,000</td><td>₹12,92,000</td><td>-₹12,96,000</td><td><span class="badge badge-yellow">Breakeven</span></td></tr>
+      <tr><td>₹10,00,000</td><td>₹17,00,000</td><td>-₹12,96,000</td><td><span class="badge badge-green">+₹4,04,000</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-danger">
+    <div class="callout-title">BOB OD Verdict</div>
+    You need to park <strong>~₹7,60,000 consistently</strong> just to break even. BOB OD only makes sense if you routinely have ₹10L+ sitting idle. <strong>Not recommended for your profile.</strong>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 11: FINAL RECOMMENDATION -->
+<!-- ============================================================ -->
+<!-- SECTION 10: CIBIL 790 → 800+ -->
+<!-- ============================================================ -->
+<div class="section" id="s10">
+  <div class="section-header">
+    <div class="section-num">10</div>
+    <h2>CIBIL Score: 790 → 800+ Strategy</h2>
+  </div>
+
+  <h3>Your Current Score Profile</h3>
+  <table>
+    <thead><tr><th>Parameter</th><th>Your Data</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>CIBIL Score</td><td>790 (was 787 last month)</td><td><span class="badge badge-green">Trending Up</span></td></tr>
+      <tr><td>Payment History</td><td>733 / 733 (100%)</td><td><span class="badge badge-green">Perfect</span></td></tr>
+      <tr><td>Credit Utilization</td><td>0.52%</td><td><span class="badge badge-green">Excellent</span></td></tr>
+      <tr><td>Credit Mix</td><td>12 credit cards + 1 car loan</td><td><span class="badge badge-accent">Good</span></td></tr>
+      <tr><td>Hard Enquiries</td><td>4 since Jan 2026</td><td><span class="badge badge-red">Main Drag</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Score Factor Breakdown</h3>
+  <table>
+    <thead><tr><th>#</th><th>Factor</th><th>Weight</th><th>Your Data</th><th>Grade</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>Payment History</strong></td><td>~35%</td><td>733/733 (100%)</td><td><span class="badge badge-green">A+</span></td><td>Maximum positive contribution</td></tr>
+      <tr><td>2</td><td><strong>Credit Utilization</strong></td><td>~30%</td><td>0.52%</td><td><span class="badge badge-green">A</span></td><td>Strong positive, near-perfect</td></tr>
+      <tr><td>3</td><td><strong>Credit Age / History</strong></td><td>~15%</td><td>12 cards + 1 loan</td><td><span class="badge badge-accent">B+ to A-</span></td><td>Depends on age of oldest card</td></tr>
+      <tr><td>4</td><td><strong>Credit Mix</strong></td><td>~10%</td><td>12 revolving + 1 installment</td><td><span class="badge badge-accent">B+</span></td><td>Slightly skewed toward revolving</td></tr>
+      <tr><td>5</td><td><strong>Hard Enquiries</strong></td><td>~10%</td><td>4 since Jan 2026</td><td><span class="badge badge-red">C+</span></td><td><strong>This is your main drag</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h3>What's Holding You at 790?</h3>
+
+  <div class="callout callout-danger">
+    <div class="callout-title">Culprit #1: Hard Enquiries — The Biggest Drag</div>
+    Each hard enquiry costs <strong>5–10 points</strong>. With 4 enquiries since Jan 2026, you're carrying a <strong>20–40 point penalty</strong> that's slowly fading. Without these enquiries, based on your perfect payment history and ultra-low utilization, you'd likely be at <strong>810–820</strong>.
+  </div>
+
+  <h4>How Enquiry Impact Decays Over Time</h4>
+  <table>
+    <thead><tr><th>Enquiry Age</th><th>Impact on Score</th><th>Your Situation</th></tr></thead>
+    <tbody>
+      <tr><td>0–6 months</td><td><strong>Maximum</strong> (full penalty)</td><td>Your most recent enquiries</td></tr>
+      <tr><td>6–12 months</td><td><strong>Fading</strong> (about half)</td><td>Your Jan/Feb 2026 enquiries (8 months old)</td></tr>
+      <tr><td>12–24 months</td><td><strong>Negligible</strong></td><td>None yet — will reach this by Jan 2027</td></tr>
+      <tr><td>24+ months</td><td><strong>Zero</strong> (drops off report)</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Culprit #2: Average Age Dilution</div>
+    If any of those 4 enquiries resulted in new cards being opened, each new account <strong>lowers your average account age</strong>. Example: 8 cards averaging 7 years + 4 new cards at 0.5 years = average drops from 7 years to 4.83 years.
+  </div>
+
+  <div class="callout callout-good">
+    <div class="callout-title">NOT a Problem: Your 0.52% Utilization</div>
+    Your 0.52% is in the optimal 1–10% zone. Ultra-low utilization does <strong>not</strong> hurt your CIBIL score. The only concern would be 0% utilization (completely unused cards), which doesn't apply to you.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 14: CREDIT CARDS — KEEP OR CANCEL? -->
+<!-- ============================================================ -->
+<!-- SECTION 15: CAR LOAN PREPAYMENT -->
+<!-- ============================================================ -->
+<!-- SECTION 11: SCORE PROJECTION & ACTION PLAN -->
+<!-- ============================================================ -->
+<div class="section" id="s11">
+  <div class="section-header">
+    <div class="section-num">11</div>
+    <h2>Projected Score Timeline &amp; Action Plan</h2>
+  </div>
+
+  <h3>Score Projection (Based on Current Trajectory)</h3>
+  <p>Your score moved from 787 → 790 in one month as enquiries age off. Projected trajectory with <strong>zero new applications</strong>:</p>
+  <table>
+    <thead><tr><th>Month</th><th>Projected Score</th><th>What's Happening</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Aug 2026</strong> (current)</td><td><strong>790</strong></td><td>Current score, enquiries fading</td></tr>
+      <tr><td>Sep–Oct 2026</td><td>792–795</td><td>Oldest enquiries crossing 9–10 months</td></tr>
+      <tr><td>Nov–Dec 2026</td><td>795–800</td><td>Oldest enquiries near 12 months, minimal impact</td></tr>
+      <tr><td><strong>Jan–Feb 2027</strong></td><td><strong>800–810</strong></td><td>Jan 2026 enquiries cross 12 months, negligible impact</td></tr>
+      <tr><td>Mar–Apr 2027</td><td>805–815</td><td>All enquiries fading, strong history continues</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-good">
+    <div class="callout-title">You'll likely hit 800+ by Dec 2026 – Jan 2027</div>
+    If you make <strong>zero new credit applications</strong>. Your score is already moving upward. Stay the course.
+  </div>
+
+  <h3>Priority Action Plan</h3>
+
+  <h4>Priority 1: Stop All New Credit Applications <span class="badge badge-red">Critical — Immediate</span></h4>
+  <table>
+    <thead><tr><th>Action</th><th>Why</th><th>Score Impact</th></tr></thead>
+    <tbody>
+      <tr><td>Zero new credit card applications</td><td>Every enquiry costs 5–10 points</td><td><strong>+10–20 points</strong> as existing enquiries age</td></tr>
+      <tr><td>Zero new loan applications (except home loan)</td><td>Same reason</td><td>Preserves score</td></tr>
+      <tr><td>Don't apply for limit increases if they trigger hard pulls</td><td>Some banks do a hard pull</td><td>Ask bank first if it's a soft pull</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Priority 2: Keep Doing What You're Doing <span class="badge badge-green">Ongoing</span></h4>
+  <table>
+    <thead><tr><th>Habit</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>733/733 payments</td><td><span class="badge badge-green">Perfect</span></td><td>Never miss a single payment</td></tr>
+      <tr><td>0.52% utilization</td><td><span class="badge badge-green">Excellent</span></td><td>Stay under 10%</td></tr>
+      <tr><td>All cards active</td><td><span class="badge badge-green">Good</span></td><td>Use each card once every 2–3 months</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Priority 3: Check CIBIL Report for Errors <span class="badge badge-yellow">Do This Week</span></h4>
+  <p>15% of Indian credit reports contain at least one error. Even at 790, a corrected error could push you over 800.</p>
+  <table>
+    <thead><tr><th>What to Check</th><th>Common Errors</th></tr></thead>
+    <tbody>
+      <tr><td>All 12 cards showing correct status</td><td>A closed card showing "open" or vice versa</td></tr>
+      <tr><td>No duplicate accounts</td><td>Same card appearing twice</td></tr>
+      <tr><td>No wrong late payments</td><td>A payment reported late that was actually on time</td></tr>
+      <tr><td>No unknown enquiries</td><td>An enquiry you didn't authorise (potential fraud)</td></tr>
+      <tr><td>Correct personal details</td><td>Wrong PAN, address, or employer causing mix-ups</td></tr>
+    </tbody>
+  </table>
+  <p>Go to <strong><a href="https://www.cibil.com/freecibilscore" target="_blank">cibil.com/freecibilscore</a></strong> → download free annual report → dispute anything incorrect. Resolution takes 30 days by RBI mandate.</p>
+
+  <h3>What NOT to Do (Common Mistakes)</h3>
+  <table>
+    <thead><tr><th>Mistake</th><th>Why It's Bad</th></tr></thead>
+    <tbody>
+      <tr><td>Cancelling credit cards to "clean up"</td><td>Reduces total limit, raises utilization, shortens credit history</td></tr>
+      <tr><td>Settling car loan (instead of prepaying)</td><td>"Settled" status destroys score by 75–100 points</td></tr>
+      <tr><td>Applying for a new card for "better rewards"</td><td>One more hard enquiry = 5–10 points lost</td></tr>
+      <tr><td>Closing your oldest credit card</td><td>Biggest possible damage to credit age factor</td></tr>
+      <tr><td>Checking score on dodgy third-party apps</td><td>Most are soft pulls (safe), but some trigger hard pulls — verify</td></tr>
+      <tr><td>Doing nothing on inactive cards</td><td>Cards unused for 12–24 months may be auto-closed by bank</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The Bottom Line</h3>
+  <div class="winner-card">
+    <h3>Summary of Decisions</h3>
+    <table>
+      <thead><tr><th>Question</th><th>Answer</th></tr></thead>
+      <tbody>
+        <tr><td>Cancel credit cards?</td><td><strong>NO</strong> — Keep all 12. Manage them passively.</td></tr>
+        <tr><td>Part prepay car loan?</td><td><strong>Only if close to full closure</strong> and affordable without hurting down payment</td></tr>
+        <tr><td>What's holding you back?</td><td><strong>4 hard enquiries</strong> — this is 80% of the gap between 790 and 800+</td></tr>
+        <tr><td>When will you hit 800+?</td><td><strong>Dec 2026 – Jan 2027</strong> if you stop all new applications</td></tr>
+        <tr><td>Biggest risk?</td><td>Applying for ANY new credit before the home loan</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:16px; color:var(--text-dim);">Your fundamentals are nearly flawless — 733/733 payments, 0.52% utilization, 13 active accounts. The enquiries are the only thing in the way, and they're already fading. <strong>Patience is your best strategy.</strong></p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 12: CAR LOAN PART PAY OR NOT -->
+<!-- ============================================================ -->
+<div class="section" id="s12">
+  <div class="section-header">
+    <div class="section-num">12</div>
+    <h2>Car Loan (₹9L / ₹5.87L Remaining) — Part Pay?</h2>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Key Context: Home Loan in July 2027</div>
+    Every decision must be evaluated against: <strong>"How will this affect my score and eligibility when I apply in July 2027?"</strong>
+  </div>
+
+  <h3>Current Car Loan Numbers</h3>
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Original loan</td><td>₹9,00,000</td></tr>
+      <tr><td>Remaining principal</td><td>₹5,87,000</td></tr>
+      <tr><td>EMI</td><td>₹15,000/month</td></tr>
+      <tr><td>Lender</td><td>SBI</td></tr>
+      <tr><td>Estimated remaining tenure</td><td>~45–48 months</td></tr>
+    </tbody>
+  </table>
+
+  <h3>By July 2027 (Without Prepayment)</h3>
+  <div class="code-block">Monthly interest (at ~9%):    ₹5,87,000 × 9% ÷ 12 = ~₹4,400
+Monthly principal:           ₹15,000 - ₹4,400 = ~₹10,600
+Principal paid in 10 months: ~₹1,10,000
+Remaining by July 2027:     ~₹4,77,000
+EMI still:                   ₹15,000/month</div>
+
+  <h3>Options Analysis</h3>
+  <table>
+    <thead><tr><th>Option</th><th>CIBIL Impact</th><th>FOIR Impact</th><th>Cash Impact</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Do nothing</strong></td>
+        <td><span class="badge badge-green">Neutral</span> Regular payments build history</td>
+        <td>₹15K still counts</td>
+        <td>No extra outflow</td>
+        <td><span class="badge badge-green">Best option</span></td>
+      </tr>
+      <tr>
+        <td><strong>Part pay ₹1–2L</strong></td>
+        <td><span class="badge badge-yellow">Negligible</span></td>
+        <td>Only helps if bank restructures to lower EMI</td>
+        <td>-₹1–2L from savings</td>
+        <td><span class="badge badge-yellow">Optional</span></td>
+      </tr>
+      <tr>
+        <td><strong>Part pay ₹3L+</strong></td>
+        <td><span class="badge badge-yellow">Negligible</span></td>
+        <td>Good if restructured</td>
+        <td>-₹3L+ — eats into down payment</td>
+        <td><span class="badge badge-red">Don't</span></td>
+      </tr>
+      <tr>
+        <td><strong>Full closure (₹5.87L)</strong></td>
+        <td><span class="badge badge-yellow">Slight positive</span> but loses installment mix</td>
+        <td>Eliminates ₹15K EMI</td>
+        <td>-₹5.87L — heavy hit</td>
+        <td><span class="badge badge-red">Don't</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-good">
+    <div class="callout-title">Recommendation: Do Nothing</div>
+    <ol>
+      <li>You already qualify for ₹1.5Cr even with the ₹15K car EMI (FOIR = 55%)</li>
+      <li>Part prepayment has <strong>negligible</strong> CIBIL score impact</li>
+      <li>Preserve every rupee for the <strong>₹50L+ down payment</strong> + ₹12–18L stamp duty</li>
+      <li>The car loan gives you <strong>installment credit mix</strong> — valuable for your credit profile</li>
+      <li>SBI home loan officers see you're an existing SBI borrower — relationship benefit</li>
+    </ol>
+  </div>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">If You Do Part Prepay</div>
+    Call SBI and explicitly ask for <strong>EMI reduction</strong> (not tenure reduction). By default, banks reduce tenure and keep EMI the same — that doesn't help your FOIR.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 13: AU ZENITH+ UPGRADE -->
+<!-- ============================================================ -->
+<div class="section" id="s13">
+  <div class="section-header">
+    <div class="section-num">13</div>
+    <h2>AU Zenith → Zenith+ Upgrade (November)</h2>
+  </div>
+
+  <h3>How Different Upgrade Types Affect Your Score</h3>
+  <table>
+    <thead><tr><th>Upgrade Type</th><th>Hard Pull?</th><th>Account Change?</th><th>Score Impact</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Bank-initiated</strong> (AU offers via app/SMS)</td>
+        <td>Usually <strong>NO</strong></td>
+        <td>Same account continues</td>
+        <td><span class="badge badge-green">Minimal to zero</span></td>
+      </tr>
+      <tr>
+        <td><strong>You apply as new card</strong></td>
+        <td><strong>YES</strong></td>
+        <td>New account, old may close</td>
+        <td><span class="badge badge-red">Negative</span> (5–10 pts + age dilution)</td>
+      </tr>
+      <tr>
+        <td><strong>Upgrade with new card number</strong> (same account)</td>
+        <td>Usually <strong>NO</strong></td>
+        <td>Account age preserved</td>
+        <td><span class="badge badge-green">Zero to positive</span> (higher limit helps)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>What To Do Before Accepting</h3>
+  <p>Call AU Bank (<strong>1800 1200 1200</strong>) and ask these exact questions:</p>
+  <ol>
+    <li>"Will this upgrade trigger a <strong>hard enquiry</strong> on my CIBIL report?"</li>
+    <li>"Will my existing <strong>account number remain the same</strong> or will a new account be opened?"</li>
+    <li>"Will my <strong>credit history length</strong> be preserved on the new card?"</li>
+  </ol>
+
+  <table>
+    <thead><tr><th>If AU Says…</th><th>Impact</th><th>Do It?</th></tr></thead>
+    <tbody>
+      <tr><td>Same account, no hard pull</td><td>Zero impact</td><td><span class="badge badge-green">Yes — go ahead</span></td></tr>
+      <tr><td>New account but no hard pull</td><td>Minor age dilution</td><td><span class="badge badge-green">Yes — acceptable</span></td></tr>
+      <tr><td>Hard pull required</td><td>5–10 point drop</td><td><span class="badge badge-yellow">Proceed — 8 months to recover before July 2027</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-good">
+    <div class="callout-title">Verdict: Proceed With the Upgrade</div>
+    Even in the worst case (hard pull + new account), the 8-month gap before your home loan gives enough recovery time. A higher credit limit from Zenith+ will <strong>help</strong> your utilization ratio.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 21: GPAY & FREE SCORE CHECKS -->
+<!-- ============================================================ -->
+<!-- SECTION 14: 2 NEW CREDIT CARDS -->
+<!-- ============================================================ -->
+<div class="section" id="s14">
+  <div class="section-header">
+    <div class="section-num">14</div>
+    <h2>2 New Credit Cards — Should You Apply?</h2>
+  </div>
+
+  <h3>Score Impact Modelling</h3>
+
+  <div class="comparison-grid">
+    <div class="compare-card recommended">
+      <h4 style="color:var(--green)">Scenario A: No New Cards</h4>
+      <p>Total enquiries stay at 4</p>
+      <p>By July 2027: all 4 enquiries are 12–18 months old (negligible)</p>
+      <p><strong>Projected score Jul 2027: 810–815</strong></p>
+      <p>Enquiries in last 12 months at application: <strong>0</strong></p>
+    </div>
+    <div class="compare-card">
+      <h4 style="color:var(--yellow)">Scenario B: 2 Cards in Oct 2026</h4>
+      <p>Total enquiries become 6</p>
+      <p>Immediate drop: 790 → 770–780</p>
+      <p><strong>Projected score Jul 2027: 800–808</strong></p>
+      <p>Enquiries in last 12 months at application: <strong>2</strong></p>
+    </div>
+  </div>
+
+  <h3>The Hidden Factor: Loan Officer Perception</h3>
+  <p>Beyond the raw score, home loan officers <strong>manually review</strong> your credit report:</p>
+  <table>
+    <thead><tr><th>What They See</th><th>With 2 New Cards</th><th>Without</th><th>Impact</th></tr></thead>
+    <tbody>
+      <tr><td>"Enquiries in last 12 months"</td><td><strong>2</strong></td><td><strong>0</strong></td><td>"0" looks much cleaner</td></tr>
+      <tr><td>"New accounts opened recently"</td><td>2 cards (age &lt; 1 year)</td><td>None</td><td>More stability without</td></tr>
+      <tr><td>Total active credit cards</td><td><strong>14</strong></td><td><strong>12</strong></td><td>14 raises more eyebrows</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Decision Framework</h3>
+  <table>
+    <thead><tr><th>If Your Requirement Is…</th><th>Decision</th><th>Reasoning</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>"Nice to have" rewards / lounges / cashback</td>
+        <td><span class="badge badge-red">Don't Apply</span></td>
+        <td>Not worth 10 points and 2 enquiries</td>
+      </tr>
+      <tr>
+        <td>Significant money saver (forex card, fuel card saving ₹2K+/month)</td>
+        <td><span class="badge badge-yellow">Apply for 1 Only</span> in Oct 2026</td>
+        <td>1 enquiry = 5 pts, 9 months aging, manageable</td>
+      </tr>
+      <tr>
+        <td>Truly essential (being discontinued, business need)</td>
+        <td><span class="badge badge-yellow">Apply for Both</span> in same week, Oct 2026</td>
+        <td>Clustering looks like rate-shopping, not credit-hungry</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>If You Decide to Apply — Timing Rules</h3>
+  <table>
+    <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Apply by <strong>October 2026 latest</strong></td><td>Maximum aging time (9 months) before July 2027</td></tr>
+      <tr><td>Apply for <strong>both in the same week</strong></td><td>Clustering looks like rate-shopping</td></tr>
+      <tr><td><strong>Do NOT apply after December 2026</strong></td><td>&lt; 6 months before home loan = enquiries at peak impact</td></tr>
+      <tr><td><strong>Zero more credit after these 2</strong></td><td>Nov 2026 to July 2027 = absolute freeze</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Honest Take</div>
+    With 12 credit cards, it's hard to imagine a "specific requirement" that can't be met by an existing card. Unless it's genuinely unique, <strong>skip it and go into the home loan with the cleanest possible report — zero enquiries in the last 12 months.</strong>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 15: JULY 2027 MASTER PLAN -->
+</div><!-- /container -->
+
+</body>
+</html>

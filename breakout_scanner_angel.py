@@ -1,13 +1,13 @@
 """
-Breakout Scanner v4.4 (Angel One edition) — Pre-Breakout Setup Detector
+Breakout Scanner v4.5 (Angel One edition) — Pre-Breakout Setup Detector
 ========================================================================
 
 Breakout scanner that identifies stocks forming horizontal resistance bases
 and approaching breakout levels. Runs the full pipeline end-to-end:
 universe generation → OHLCV download → pattern detection → scoring →
-Excel + chart output.
+LLM quality assessment → LLM conviction filter → Excel + chart output.
 
-ARCHITECTURE (v4.4)
+ARCHITECTURE (v4.5)
 -------------------
 A single universe is scanned:
 
@@ -27,6 +27,16 @@ The breakout scan detects:
   - Relative strength vs Nifty 500 (rising RS line over 50 sessions)
   - Risk/reward plan (stop, target, R:R ratio)
 
+LLM INTELLIGENCE LAYER (v4.5):
+  - Pattern Quality: LLM evaluates each detected pattern (C&H, VCP, W)
+    for textbook quality, volume confirmation, and base cleanliness.
+    Quality < 5/10 downgrades high_conviction to False.
+  - Smart Filter: LLM conviction court reviews all candidates after
+    scoring, checking base quality, risk profile, regime fit, and
+    kill signals. Rejected picks are dropped.
+  - Graceful degradation: --no-llm flag disables all LLM features,
+    reverting to pure rule-based behavior.
+
 SCORING (v4.3)
 --------------
   Composite score 0-100 from: base_quality, vcr, vdu, proximity,
@@ -35,6 +45,7 @@ SCORING (v4.3)
 
   HIGH-CONVICTION requires ALL of:
     - One structural pattern (multi_touch ≥2 OR vcp OR w_pattern OR cup_handle)
+    - LLM pattern quality ≥ 5 (when LLM enabled)
     - Close > 50 DMA (stage2)
     - Not extended (no vertical chase)
     - Distance to R: -5% to +4%
@@ -123,6 +134,14 @@ import pandas as pd
 from dotenv import load_dotenv
 
 import screener_client
+
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
+_USE_LLM = True
 
 warnings.filterwarnings("ignore")
 
@@ -1199,6 +1218,143 @@ def w_pattern(df: pd.DataFrame, base_start, R: float) -> bool:
     return False
 
 
+# ─── LLM Pattern Quality & Smart Filter ─────────────────────────
+
+def llm_pattern_quality(df: pd.DataFrame, pattern_type: str,
+                        pattern_metrics: dict) -> Optional[dict]:
+    """LLM evaluates a detected chart pattern for textbook quality.
+
+    Returns quality assessment or None if LLM unavailable.
+    """
+    if not _USE_LLM or not llm_json or not llm_is_available():
+        return None
+
+    last_30 = df.tail(30)
+    ohlcv_compact = []
+    for _, row in last_30.iterrows():
+        ohlcv_compact.append(
+            f"O={row['Open']:.1f} H={row['High']:.1f} "
+            f"L={row['Low']:.1f} C={row['Close']:.1f} "
+            f"V={int(row['Volume'])}")
+
+    result = llm_json(
+        "You are a chart pattern analysis expert for Indian equities. "
+        "Respond with valid JSON only.",
+        f"""Evaluate this detected {pattern_type} pattern.
+A rule-based detector found it, but rule-based detection is crude.
+
+PATTERN METRICS:
+{json.dumps(pattern_metrics, default=str)}
+
+LAST 30 BARS (OHLCV):
+{chr(10).join(ohlcv_compact[-15:])}
+
+Assess:
+1. Is this a textbook {pattern_type} or a marginal/false detection?
+2. Does volume confirm the pattern? (declining in base, expanding at R)
+3. Is the base clean and orderly or choppy/messy?
+
+Return JSON:
+{{"quality": 0-10,
+  "textbook": true/false,
+  "volume_confirmed": true/false,
+  "concerns": ["list of issues if any"]}}""",
+        max_tokens=600,
+    )
+    return result
+
+
+def llm_scan_filter(rows: list, bench: pd.Series,
+                    ohlcv: dict) -> list:
+    """LLM reviews all V4.4 scan results and applies a conviction court filter.
+
+    Targets 95%+ hit rate by rejecting weak setups the rules can't catch.
+    Returns filtered rows list.
+    """
+    if not _USE_LLM or not llm_json or not llm_is_available():
+        return rows
+    if not rows or len(rows) <= 2:
+        return rows
+
+    print(f"\n  LLM scan filter reviewing {len(rows)} V4.4 picks...")
+
+    pick_summaries = []
+    for r in rows[:20]:
+        sym = r["symbol"]
+        last_bars = ""
+        if sym in ohlcv:
+            tail = ohlcv[sym].tail(5)
+            bars = []
+            for _, row in tail.iterrows():
+                bars.append(f"C={row['Close']:.1f} V={int(row['Volume'])}")
+            last_bars = " | ".join(bars)
+
+        pick_summaries.append(
+            f"{sym}: score={r['score']:.0f}, HC={r['high_conviction']}, "
+            f"pattern={r.get('hc_path', 'none')}, "
+            f"close={r['close']}, R={r['resistance']}, "
+            f"dist={r['distance_pct']:.1f}%, "
+            f"touches={r['touches']}, base={r['base_days']}d, "
+            f"range={r.get('base_range_pct', 0):.1f}%, "
+            f"rr={r.get('rr', 0)}, rs_rising={r.get('rs_rising_50d')}"
+            f"\n    Last 5 bars: {last_bars}")
+
+    bench_last = float(bench.iloc[-1]) if len(bench) > 0 else 0
+    bench_20d = float(bench.tail(20).mean()) if len(bench) >= 20 else bench_last
+    regime_hint = "bullish" if bench_last > bench_20d else "cautious"
+
+    result = llm_json(
+        "You are the final conviction filter for a pre-breakout scanner "
+        "targeting 95%+ success rate for Indian stocks. "
+        "Respond with valid JSON only.",
+        f"""Review these V4.4 breakout candidates. Your job: find reasons to REJECT.
+A pick must survive your scrutiny. Be paranoid — a false positive costs
+more than a missed opportunity.
+
+MARKET: Nifty benchmark last={bench_last:.0f}, 20d avg={bench_20d:.0f}, "
+regime={regime_hint}
+
+CANDIDATES:
+{chr(10).join(pick_summaries)}
+
+For each pick, check:
+1. Base quality — clean consolidation or choppy?
+2. Risk profile — R:R acceptable? Stop too far?
+3. Distance — already above R = chasing
+4. Pattern — any pattern detected? How reliable?
+5. RS — rising or fading?
+6. Volume character from last 5 bars
+
+Return JSON:
+{{"verdicts": [{{
+    "symbol": "X.NS",
+    "verdict": "APPROVE" | "REJECT",
+    "conviction": 0-100,
+    "reason": "1 sentence"
+}}]}}""",
+        max_tokens=2000,
+    )
+
+    if not result or "verdicts" not in result:
+        print("  LLM scan filter unavailable, keeping all")
+        return rows
+
+    verdict_map = {v["symbol"]: v for v in result["verdicts"]}
+    kept = []
+    rejected = 0
+    for r in rows:
+        v = verdict_map.get(r["symbol"])
+        if v and v.get("verdict") == "REJECT":
+            rejected += 1
+            continue
+        if v:
+            r["llm_conviction"] = v.get("conviction", 50)
+        kept.append(r)
+
+    print(f"  LLM filter: {len(kept)} kept, {rejected} rejected")
+    return kept
+
+
 # ─── Minervini Trend Template ────────────────────────────────────
 
 def build_minervini_universe() -> list:
@@ -1434,12 +1590,18 @@ def scan_minervini(ohlcv: dict) -> tuple:
 # ─── Scan driver ─────────────────────────────────────────────────
 
 def scan(symbols: list, ohlcv: dict, bench: pd.Series,
-         min_score: float, strict: bool = True) -> tuple:
+         min_score: float, strict: bool = True,
+         use_llm: bool = True) -> tuple:
     """Run per-ticker scan. Returns (rows, drop_counts).
 
     When strict=True, the v3.3 hard gates are enforced and every drop
     is logged into drop_counts for the funnel report. strict=False
-    disables gates (diagnostic v1 funnel)."""
+    disables gates (diagnostic v1 funnel).
+
+    When use_llm=True (default), detected patterns are evaluated by LLM
+    for quality scoring, and the final result set is filtered through
+    an LLM conviction court.
+    """
     rows = []
     drops: dict = {}
 
@@ -1527,6 +1689,19 @@ def scan(symbols: list, ohlcv: dict, bench: pd.Series,
             pattern_ok = bool(pattern_multitouch or pattern_vcp
                               or pattern_w or pattern_ch)
 
+            llm_quality = None
+            if use_llm and pattern_ok and pattern_label:
+                metrics = {
+                    "pattern": pattern_label, "touches": res["touches"],
+                    "base_days": res["base_len_days"],
+                    "base_range_pct": round(base_geo["range_pct"] * 100, 2),
+                    "n_vcp": n_vcp, "R": round(R, 2),
+                    "close": round(float(df["Close"].iloc[-1]), 2),
+                }
+                llm_quality = llm_pattern_quality(df, pattern_label, metrics)
+                if llm_quality and llm_quality.get("quality", 10) < 5:
+                    pattern_ok = False
+
             risk = risk_plan(df, res)
             distance_pct_value = round(res["distance_pct"] * 100, 2)
 
@@ -1568,12 +1743,18 @@ def scan(symbols: list, ohlcv: dict, bench: pd.Series,
                 "pattern_w": pattern_w,
                 "pattern_cup_handle": pattern_ch,
                 "n_vcp": n_vcp,
+                "llm_pattern_quality": (llm_quality.get("quality")
+                                        if llm_quality else None),
                 **risk,
             })
         except Exception as e:
             print(f"  [{sym}] error: {e}")
         if i % 100 == 0:
             print(f"  scanned {i}/{n} ...")
+
+    if use_llm and rows:
+        rows = llm_scan_filter(rows, bench, ohlcv)
+
     return rows, drops
 
 
@@ -1618,8 +1799,13 @@ def main():
                         "correct), 'screener' = reuse the screener universe")
     p.add_argument("--skip-minervini", action="store_true",
                    help="skip the MinerviniTrend sheet (keeps runs fast)")
+    p.add_argument("--no-llm", action="store_true",
+                   help="disable LLM pattern quality and scan filtering")
     args = p.parse_args()
     strict = not args.no_strict
+
+    global _USE_LLM
+    _USE_LLM = not args.no_llm
 
     # Tee stdout+stderr to Output/logs/ so logs land in the right place.
     log_path = os.path.join(OUTPUT_DIR, "logs",
@@ -1651,7 +1837,8 @@ def main():
         ohlcv = fetch_ohlcv(tickers, args.lookback)
         bench = fetch_benchmark(args.lookback)
         rows, drops = scan(list(ohlcv.keys()), ohlcv, bench,
-                           effective_min_score, strict=strict)
+                           effective_min_score, strict=strict,
+                           use_llm=_USE_LLM)
         _print_scan_stats(rows, drops, effective_min_score)
         if rows:
             excel_path = os.path.join(SCRIPT_DIR, "breakout_watchlist.xlsx")
@@ -1707,7 +1894,8 @@ def main():
             ohlcv_scr = fetch_ohlcv(scr_tickers, args.lookback)
             print("\n  Scanning universe ...")
             scr_rows, scr_drops = scan(list(ohlcv_scr.keys()), ohlcv_scr,
-                                       bench, effective_min_score, strict=strict)
+                                       bench, effective_min_score, strict=strict,
+                                       use_llm=_USE_LLM)
             _print_scan_stats(scr_rows, scr_drops, effective_min_score)
         else:
             print("  No tickers resolved — skipping scan.")

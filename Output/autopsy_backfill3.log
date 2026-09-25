@@ -1,0 +1,25 @@
+
+======================================================================
+STOCK AUTOPSY — BACKFILL 90 DAYS
+======================================================================
+
+1. Loading OHLCV universe for full backfill window...
+    OHLCV: 1000/3142 (999 loaded) [1s]
+    OHLCV: 2000/3142 (1998 loaded) [3s]
+    OHLCV: 3000/3142 (2995 loaded) [4s]
+    OHLCV done: 3137/3142 loaded, 5 no cache file [4s]
+   OHLCV loaded for 3137 tickers
+
+2. Processing 90 trading days...
+
+  2026-09-02: 72 new runners (daily: 72, weekly: 0)
+/Users/ankit.srivastava/Documents/Analysis/.venv/lib/python3.11/site-packages/jugaad_data/util.py:38: UserWarning: no explicit representation of timezones available for np.datetime64
+  return np.datetime64(dt)
+
+  2026-09-03: 101 new runners (daily: 101, weekly: 0)
+
+  2026-09-04: 111 new runners (daily: 111, weekly: 0)
+
+  2026-09-07: 119 new runners (daily: 119, weekly: 0)
+
+  2026-09-08: 96 new runners (daily: 96, weekly: 0)

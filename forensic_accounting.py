@@ -149,7 +149,16 @@ except Exception:
 
 import screener_client
 
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Global flag — set by run() based on --no-llm CLI arg
+_USE_LLM = True
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RESILIENCE: Same-day cache + Retry logic with backoff
@@ -5598,6 +5607,13 @@ class DeepFundamentalAnalyzer:
                 "policy_changes": len(policy_changes),
                 "policy_change_excerpts": policy_changes[:3],
             }
+
+            llm_ar = llm_annual_report_analysis(text, yr_result)
+            if llm_ar:
+                yr_result["llm_analysis"] = llm_ar
+                yr_result["llm_governance_score"] = llm_ar.get("governance_score")
+                yr_result["llm_key_findings"] = llm_ar.get("key_findings", [])
+
             all_year_results.append(yr_result)
 
         # Aggregate flags
@@ -7507,6 +7523,51 @@ class ForensicReport(FPDF):
                 shown += 1
             self.set_text_color(0, 0, 0)
 
+    def add_llm_executive_summary(self):
+        """LLM-generated narrative connecting forensic indicators. Skipped if unavailable."""
+        llm_data = getattr(self.d, "llm_executive_summary", None)
+        if not llm_data:
+            return
+
+        self._section("AI FORENSIC NARRATIVE")
+
+        summary = llm_data.get("executive_summary", "")
+        if summary:
+            self._subsection("Executive Narrative")
+            self.set_font("Calibri", "", 9)
+            self.multi_cell(0, 5, _latin(summary), new_x="LMARGIN", new_y="NEXT")
+            self.ln(2)
+
+        connections = llm_data.get("key_connections", [])
+        if connections:
+            self._subsection("Cross-Indicator Connections")
+            self.set_font("Calibri", "", 9)
+            for i, conn in enumerate(connections[:5], 1):
+                self.multi_cell(0, 4.5, _latin("%d. %s" % (i, conn)),
+                                new_x="LMARGIN", new_y="NEXT")
+            self.ln(2)
+
+        sector_ctx = llm_data.get("sector_context", "")
+        if sector_ctx:
+            self._subsection("Sector Context")
+            self.set_font("Calibri", "", 9)
+            self.multi_cell(0, 5, _latin(sector_ctx), new_x="LMARGIN", new_y="NEXT")
+            self.ln(2)
+
+        conviction = llm_data.get("conviction", "")
+        if conviction:
+            self.set_font("Calibri", "B", 9)
+            self.cell(0, 5, _latin("AI Conviction: %s" % conviction),
+                      new_x="LMARGIN", new_y="NEXT")
+            self.set_font("Calibri", "I", 7)
+            self.set_text_color(120, 120, 120)
+            self.cell(0, 4,
+                      _latin("Note: AI narrative is generated from pre-computed scores. "
+                             "All underlying data and forensic scores are deterministic."),
+                      new_x="LMARGIN", new_y="NEXT")
+            self.set_text_color(0, 0, 0)
+            self.ln(2)
+
     def add_company_overview(self):
         """Company overview section."""
         self._check_page_break(60)
@@ -8506,6 +8567,7 @@ class ForensicReport(FPDF):
             print("  TOC placeholder failed: %s" % e)
         self.add_key_red_flags_summary()
         self.add_executive_summary()
+        self.add_llm_executive_summary()
         self.add_recommendation_page()  # Section 2: right after executive summary
 
         # ── SECTION ORDER: Logical analysis flow ──
@@ -9746,18 +9808,151 @@ def fetch_comparison_metrics(symbols):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# LLM SYNTHESIS LAYER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def llm_executive_summary(symbol, analyzer, deep_results, data):
+    """Generate a 1-page executive summary connecting all forensic indicators.
+
+    Called after all computation is done. Returns a dict with narrative fields
+    or None if LLM is unavailable / fails.
+    """
+    if not _USE_LLM or not llm_json or not llm_is_available():
+        return None
+
+    overall = analyzer.results.get("overall", {})
+    deep_sc = deep_results.get("deep_score", {}) if deep_results else {}
+
+    score_summary = {
+        "forensic_score": overall.get("final_score", 0),
+        "recommendation": overall.get("recommendation", "N/A"),
+        "deep_score": deep_sc.get("final_score", 0),
+        "beneish": analyzer.results.get("beneish", {}).get("m_score"),
+        "altman_z": analyzer.results.get("altman", {}).get("z_score"),
+        "piotroski_f": analyzer.results.get("piotroski", {}).get("f_score"),
+        "springate": analyzer.results.get("springate", {}).get("s_score"),
+        "ohlson_o": analyzer.results.get("ohlson", {}).get("o_score"),
+        "montier_c": analyzer.results.get("montier", {}).get("c_score"),
+        "cashflow_quality": analyzer.results.get("cashflow", {}).get("quality"),
+        "red_flags": [str(f) for f in analyzer.red_flags[:10]],
+        "green_flags": [str(f) for f in analyzer.green_flags[:10]],
+    }
+
+    shareholding = {}
+    if hasattr(data, "shareholding_quarterly") and data.shareholding_quarterly:
+        sh = data.shareholding_quarterly
+        if isinstance(sh, list) and sh:
+            latest = sh[0] if isinstance(sh[0], dict) else {}
+            shareholding = {
+                "promoter_pct": latest.get("promoter_pct"),
+                "fii_pct": latest.get("fii_pct"),
+                "dii_pct": latest.get("dii_pct"),
+                "pledge_pct": latest.get("pledge_pct"),
+            }
+
+    risk_factors = []
+    if hasattr(deep_results, "get"):
+        rf = deep_results.get("risk", {})
+        if isinstance(rf, dict):
+            risk_factors = rf.get("factors", [])[:8]
+
+    user_data = json.dumps({
+        "symbol": symbol,
+        "scores": score_summary,
+        "shareholding": shareholding,
+        "risk_factors": [str(r) for r in risk_factors],
+        "moat_signals": [str(s) for s in getattr(analyzer, "moat_signals", [])[:5]]
+            if hasattr(analyzer, "moat_signals") else [],
+    }, default=str)
+
+    system_prompt = (
+        "You are a forensic accounting analyst specialising in Indian equities. "
+        "Given pre-computed forensic scores, red/green flags, shareholding data, "
+        "and risk factors for a stock, produce a concise executive summary.\n\n"
+        "Return JSON with these keys:\n"
+        "- executive_summary: 4-6 sentence narrative connecting the key indicators. "
+        "Highlight where multiple signals converge (e.g. rising M-Score + declining "
+        "promoter holding + new pledge = serious concern). Use plain English.\n"
+        "- key_connections: list of 3-5 cross-indicator connections found.\n"
+        "- sector_context: 1-2 sentences on how this company's metrics compare to "
+        "typical sector norms (use your knowledge of Indian market sectors).\n"
+        "- conviction: one of STRONG_BUY, BUY, HOLD, SELL, STRONG_AVOID — your "
+        "independent assessment based on the forensic evidence."
+    )
+
+    print("  [LLM] Generating executive summary …")
+    try:
+        result = llm_json(system_prompt, user_data, max_tokens=2000)
+        if result:
+            print("  [LLM] Executive summary generated (%d chars)" %
+                  len(result.get("executive_summary", "")))
+        return result
+    except Exception as e:
+        print("  [LLM] Executive summary failed: %s" % e)
+        return None
+
+
+def llm_annual_report_analysis(text, regex_results):
+    """Complement regex-based annual report NLP with LLM contextual analysis.
+
+    Called per annual report after regex extraction. Returns a dict with
+    severity assessments or None if LLM unavailable.
+    """
+    if not _USE_LLM or not llm_json or not llm_is_available():
+        return None
+
+    truncated = text[:8000] if len(text) > 8000 else text
+
+    user_data = json.dumps({
+        "annual_report_text": truncated,
+        "regex_findings": {
+            "related_party_mentions": regex_results.get("related_party_mentions", 0),
+            "contingent_mentions": regex_results.get("contingent_mentions", 0),
+            "auditor_concerns": regex_results.get("auditor_concerns", 0),
+            "policy_changes": regex_results.get("policy_changes", 0),
+        },
+    }, default=str)
+
+    system_prompt = (
+        "You are an auditor reviewing an Indian company's annual report. "
+        "The regex scanner already found approximate mention counts. Now do a "
+        "deeper contextual analysis of the text.\n\n"
+        "Return JSON with:\n"
+        "- related_party_severity: high / medium / low / none — based on "
+        "amount materiality and nature of transactions\n"
+        "- auditor_concern_level: qualified / emphasis / clean — the most "
+        "serious auditor observation\n"
+        "- contingent_risk: high / medium / low / none — based on amounts "
+        "relative to net worth\n"
+        "- policy_change_impact: material / minor / none\n"
+        "- key_findings: list of 3-5 important findings not captured by "
+        "simple pattern matching\n"
+        "- governance_score: 0-10 (10 = excellent governance)"
+    )
+
+    try:
+        return llm_json(system_prompt, user_data, max_tokens=1500)
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(symbol=None, documents_dir=None, compare=None):
+def run(symbol=None, documents_dir=None, compare=None, use_llm=True):
     """Run the complete forensic + deep fundamental analysis.
-    
+
     Args:
         symbol: NSE symbol (e.g. 'RELIANCE'). Defaults to COMPANY_SYMBOL.
         documents_dir: Optional path to a folder containing concall PDFs
                        and annual report PDFs for NLP analysis.
         compare: List of NSE symbols to include in comparative analysis section.
+        use_llm: If False, skip all LLM calls (equivalent to --no-llm).
     """
+    global _USE_LLM
+    _USE_LLM = use_llm
+
     if symbol is None:
         symbol = COMPANY_SYMBOL
 
@@ -9843,6 +10038,10 @@ def run(symbol=None, documents_dir=None, compare=None):
     deep_results = deep_analyzer.run_all(documents_dir=documents_dir)
     data.deep_results = deep_results
 
+    # Step 4b: LLM Executive Summary (post-processing — all data computed)
+    data.llm_executive_summary = llm_executive_summary(
+        symbol, analyzer, deep_results, data)
+
     # Step 5: Generate PDF
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     pdf_name = "forensic_report_%s_%s.pdf" % (symbol, timestamp)
@@ -9883,10 +10082,12 @@ if __name__ == "__main__":
     parser.add_argument("--compare", "-c", type=str, default=None,
                         help="Comma-separated list of peer symbols for comparative analysis "
                              "(e.g. --compare DANISH,VOLTAMP,INDOTECH,SHILCTECH)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="Skip LLM narrative synthesis (report uses computed scores only)")
     args = parser.parse_args()
 
     compare_list = None
     if args.compare:
         compare_list = [s.strip() for s in args.compare.split(",") if s.strip()]
 
-    run(symbol=args.symbol, compare=compare_list)
+    run(symbol=args.symbol, compare=compare_list, use_llm=not args.no_llm)

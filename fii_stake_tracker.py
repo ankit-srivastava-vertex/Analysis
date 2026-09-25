@@ -10,6 +10,12 @@ where Foreign Institutional Investors (FII/FPI) have:
   2. Increased stake from last quarter (quarter-on-quarter increase).
   3. Been increasing stake over multiple consecutive quarters.
 
+LLM ENHANCEMENT (optional, via Azure OpenAI):
+  When LLM is available, generates a conviction shortlist of 10-15 top picks
+  from the top 50 FII-accumulating stocks, enriched with Weinstein stage data.
+  Each pick includes a 1-sentence thesis and conviction rating.
+  Disable with --no-llm; the module works identically without LLM.
+
 WORKFLOW
 --------
 1. **Data Fetch (Primary — Tickertape)**
@@ -61,8 +67,9 @@ WORKFLOW
    - "Increased Stake"          — this quarter only.
 
 5. **HNI / Superstar Holdings**
-   Scrapes 33 Screener.in `/people/` pages (Kacholia, Kedia, Mukul Agrawal,
-   Malabar, Steadview ...), comparing the latest two quarters per holding to
+   Scrapes Screener.in `/people/` pages from investor_registry.py (Kacholia,
+   Kedia, Mukul Agrawal, Malabar, Steadview ...), comparing the latest two
+   quarters per holding to
    flag "New Entry" / "Increased" / "Decreased" / "Exited"; holdings left
    unchanged are skipped. These pages only carry stakes above the 1% SEBI
    disclosure threshold, so "New Entry" means "crossed 1%" and "Exited" means
@@ -166,6 +173,19 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 import screener_client
+
+try:
+    from llm_client import llm_json, is_available as llm_is_available
+except ImportError:
+    llm_json = None
+    def llm_is_available(): return False
+
+try:
+    from stage_analysis import stage_for as _stage_for
+except ImportError:
+    _stage_for = None
+
+_USE_LLM = True
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -1015,57 +1035,8 @@ def _enrich_with_streaks(df):
 # latest two quarters per row to flag "New Entry" / "Increased" / "Decreased" /
 # "Exited".  Only stakes above the 1% disclosure threshold appear at all.
 HNI_PAGE_TTL_HOURS = 12  # these pages only change when a filing lands
-HNI_PEOPLE_URLS = [
-    "https://www.screener.in/people/127736/ashish-kacholia/",
-    "https://www.screener.in/people/148535/bengal-finance-and-investment-pvt-ltd/",
-    "https://www.screener.in/people/64/bengal-finance-and-ninvestment-private-limited/",
-    "https://www.screener.in/people/19205/suryavanshi-commotrade-private-limited/",
-    "https://www.screener.in/people/133451/bengal-finance-investment-p-ltd/",
-    "https://www.screener.in/people/153475/rba-finance-investment-co-partnership-firm/",
-    "https://www.screener.in/people/2350/suresh-kumar-agarwal/",
-    "https://www.screener.in/people/163158/vijay-kishanlal-kedia/",
-    "https://www.screener.in/people/134160/vijay-kedia/",
-    "https://www.screener.in/people/7379/kedia-secuirities-private-limited/",
-    "https://www.screener.in/people/123054/venkata-nagaraju-padala/",
-    "https://www.screener.in/people/33390/rohan-gupta/",
-    "https://www.screener.in/people/21712/ajay-kumar-aggarwal/",
-    "https://www.screener.in/people/71485/nibe-ganesh-ramesh/",
-    "https://www.screener.in/people/108142/laroia-mona/",
-    "https://www.screener.in/people/174015/india-equity-fund-1/",
-    "https://www.screener.in/people/131338/shalu-aggarwal/",
-    "https://www.screener.in/people/170071/akash-bhanshali/",
-    "https://www.screener.in/people/30960/madhuri-madhusudan-kela/",
-    "https://www.screener.in/people/86419/madhusudhan-murlidhar-kela/",
-    "https://www.screener.in/people/32876/madhusudan-murlidhar-kela/",
-    "https://www.screener.in/people/154329/mahi-madhusudan-kela/",
-    "https://www.screener.in/people/35415/cohesion-mk-best-ideas-sub-trust/",
-    "https://www.screener.in/people/150091/singularity-equity-fund-i/",
-    "https://www.screener.in/people/126373/chartered-finance-leasing-limited/",
-    "https://www.screener.in/people/162189/vq-fastercap-fund/",
-    "https://www.screener.in/people/21426/steadview-capital-mauritius-limited/",
-    "https://www.screener.in/people/141932/valuequest-s-c-a-l-e-fund/",
-    "https://www.screener.in/people/6066/asha-mukul-agrawal/",
-    "https://www.screener.in/people/168570/sanshi-fund-i/",
-    "https://www.screener.in/people/98486/ms-param-capital/",
-    "https://www.screener.in/people/127829/mukul-mahavir-agrawal/",
-    "https://www.screener.in/people/116773/bijal-pritesh-vora/",
-    "https://www.screener.in/people/180470/ritu-bapna/",
-    "https://www.screener.in/people/119660/manish-grover/",
-    "https://www.screener.in/people/78663/nalanda-india-fund-limited/",
-    "https://www.screener.in/people/73618/nalanda-india-equity-fund-limited/",
-    "https://www.screener.in/people/23593/sandeep-singh/",
-    "https://www.screener.in/people/161937/reina-ra-jaisinghani/",
-    "https://www.screener.in/people/78665/kunjal-lalitkumar-patel/",
-    "https://www.screener.in/people/679/ajay-upadhyaya/",
-    "https://www.screener.in/people/392/vanjana-sundar-iyer/",
-    "https://www.screener.in/people/126875/malabar-india-fund-limited/",
-    "https://www.screener.in/people/131169/goldman-sachs-funds-goldman-sachs-asia-equity-portfolio/",
-    "https://www.screener.in/people/129685/goldman-sachc-funds-goldman-sachs-india-equity-portfolio/",
-    "https://www.screener.in/people/19335/goldman-sachs-funds-goldman-sachsindia-equity-p/",
-    "https://www.screener.in/people/98375/goldman-sachs-investments-mauritius-i-limited/",
-    "https://www.screener.in/people/181599/goldman-sachs-bank-europe-se/",
-    "https://www.screener.in/people/149987/massachusetts-institute-of-techno/",
-]
+from investor_registry import all_screener_urls
+HNI_PEOPLE_URLS = all_screener_urls()
 
 
 def _parse_pct(text):
@@ -1217,9 +1188,107 @@ def fetch_hni_holdings():
     return df
 
 
+# ─── LLM conviction shortlist ────────────────────────────────────────────────
+
+
+def llm_conviction_shortlist(df):
+    """Use LLM to distil the top 10-15 highest-conviction FII accumulation picks.
+
+    Feeds the top 50 stocks (by streak length + FII stake) along with available
+    cross-module context (Weinstein stage) to the LLM.  Returns a DataFrame
+    with columns: Rank, Ticker, Stock Name, Thesis, Conviction, Key Factor.
+    Returns None when LLM is unavailable or the call fails.
+    """
+    if not _USE_LLM or llm_json is None or not llm_is_available():
+        return None
+
+    top = df.nlargest(50, ["Streak (Qtrs)", "FII Stake (%)"])
+    if top.empty:
+        return None
+
+    stock_profiles = []
+    for _, r in top.iterrows():
+        profile = {
+            "ticker": r.get("Ticker", ""),
+            "name": r.get("Stock Name", ""),
+            "fii_stake_pct": r.get("FII Stake (%)", 0),
+            "change_qoq_pp": r.get("Change QoQ (pp)", 0),
+            "streak_qtrs": int(r.get("Streak (Qtrs)", 0)),
+            "category": r.get("Category", ""),
+            "pe": r.get("PE (TTM)", None),
+            "pb": r.get("PB", None),
+            "roe_pct": r.get("ROE (%)", None),
+            "roce_pct": r.get("ROCE (%)", None),
+            "de": r.get("D/E", None),
+            "revenue_growth_pct": r.get("Revenue Growth (%)", None),
+            "eps_growth_5y_pct": r.get("EPS Growth 5Y (%)", None),
+            "market_cap_cr": r.get("Market Cap (₹ Cr)", None),
+            "sector": r.get("Sector", ""),
+        }
+
+        if _stage_for is not None:
+            try:
+                stage_info = _stage_for(str(r.get("Ticker", "")))
+                if stage_info:
+                    profile["weinstein_stage"] = stage_info.get("stage")
+                    profile["stage_action"] = stage_info.get("action")
+            except Exception:
+                pass
+
+        profile = {k: v for k, v in profile.items() if v is not None and v != ""}
+        stock_profiles.append(profile)
+
+    system_prompt = (
+        "You are an institutional equity analyst specialising in Indian markets. "
+        "Given 50 stocks where FII/FPI are accumulating, identify the 10-15 with "
+        "the strongest conviction case. Rank them by a composite of: streak length "
+        "(longer = more committed), improving fundamentals (ROE, ROCE, revenue growth), "
+        "favourable Weinstein stage (Stage 2 preferred), and reasonable valuations.\n\n"
+        "For each pick provide a 1-sentence thesis explaining WHY this FII accumulation "
+        "is significant for THIS stock specifically — connect the FII behaviour to the "
+        "fundamentals. Be direct and blunt about conviction level.\n\n"
+        "Return JSON: {\"shortlist\": [{\"ticker\": str, \"name\": str, \"rank\": int, "
+        "\"thesis\": str, \"conviction\": \"high\" | \"medium\", \"key_factor\": str}], "
+        "\"market_observation\": str}"
+    )
+
+    user_prompt = (
+        "FII accumulation candidates (top 50 by streak + stake):\n\n"
+        + json.dumps(stock_profiles, indent=1, default=str)
+    )
+
+    try:
+        result = llm_json(system_prompt, user_prompt, max_tokens=4000, timeout=120)
+    except Exception as e:
+        print(f"  [fii] LLM conviction shortlist failed: {e}")
+        return None
+
+    if not result or "shortlist" not in result:
+        return None
+
+    rows = []
+    for item in result["shortlist"]:
+        rows.append({
+            "Rank": item.get("rank", ""),
+            "Ticker": item.get("ticker", ""),
+            "Stock Name": item.get("name", ""),
+            "Thesis": item.get("thesis", ""),
+            "Conviction": item.get("conviction", ""),
+            "Key Factor": item.get("key_factor", ""),
+        })
+
+    shortlist_df = pd.DataFrame(rows)
+    if not shortlist_df.empty:
+        obs = result.get("market_observation", "")
+        if obs:
+            shortlist_df.attrs["market_observation"] = obs
+        print(f"  [fii] LLM conviction shortlist: {len(shortlist_df)} picks")
+    return shortlist_df
+
+
 # ─── Excel export ─────────────────────────────────────────────────────────────────────
 
-def save_to_excel(df, output_prefix, hni_df=None):
+def save_to_excel(df, output_prefix, hni_df=None, shortlist_df=None):
     """Save FII stake tracker results to Excel."""
     excel_path = os.path.join(SCRIPT_DIR, f"{output_prefix}.xlsx")
 
@@ -1303,6 +1372,10 @@ def save_to_excel(df, output_prefix, hni_df=None):
         if hni_df is not None and not hni_df.empty:
             hni_df.to_excel(writer, sheet_name="HNIs", index=False)
 
+        # LLM conviction shortlist
+        if shortlist_df is not None and not shortlist_df.empty:
+            shortlist_df.to_excel(writer, sheet_name="LLM Shortlist", index=False)
+
         # Auto-fit column widths
         for ws in writer.book.worksheets:
             for col in ws.columns:
@@ -1373,11 +1446,14 @@ def get_sheets():
     return sheets
 
 
-def run(output_prefix="fii_stake_tracker"):
+def run(output_prefix="fii_stake_tracker", use_llm=True):
     """Main entry point (for run_all.py integration).
 
     Returns (df, excel_path).
     """
+    global _USE_LLM
+    _USE_LLM = use_llm
+
     # HNI pages first: they need a logged-in screener.in session, and any
     # later bulk fetching is the thing most likely to get the IP throttled.
     try:
@@ -1408,7 +1484,10 @@ def run(output_prefix="fii_stake_tracker"):
     print(f"  {'Total':30s}: {len(df):>5}")
     print(f"{'='*60}")
 
-    excel_path = save_to_excel(df, output_prefix, hni_df=hni_df)
+    shortlist_df = llm_conviction_shortlist(df) if use_llm else None
+
+    excel_path = save_to_excel(df, output_prefix, hni_df=hni_df,
+                               shortlist_df=shortlist_df)
     return df, excel_path
 
 
@@ -1420,8 +1499,12 @@ def main():
         "-o", "--output", default="fii_stake_tracker",
         help="Output file prefix (default: fii_stake_tracker)"
     )
+    parser.add_argument(
+        "--no-llm", action="store_true",
+        help="Skip LLM conviction shortlist generation"
+    )
     args = parser.parse_args()
-    run(output_prefix=args.output)
+    run(output_prefix=args.output, use_llm=not args.no_llm)
 
 
 if __name__ == "__main__":

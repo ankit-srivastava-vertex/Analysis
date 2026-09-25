@@ -28,7 +28,7 @@ WORKFLOW (daily)
    were verified to return identical rows for the same session (87 = 87).
 3. Normalise both feeds onto one column schema per exchange.
 4. Filter the same four feeds two ways:
-   a. by a hardcoded list of superstar client names (who traded?)
+   a. by the superstar client names from investor_registry.py (who traded?)
    b. by the hardcoded STOCK_WATCHLIST of scrips (what was traded?)
    Either filter matching nothing yields a one-row "Status" sheet, so "no
    deals today" is never confused with "the fetch failed".
@@ -317,7 +317,6 @@ STOCK_WATCHLIST = [
     ('CREDITACC',  541770,  'CREDITACC',  'CreditAccess Grameen Limited'),
     ('DANISH',     None,    None,         'Danish Power Limited'),
     ('DEEPINDS',   543288,  'DEEPINDS',   'Deep Industries Limited'),
-    ('EFFWA',      None,    None,         'Effwa Infra & Research Limited'),
     ('EIMCOELECO', 523708,  'EIMCOELECO', 'Eimco Elecon (India) Limited'),
     ('EMMIL',      None,    None,         'Energy Mission Machineries (India) Limited'),
     ('EXCELSOFT',  544617,  'EXCELSOFT',  'Excelsoft Technologies Limited'),
@@ -325,7 +324,7 @@ STOCK_WATCHLIST = [
     ('FINBUD',     None,    None,         'Finbud Financial Services Limited'),
     ('FUSION',     543652,  'FUSION',     'Fusion Finance Limited'),
     ('GAUDIUMIVF', 544709,  'GAUDIUMIVF', 'Gaudium IVF and Women Health Limited'),
-    ('GENSOL',     542851,  'GENSOL',     'Gensol Engineering Limited'),
+    ('GLASSWLSYS', None,    None,         'Glass Wall System (I) Limited'),
     ('GSFC',       500690,  'GSFC',       'Gujarat State Fertilizers & Chemicals Limited'),
     ('HARIOMPIPE', 543517,  'HARIOMPIPE', 'Hariom Pipe Industries Limited'),
     ('HAVELLS',    517354,  'HAVELLS',    'Havells India Limited'),
@@ -347,20 +346,24 @@ STOCK_WATCHLIST = [
     ('LALITHAA',   544879,  'LALITHAA',   'Lalithaa Jewellery Mart Limited'),
     ('LAXMIDENTL', 544339,  'LAXMIDENTL', 'Laxmi Dental Limited'),
     ('LAXMIINDIA', 544465,  'LAXMIINDIA', 'Laxmi India Finance Limited'),
+    ('LCCPROJECT', None,    None,         'LCC Projects Limited'),
     ('M&M',        500520,  'M&M',        'Mahindra & Mahindra Limited'),
     ('MOLDTKPAC',  533080,  'MOLDTKPAC',  'Mold-Tek Packaging Limited'),
+    ('MPIMANIPAL', None,    None,         'Manipal Technologies Limited'),
     ('MSPL',       532650,  'MSPL',       'MSP Steel & Power Limited'),
     ('NEWJAISA',   None,    None,         'Newjaisa Technologies Limited'),
     ('NORTHARC',   544260,  'NORTHARC',   'Northern Arc Capital Limited'),
     ('OMAXE',      532880,  'OMAXE',      'Omaxe Limited'),
     ('PSFL',       None,    None,         'Paramount Speciality Forgings Limited'),
     ('PGEL',       533581,  'PGEL',       'PG Electroplast Limited'),
+    ('PHYCHEM',    None,    None,         'Phychem Technologies Limited'),
     ('PRAJIND',    522205,  'PRAJIND',    'Praj Industries Limited'),
     ('PPL',        542684,  'PPL',        'Prakash Pipes Limited'),
     ('PRAMODINI',  None,    None,         'Pramodini Medicare Limited'),
     ('QLINE',      None,    None,         'Q-Line Biotech Limited'),
     (None,         544091,  'QLL',        'Qualitek Labs Ltd'),
     ('RACE',       537785,  'RACE',       'Race Eco Chain Limited'),
+    ('RAKSAN',     None,    None,         'Raksan Transformers Limited'),
     ('RPOWER',     532939,  'RPOWER',     'Reliance Power Limited'),
     ('RMC',        540358,  'RMC',        'RMC Switchgears Limited'),
     ('SAHASRA',    None,    None,         'Sahasra Electronic Solutions Limited'),
@@ -372,6 +375,7 @@ STOCK_WATCHLIST = [
     ('SBCL',       513097,  'SBCL',       'Shivalik Bimetal Controls Limited'),
     ('SKYWAYS',    544890,  'SKYWAYS',    'Skyways Air Services Limited'),
     ('SPIC',       590030,  'SPIC',       'Southern Petrochemicals Industries Corporation Limited'),
+    ('STEAMHOUSE', None,    None,         'Steamhouse India Limited'),
     ('SUDEEPPHRM', 544619,  'SUDEEPPHRM', 'Sudeep Pharma Limited'),
     ('SULA',       543711,  'SULA',       'Sula Vineyards Limited'),
     ('SUNPHARMA',  524715,  'SUNPHARMA',  'Sun Pharmaceutical Industries Limited'),
@@ -392,7 +396,6 @@ STOCK_WATCHLIST = [
     (None,         544219,  'VVIPIL',     'VVIP Infratech Ltd'),
     (None,         539337,  'WAAREE',     'Waaree Technologies Ltd'),
     ('YESBANK',    532648,  'YESBANK',    'Yes Bank Limited'),
-    ('ZENTEC',     533339,  'ZENTEC',     'Zen Technologies Limited'),
 ]
 
 # Sheet key -> (source DataFrame exchange, human label) for the watchlist views.
@@ -767,182 +770,8 @@ class BSEScraper:
         # Download NSE block deals data
         nse_block_deals_df = self.nse_largedeals(mode="block_deals")
 
-        # Sample list of superstar names to filter in bulk and block deals
-        client_names_to_filter = [
-'AJAY KUMAR AGGARWAL',
-
-'AJAY UPADHYAYA',
-'UPADHYAYA AJAY',
-'UPADHYAYA AJAY SHIV NARAYAN',
-
-'AKASH BHANSHALI',
-
-'Ankit Vijay Kedia',
-'ANKUSH KEDIA',
-
-'Vijay Krishanlal Kedia',
-'Kedia Secuirities Private Limited',
-
-'ASHISH KACHOLIA',
-'ASHISH RAMESH KACHOLIA',
-'ASHISH RAMESHCHANDRA KACHOLIA',
-'BENGAL FIN. & INV. PVT. LTD',
-'SURYAVANSHI COMMOTRADE PVT LTD',
-'Suryavanshi Commotrade Private Limited',
-'HIMALAYA FINANCE & INV. CO',
-'HIMALAYA FINANCE & INVESTMENT COMPANY',
-'HIMALAYA FINANCE AND INVESTMENT CO',
-'KACHOLIA ASHISH',
-'LUCKY INVESTMENT MANAGERS PRIVATE LIMITED',
-'R.B.A. FINANCE ## INVESTMENT CO.',
-'R.B.A.FINANCE & INVT. CO',
-'SURYA VANSHI COMMOTRADE PVT. LTD.',            # spacing/punctuation variant
-'BENGAL FINANCE & INVESTMENT PRIVATE LIMITED',   # name variant of Bengal Fin
-'BENGAL FINANCE & INVESTMENT PVT. LTD.',
-
-'Suresh Kumar Agarwal',
-
-'GOLDMAN SACHS (SINGAPORE) PTE',
-'GOLDMAN SACHS (SINGAPORE) PTE.- ODI',
-'GOLDMAN SACHS COLLECTIVE TRUST - EMERGING MARKETS EQUITY EX CHINA FUND',
-'GOLDMAN SACHS COLLECTIVE TRUST - EMERGING MARKETS EQUITY EX. CHINA FUND',
-'GOLDMAN SACHS FDS GOLDMAN SACHS INDIA EQ PORTFOLIO',
-'GOLDMAN SACHS FUNDS  GOLDMAN SACHS INDIA EQUITY PORTFOLIO',
-'GOLDMAN SACHS FUNDS - GOLDMAN SACHS INDIA EQUITY PORTFOLIO',
-'GOLDMAN SACHS FUNDS GOLDMAN SACHS INDIA EQUITY PORTFOLIO',
-'GOLDMAN SACHS FUNDS-GOLDMAN SACHS ASIA EQUITY PORTFOLIO',
-'GOLDMAN SACHS INDIA LIMITED',
-'GOLDMAN SACHS INVESTMENT (MAURITIUS) I LTD',
-'GOLDMAN SACHS INVESTMENTS (MAURITIUS) I LIMITED',
-'GOLDMAN SACHS INVESTMENTS HOLDINGS ASIA LIMITED',
-'GOLDMAN SACHS INVESTMENTS MAURITIUS  I LIMITED',
-'GOLDMAN SACHS INVESTMENTS MAURITIUS  I LTD',
-'GOLDMAN SACHS INVESTMENTS MAURITIUS I LIMITED',
-'GOLDMAN SACHS TRUST II - GOLDMAN SACHS GQG PARTNERS INTERNATIONAL OPPORTUNITIES FUND',
-'GOLDMANSACHS FUNDS GOLDMANSACHS INDIA EQUITY PORTFOLIO',
-
-'INDIA EQUITY FUND 1',
-
-'MADHURI MADHUSUDAN KELA',
-'COHESION MK BEST IDEAS SUB-TRUST',
-'FOUNDERS COLLECTIVE FUND',
-'SINGULARITY EQUITY FUND I',
-'SINGULARITY LARGE VALUE FUND II',
-'SINGULARITY LARGE VALUE FUND III',
-'Chartered Finance & Leasing Limited',
-'Madhusudan Murlidhar Kela',
-'SINGULARITY LARGE VALUE FUND I',               # Fund I (II & III already listed)
-'SINGULARITY GROWTH OPPORTUNITIES FUND II',
-'CHARTERED FINANCE & LEASI NG LIMITED',          # typo in exchange data
-
-'LAROIA MONA',
-'MONA LAROIA',
-
-'BIJAL PRITESH VORA',
-'MALABAR INDIA FUND LIMITED',
-'MASSACHUSETTS INSTITUTE OF TECHNOLOGY',
-'MANISH GROVER', #Jeena Sikho promoter
-'ROHAN GUPTA', #SG Finserve promoter
-
-'NALANDA INDIA EQUITY FUND LIMITED',
-'NALANDA INDIA FUND LIMITED',
-
-#Quick money
-'NAV CAPITAL VCC - NAV CAPITAL EMERGING STAR FUND',
-'Nav Capital Vcc - Nav Capital Emerging Star Fund',
-
-'RAJASTHAN GLOBAL SECURITIES PRIVATE LIMITED',
-'RAJASTHAN GLOBAL SECURITIES PVT LTD',
-'RAJASTHAN SECURITIES LIMITED',
-'RAJASTHAN GLOBAL SECURITIES PVT.LTD',
-'Rajasthan Global Securities Private Limited',
-
-'FINAVENUE GROWTH FUND',
-'FINAVENUE CAPITAL TRUST-FINAVENUE GROWTH FUND',
-'Finavenue Capital Trust - Finavenue Growth Fund',
-'Finavenue Capital trust Finavenue Growth Fund',
-'Finavenue Capital Trust - Finavenue Strategic Fund',
-
-'SAINT CAPITAL FUND',
-'Saint Capital Fund',
-
-'MERU INVESTMENTS',
-'MERU INVESTMENT FUND PCC- CELL 1',
-'MERU INVESTMENT FUND PCC-CELL 1',
-'Meru Investment Fund PCC-Cell 1',
-'MERU INVESTMENT FUND PCC - CELL 1',
-'MERU INVESTMENT FUND',
-
-'VIKASA INDIA EIF I FUND',
-'VIKASA INDIA EIF I FUND - SHARE CLASS P',
-'VIKASA INDIA EIF I FUND-INCUBE GLOBAL OPPORTUNITIES',
-'Vikasa India EIF I Fund - Incube Global Opportunities',
-'VIKASA INDIA EIF I FUND - INCUBE GLOBAL OPPORTUNITIES',
-'Vikasa India EIF I Fund- Share ClassP',
-'Vikasa India EIF I Fund - Share Class P',
-'Vikasa Global Fund PCC - Eubilia Capital Partners Fund - I',
-'VIKASA INDIA EIF I FUND - pte OPPORTUNITIES',
-'VIKASA CAPITAL INC',   
-'VIKASA INDIA EIF I FUND-SHARE CLASS P',
-
-'LRSD SECURITIES PRIVATE LIMITED',
-'LRSD SECURITIES PVT.LTD',
-'LRSD SECURITIES PVT LTD',
-
-'TIGER STRATEGIES FUND -I',
-'TIGER STRATEGIES FUND - 1',
-'Tiger Strategies Fund-I',
-'Tiger Strategies Fund - I',
-
-'EVERGROW CAPITAL OPPORTUNITIES FUND',
-'Evergrow Capital Opportunities Fund',
-
-'SAGEONE - FLAGSHIP GROWTH 2 FUND',
-'SAGEONE - FLAGSHIP GROWTH OE FUND',
-'SAGEONE FLAGSHIP GROWTH 2 FUND',
-'SAGEONE INVESTMENT MANAGERS LLP',
-'SAGEONE-FLAGSHIP GROWTH OE FUND',
-'Sageone - Flagship Growth OE Fund',
-'SageOne India Opportunity Trust',
-
-'MINT FOCUSED GROWTH FUND PCC- CELL 1',
-'Mint Focused Growth Fund PCC- CELL 1',
-'Mint Focused Growth Fund-PCC Cell 1',
-'Mint Focused Growth Fund PCC- Cell',
-'MINT FOCUSED GROWTH FUND',
-
-'RELIGO CAPITAL ADVISORS PRIVATE LIMITED',
-'RELIGO COMMODITIES VENTURES FUND',
-'Religo Commodities Venture Trust-Religo Commodities Ventures Fund',
-'RELIGO COMMODITIES VENTURES TRUST - RELIGO COMMODITIES VENTURES FUND',
-'Religo Commeadition Ventures Trust Religo Commodities Ventures Fund',
-
-'Hem Growth Opportunities Fund',
-'HEM GROWTH OPPORTUNITIES FUND',
-
-'RGSL INVESTMENT LVF 1',
-'RGSL INVESTMENT FUND - RGSL INVESTMENT LVF 1',
-'RGSL INFRA PRIVATE LIMITED',
-#Quick money
-
-'RITU BAPNA',
-'SANDEEP SINGH',
-'SANDEEP  SINGH',
-
-'Mukul Mahavir Agrawal',
-'SANSHI FUND-I',
-'PARAM CAPITAL',
-'Asha Mukul Agrawal',
-
-'SHALU  AGGARWAL',
-'VANAJA SUNDAR IYER',
-'VENKATA NAGARAJU PADALA',
-'VINOD  KUMAR',
-
-'Valuequest S C A L E Fund',
-'VQ FASTERCAP FUND',
-'VALUEQUEST INVESTMENT ADVISORS PVT LTD',        # Valuequest entity
-        ]
+        from investor_registry import all_bulk_deal_names
+        client_names_to_filter = all_bulk_deal_names()
 
         # Guard against empty NSE DataFrames (e.g. the fetch failed)
         pulled_str = f"Data pulled on {datetime.now().strftime('%d-%b-%Y %H:%M')}"

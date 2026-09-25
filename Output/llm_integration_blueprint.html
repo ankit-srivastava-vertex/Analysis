@@ -1,0 +1,637 @@
+<title>LLM Integration Blueprint</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --bg: #f8f7f4;
+    --surface: #ffffff;
+    --surface-alt: #f0eeea;
+    --text: #1a1814;
+    --text-muted: #6b665c;
+    --accent: #c45d2c;
+    --accent-light: #f4e6dd;
+    --green: #2d7a4f;
+    --green-light: #e2f0e8;
+    --blue: #2c5fc4;
+    --blue-light: #dce6f7;
+    --border: #ddd8cf;
+    --red: #b83a30;
+    --red-light: #fbe8e6;
+    --yellow: #a68a1b;
+    --yellow-light: #faf3d8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121110;
+      --surface: #1c1b18;
+      --surface-alt: #242320;
+      --text: #e8e4dc;
+      --text-muted: #9a9488;
+      --accent: #e07a4a;
+      --accent-light: #2e1f16;
+      --green: #4aba76;
+      --green-light: #132a1c;
+      --blue: #5e8de8;
+      --blue-light: #141e30;
+      --border: #333028;
+      --red: #e05a50;
+      --red-light: #2a1210;
+      --yellow: #d4b942;
+      --yellow-light: #2a2510;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121110;
+    --surface: #1c1b18;
+    --surface-alt: #242320;
+    --text: #e8e4dc;
+    --text-muted: #9a9488;
+    --accent: #e07a4a;
+    --accent-light: #2e1f16;
+    --green: #4aba76;
+    --green-light: #132a1c;
+    --blue: #5e8de8;
+    --blue-light: #141e30;
+    --border: #333028;
+    --red: #e05a50;
+    --red-light: #2a1210;
+    --yellow: #d4b942;
+    --yellow-light: #2a2510;
+  }
+
+  body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    padding-inline: 20px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  .mono { font-family: 'Space Mono', monospace; }
+
+  header {
+    padding: 3rem 0 2rem;
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: 2.5rem;
+  }
+  header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    text-wrap: balance;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    color: var(--text-muted);
+    margin: 0;
+    font-size: 0.95rem;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 2.5rem 0 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--accent);
+  }
+
+  p { margin: 0 0 1rem; }
+
+  .layer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+  }
+  .layer-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .layer-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+  .layer-name {
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+  }
+  .tag-done { background: var(--green-light); color: var(--green); }
+  .tag-new { background: var(--accent-light); color: var(--accent); }
+  .tag-critical { background: var(--red-light); color: var(--red); }
+  .tag-data { background: var(--blue-light); color: var(--blue); }
+  .tag-edge { background: var(--yellow-light); color: var(--yellow); }
+
+  .detail {
+    background: var(--surface-alt);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    font-size: 0.92rem;
+  }
+  .detail strong { color: var(--accent); }
+
+  ul { padding-left: 1.25rem; margin: 0.5rem 0 1rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--accent); }
+
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 1.5rem 0;
+    position: relative;
+  }
+  .pipeline::before {
+    content: '';
+    position: absolute;
+    left: 1rem;
+    top: 2rem;
+    bottom: 2rem;
+    width: 2px;
+    background: var(--border);
+  }
+  .pipe-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    position: relative;
+  }
+  .pipe-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 0.4rem;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    margin-left: calc(1rem - 5px);
+  }
+
+  .summary-box {
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .summary-box h3 { color: var(--text); margin-top: 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin: 1rem 0;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    font-weight: 600;
+    background: var(--surface-alt);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .kpi-val {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .kpi-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 0.25rem;
+  }
+
+  .verdict {
+    background: var(--green-light);
+    border-left: 4px solid var(--green);
+    padding: 1rem 1.25rem;
+    border-radius: 0 6px 6px 0;
+    margin: 0.75rem 0;
+  }
+  .verdict-neg {
+    background: var(--red-light);
+    border-left-color: var(--red);
+  }
+
+  @media (max-width: 600px) {
+    header h1 { font-size: 1.35rem; }
+    .layer { padding: 1rem; }
+    .kpi-row { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+
+<header>
+  <h1>Where LLM Creates Unfair Advantage in Breakout Scanning</h1>
+  <p>A layer-by-layer blueprint for integrating GPT into the breakout pipeline — what's built, what's missing, and where the real edge lives.</p>
+</header>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-val">12</div><div class="kpi-label">Integration Points</div></div>
+  <div class="kpi"><div class="kpi-val">3</div><div class="kpi-label">Built Today</div></div>
+  <div class="kpi"><div class="kpi-val">4</div><div class="kpi-label">Critical Missing</div></div>
+  <div class="kpi"><div class="kpi-val">5</div><div class="kpi-label">Edge Creators</div></div>
+</div>
+
+<h2>The Core Problem Rigid Code Can't Solve</h2>
+<p>A hardcoded scanner treats every stock the same way — same thresholds, same rules, same parameters across all 3,500+ stocks. But breakout behavior differs wildly: a pharma stock forming a base after FDA approval behaves nothing like a metal stock coiling before a commodity cycle turn. Rules that work for large-caps fail on SME stocks. Thresholds calibrated for bull markets kill everything in corrections.</p>
+<p><strong>The LLM's real job isn't to "be smart" — it's to be contextual.</strong> It reads the situation each stock is in and adjusts judgement in ways no fixed parameter set ever can.</p>
+
+<h2>What's Already Built</h2>
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-val" style="font-size:1.1rem">Pick Filter</div><div class="kpi-label">Reviews & drops weak picks</div></div>
+  <div class="kpi"><div class="kpi-val" style="font-size:1.1rem">Outcome Judge</div><div class="kpi-label">5-10 day flexible verdict</div></div>
+  <div class="kpi"><div class="kpi-val" style="font-size:1.1rem">Param Tuner</div><div class="kpi-label">Auto-adjusts thresholds</div></div>
+</div>
+
+<h2>The 12 Integration Points — Layer by Layer</h2>
+
+<!-- ─── LAYER 1 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">1</span>
+    <span class="layer-name">News & Catalyst Detection</span>
+    <span class="tag tag-critical">Critical Missing</span>
+  </div>
+  <p>Breakouts don't happen randomly — they're triggered by <em>catalysts</em>. A stock consolidating for 3 months breaks out because something changed: a quarterly result beat, a contract win, an analyst upgrade, a sector policy shift. Rigid code is blind to this.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> Before recommending any stock, scrape NSE corporate announcements (<code>/api/corporate-announcements</code> — already accessible via the forensic module), recent Moneycontrol/ET headlines, and quarterly result filings. Feed them to the LLM with the question: <em>"Is there an upcoming or recent catalyst for this stock that would trigger a breakout within a week?"</em>
+  </div>
+  <ul>
+    <li><strong>Quarterly results:</strong> If a stock is consolidating near resistance AND its Q-results are due in the next 5 days, that's a catalyst. LLM reads the consensus estimates and past beat/miss pattern.</li>
+    <li><strong>Contract/order wins:</strong> NSE announcements saying "Company XYZ bags ₹500cr order" — LLM judges if this is material enough to trigger a breakout.</li>
+    <li><strong>Analyst upgrades:</strong> A stock already near resistance getting a price target upgrade from a major broker — that's institutional buying pressure about to arrive.</li>
+    <li><strong>Sector policy:</strong> Government announces PLI scheme for electronics — every electronics stock near resistance suddenly has a higher probability of breaking out.</li>
+  </ul>
+  <div class="verdict">
+    <strong>Edge value:</strong> This alone could add 10-15% accuracy. A stock with a technical setup AND a catalyst breaks out far more reliably than one with just a chart pattern.
+  </div>
+  <p><strong>Data sources already available:</strong> NSE <code>/api/corporate-announcements</code> (in forensic_accounting.py), screener.in company pages (quarterly results), BSE notices API.</p>
+</div>
+
+<!-- ─── LAYER 2 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">2</span>
+    <span class="layer-name">Chart Pattern Recognition via Description</span>
+    <span class="tag tag-critical">Critical Missing</span>
+  </div>
+  <p>The biggest failure of the current scanner: it finds "resistance" using fractal pivot math, but that math can't tell a genuine flat base from a trending stock's recent highs. We patched this with a flat-ceiling check, but it's still crude.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For each candidate stock, generate a text description of its chart: <em>"Stock rose 45% from ₹200 to ₹290 over 4 months, then traded sideways between ₹270-290 for 6 weeks with declining volume. The last 5 days show a tight range of ₹285-290 with very low volume. Resistance at ₹290 tested 4 times."</em> Ask the LLM: <em>"Is this a genuine breakout setup, or is the code detecting a false pattern?"</em>
+  </div>
+  <ul>
+    <li>The LLM can distinguish: "flat base" vs "descending triangle" vs "just noise near a random price"</li>
+    <li>It can identify patterns the rigid code doesn't check: ascending triangle, bull flag, cup & handle with a proper handle (the code's cup & handle detector was 0 wins in 16 trades)</li>
+    <li>It can spot red flags: "this stock gapped up on one huge volume day and has been drifting — that's not a base, that's distribution"</li>
+  </ul>
+  <div class="verdict">
+    <strong>Edge value:</strong> Eliminates the #1 user complaint — "the charts have no pattern." The LLM acts as a human chartist reviewing every pick before it goes out.
+  </div>
+</div>
+
+<!-- ─── LAYER 3 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">3</span>
+    <span class="layer-name">Institutional Footprint via Bulk/Block Deal Intelligence</span>
+    <span class="tag tag-critical">Critical Missing</span>
+  </div>
+  <p>You already have BulkBlock.py that fetches bulk & block deal data from NSE and BSE, and an investor_registry.py that tracks known superstar investors (Ashish Kacholia, etc.). This data is NOT being used by either breakout scanner.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For each breakout candidate, check the last 30 days of bulk/block deals. Feed the deal data to the LLM: <em>"RELIANCE had 3 bulk deals in the last 2 weeks: Goldman Sachs bought 2M shares, Morgan Stanley bought 1.5M shares, HDFC MF bought 800K shares. Stock is consolidating near ₹2800 resistance. Does this institutional buying pattern suggest a breakout is coming?"</em>
+  </div>
+  <ul>
+    <li><strong>Known buyer detection:</strong> investor_registry.py already maps superstar names (Kacholia, Dolly Khanna, etc.). LLM can judge: "Ashish Kacholia bought via bulk deal 10 days ago at ₹450. Stock is now at ₹480 near resistance at ₹490. High conviction — Kacholia typically gets in before breakouts."</li>
+    <li><strong>Quantity vs price:</strong> LLM can judge whether the deal size is meaningful relative to the stock's float and daily volume.</li>
+    <li><strong>Sell-side warnings:</strong> If a bulk deal shows a major SELLER (promoter reducing stake, PE fund exiting), the LLM should flag this as a breakout KILL signal.</li>
+  </ul>
+  <div class="verdict">
+    <strong>Edge value:</strong> You're sitting on this data and not using it. Smart money buys BEFORE breakouts — this signal is worth 5-10% accuracy improvement on its own.
+  </div>
+</div>
+
+<!-- ─── LAYER 4 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">4</span>
+    <span class="layer-name">F&O Open Interest as Resistance/Support Confirmation</span>
+    <span class="tag tag-critical">Critical Missing</span>
+  </div>
+  <p>You have fno_max_oi.py that scans F&O max open interest strikes. For F&O stocks, the max call OI strike IS the resistance, and max put OI IS the support. This is market-consensus resistance, not just chart-based.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For F&O stocks in the breakout watchlist, cross-reference: <em>"The chart says resistance is at ₹2800. The max call OI is at ₹2800 strike with 50 lakh contracts. This CONFIRMS the resistance. But put OI is building at ₹2700 — strong floor. If the stock breaks ₹2800, short-covering from those 50 lakh call sellers will turbocharge the breakout."</em>
+  </div>
+  <ul>
+    <li>When chart resistance aligns with max call OI → breakout is explosive (short covering cascade)</li>
+    <li>When chart resistance does NOT align with OI → the "resistance" might be a false level</li>
+    <li>PCR (put-call ratio) shifts near the resistance level signal whether the breakout will hold</li>
+  </ul>
+  <div class="verdict">
+    <strong>Edge value:</strong> For the ~200 F&O stocks, this adds a completely independent confirmation signal. OI-confirmed breakouts succeed at much higher rates than chart-only breakouts.
+  </div>
+</div>
+
+<!-- ─── LAYER 5 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">5</span>
+    <span class="layer-name">Sector Rotation & Relative Strength Context</span>
+    <span class="tag tag-new">New</span>
+  </div>
+  <p>You have sector_momentum.py, nse_ready_sectors.py, sector_breadth.py, and stage_analysis.py. Together they tell you which sectors are leading, which are rotating in, and which stocks within those sectors are the strongest.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> Instead of mechanically filtering "top 30% sectors," the LLM reads the full sector picture: <em>"Pharma sector just entered Stage 2 this week (stage_analysis). Breadth is expanding — 70% of pharma stocks above 200 EMA (sector_breadth). RS vs Nifty 500 turned positive for the first time in 6 months (nse_ready_sectors). Within pharma, JAGSNPHARM is forming a flat base near resistance with a squeeze. This is a SECTOR ROTATION trade — highest conviction."</em>
+  </div>
+  <ul>
+    <li>LLM identifies <em>which</em> sector is rotating in (not just ranking, but the dynamic — is it accelerating or decelerating?)</li>
+    <li>Stocks in freshly rotating sectors have much higher breakout success than stocks in stale leaders</li>
+    <li>LLM can identify theme plays: "Defence stocks are all consolidating simultaneously — sector breakout incoming"</li>
+  </ul>
+</div>
+
+<!-- ─── LAYER 6 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">6</span>
+    <span class="layer-name">FII/DII Flow Direction</span>
+    <span class="tag tag-new">New</span>
+  </div>
+  <p>fii_flows.py fetches FII/DII daily and monthly flow data. FII stake trends are tracked in fii_stake_tracker.py. This macro flow direction is crucial context.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> Before making ANY recommendations, the LLM reads the macro picture: <em>"FIIs net sold ₹8,000cr in the last 5 sessions. DIIs bought ₹6,000cr. Net negative. However, FII selling is concentrated in large-caps while small/mid-caps are seeing DII accumulation. Breakout success in large-caps will be lower this week. Weight recommendations toward DII-backed mid-caps."</em>
+  </div>
+  <ul>
+    <li>FII buying phase → large-cap breakouts succeed more</li>
+    <li>DII accumulation → mid/small-cap breakouts succeed more</li>
+    <li>Both selling → reduce position sizes, only highest conviction picks</li>
+    <li>LLM adjusts the scanner's confidence/sizing based on flow direction</li>
+  </ul>
+</div>
+
+<!-- ─── LAYER 7 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">7</span>
+    <span class="layer-name">Per-Stock Fundamental Quick-Check</span>
+    <span class="tag tag-new">New</span>
+  </div>
+  <p>forensic_accounting.py and tickertape_client.py can fetch financials. A breakout in a fundamentally weak company is a trap — a breakout in a company with accelerating earnings is the real deal.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For each top-10 pick, quick-fetch the latest 2 quarters of revenue and profit growth from Tickertape. Feed to LLM: <em>"Stock X: Revenue grew 35% YoY last quarter, profit grew 60% YoY. Price is consolidating near ₹500. This is a CANSLIM-style growth breakout — strongest conviction. vs Stock Y: Revenue flat, profit declining 10%. Price near resistance. This breakout is likely to FAIL — no fundamental support."</em>
+  </div>
+  <ul>
+    <li>Earnings acceleration + technical breakout = highest conviction</li>
+    <li>Fundamental deterioration + near resistance = likely false breakout</li>
+    <li>Not a full forensic analysis — just 30-second growth check per stock</li>
+  </ul>
+</div>
+
+<!-- ─── LAYER 8 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">8</span>
+    <span class="layer-name">Dynamic Code Modification</span>
+    <span class="tag tag-edge">Edge</span>
+  </div>
+  <p>Currently the LLM suggests parameter changes as JSON. But the deeper improvements need actual CODE changes — new rules, new indicators, new gate logic.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> After analyzing failure patterns, instead of just saying <em>"add a rule for X"</em>, the LLM writes the actual Python code: a new function, a modified gate, an additional indicator calculation. This code is written to a plugin file that the scanner imports and applies. The LLM effectively becomes a developer that improves the scanner weekly.
+  </div>
+  <ul>
+    <li><strong>New indicator discovery:</strong> "I noticed failures cluster when the 5-day VWAP is below the 20-day VWAP. Adding a VWAP cross check." → LLM writes the VWAP function and adds it as a gate.</li>
+    <li><strong>Adaptive gate logic:</strong> "In weak markets, tighten proximity to -1% to +1%. In strong markets, allow -4% to +3%." → LLM writes an if/else that reads market regime and adjusts gates dynamically.</li>
+    <li><strong>Feature engineering:</strong> LLM can create composite features the original coder didn't think of — "combine RS rating × squeeze tightness × delivery trend into a single conviction score"</li>
+  </ul>
+  <div class="verdict">
+    <strong>Edge value:</strong> This is where the system becomes truly self-improving. The LLM doesn't just tune knobs — it builds new machinery.
+  </div>
+</div>
+
+<!-- ─── LAYER 9 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">9</span>
+    <span class="layer-name">Delivery Data Integration</span>
+    <span class="tag tag-data">Data</span>
+  </div>
+  <p>jugaad-data returns DELIVERY QTY and DELIVERY % for every NSE stock. This is the single most powerful institutional signal in Indian markets — and it's NOT being used in the live scanner (only theoretically designed).</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For each top candidate, fetch 20 days of delivery data via jugaad-data. The LLM interprets the pattern: <em>"ANANDRATHI: Delivery % rose from 42% to 68% over the last 5 sessions while price stayed flat at ₹2200. This is STEALTH ACCUMULATION — institutions are buying heavily while the stock appears quiet. When it breaks ₹2215, the accumulated demand will push it hard."</em>
+  </div>
+  <ul>
+    <li>Rising delivery + flat price = stealth accumulation (highest signal)</li>
+    <li>Falling delivery + rising price = retail FOMO, likely to fail</li>
+    <li>The LLM distinguishes these nuances that a simple delivery % threshold cannot</li>
+  </ul>
+</div>
+
+<!-- ─── LAYER 10 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">10</span>
+    <span class="layer-name">Intraday Breakout Trigger Monitoring</span>
+    <span class="tag tag-edge">Edge</span>
+  </div>
+  <p>The scanner runs after market close and recommends stocks. But the ACTUAL breakout might happen at 10:30 AM the next day. By the time the user sees the recommendation, the breakout is over.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For the daily watchlist, set up an intraday monitor: using Angel One's live market data (already accessible), check every 15 minutes during market hours if any watchlisted stock's price crosses its resistance level on above-average volume. When it does, the LLM composes a real-time alert: <em>"🚨 BREAKOUT: ANANDRATHI crossed ₹2215 resistance at 10:45 AM on 2.3x average volume. Entry NOW at ₹2220, stop ₹2070, target ₹2430."</em>
+  </div>
+  <ul>
+    <li>Transforms the scanner from "end-of-day report" to "live breakout alert system"</li>
+    <li>The LLM judges whether the intraday move is genuine (volume-confirmed) or a fakeout</li>
+    <li>Uses email_sender.py to push alerts immediately</li>
+  </ul>
+</div>
+
+<!-- ─── LAYER 11 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">11</span>
+    <span class="layer-name">Risk-Adjusted Position Sizing</span>
+    <span class="tag tag-edge">Edge</span>
+  </div>
+  <p>Currently every pick gets equal weight. But some setups are 95% conviction and others are 60%. The LLM should tell you not just WHAT to buy, but HOW MUCH.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> For each pick, compute a conviction-adjusted position size: <em>"TITAGARH: 9 resistance touches, BB/KC squeeze, OBV divergence, recent volume surge, sector (Rail) entering Stage 2, FII buying in capital goods — CONVICTION: 95%. Allocate 20% of breakout capital. vs BEPL: 2 touches, one signal, no squeeze — CONVICTION: 55%. Allocate 5% maximum."</em>
+  </div>
+</div>
+
+<!-- ─── LAYER 12 ─── -->
+<div class="layer">
+  <div class="layer-title">
+    <span class="layer-num">12</span>
+    <span class="layer-name">Weekly Strategy Review & Rotation</span>
+    <span class="tag tag-edge">Edge</span>
+  </div>
+  <p>Once a week, the LLM does a comprehensive strategy review: reads all the data from the tracker history, sector flows, market regime, FII flows, and decides the OVERALL approach for the next week.</p>
+  <div class="detail">
+    <strong>What the LLM would do:</strong> <em>"Week review: Market corrected 3% this week. FIIs sold ₹12,000cr. Nifty below 50 DMA. However, pharma and FMCG sectors showed relative strength. 6 of 8 successful breakouts this week were in defensive sectors. STRATEGY FOR NEXT WEEK: Focus on pharma/FMCG/healthcare breakouts only. Raise minimum score to 65. Require OI confirmation for all F&O stocks. Reduce position sizes by 40%."</em>
+  </div>
+</div>
+
+<h2>Priority Ranking — What to Build Next</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Priority</th>
+      <th>Integration</th>
+      <th>Accuracy Impact</th>
+      <th>Build Effort</th>
+      <th>Data Ready?</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1</strong></td>
+      <td>News & Catalyst Detection</td>
+      <td>+10-15%</td>
+      <td>Medium</td>
+      <td>Yes — NSE API</td>
+    </tr>
+    <tr>
+      <td><strong>2</strong></td>
+      <td>Bulk/Block Deal Intelligence</td>
+      <td>+5-10%</td>
+      <td>Low</td>
+      <td>Yes — BulkBlock.py</td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td>Delivery Data (jugaad-data)</td>
+      <td>+5-8%</td>
+      <td>Low</td>
+      <td>Yes — jugaad installed</td>
+    </tr>
+    <tr>
+      <td><strong>4</strong></td>
+      <td>F&O Max OI Confirmation</td>
+      <td>+5-8%</td>
+      <td>Low</td>
+      <td>Yes — fno_max_oi.py</td>
+    </tr>
+    <tr>
+      <td><strong>5</strong></td>
+      <td>Chart Pattern Description + LLM Review</td>
+      <td>+5-10%</td>
+      <td>Medium</td>
+      <td>Yes — OHLCV data</td>
+    </tr>
+    <tr>
+      <td><strong>6</strong></td>
+      <td>Sector Rotation Context</td>
+      <td>+3-5%</td>
+      <td>Low</td>
+      <td>Yes — 3 modules</td>
+    </tr>
+    <tr>
+      <td><strong>7</strong></td>
+      <td>FII/DII Flow Direction</td>
+      <td>+3-5%</td>
+      <td>Low</td>
+      <td>Yes — fii_flows.py</td>
+    </tr>
+    <tr>
+      <td><strong>8</strong></td>
+      <td>Fundamental Quick-Check</td>
+      <td>+3-5%</td>
+      <td>Medium</td>
+      <td>Yes — Tickertape</td>
+    </tr>
+    <tr>
+      <td><strong>9</strong></td>
+      <td>Dynamic Code Modification</td>
+      <td>+5-10%</td>
+      <td>High</td>
+      <td>N/A</td>
+    </tr>
+    <tr>
+      <td><strong>10</strong></td>
+      <td>Intraday Breakout Alerts</td>
+      <td>Timing edge</td>
+      <td>High</td>
+      <td>Yes — Angel live</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="summary-box">
+  <h3>The Foolproof System — What It Looks Like When Everything Is Connected</h3>
+  <p>Imagine the daily run 30 days from now:</p>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Scanner finds 150 stocks with flat bases near resistance</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Delivery data shows 40 of them have rising institutional accumulation</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Bulk deal check shows 8 had superstar investor buying in the last month</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>F&O OI confirms resistance for 5 of those 8 (short-covering potential)</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>NSE announcements show 3 have upcoming results or recent order wins</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Sector analysis shows 2 are in a freshly-rotating sector entering Stage 2</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Tickertape check confirms 2 have accelerating earnings (35%+ growth)</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>LLM reads the full picture for each and writes a one-paragraph thesis</span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Final output: <strong>2-3 stocks with technical + institutional + fundamental + catalyst alignment</strong></span></div>
+    <div class="pipe-step"><span class="pipe-dot"></span><span>Next day: intraday monitor catches the breakout at 10:30 AM, sends you an alert</span></div>
+  </div>
+  <p><strong>Each layer is an independent filter.</strong> A stock that passes ALL of them has 6 independent reasons to break out. The probability of all 6 being wrong simultaneously is negligible. That's how you get to 90%+ — not by tuning one scanner's parameters, but by stacking independent confirmation signals and letting the LLM synthesize them.</p>
+</div>
+
+<h2>What Makes This Different From Any Other Scanner</h2>
+<div class="layer" style="border-color: var(--accent);">
+  <p>Every scanning tool on the market — Chartink, StockEdge, TradingView screeners — does one thing: applies fixed rules to price data. They can't read news. They can't check who bought in bulk deals. They can't cross-reference F&O OI with chart resistance. They can't adapt their rules based on what failed last week.</p>
+  <p><strong>This system does all of that because the LLM is the glue.</strong> It reads structured data from 10+ sources (OHLCV, delivery, bulk deals, F&O OI, sector breadth, FII flows, corporate announcements, fundamentals) and synthesizes a judgement call that no fixed rule set can replicate. And it improves itself every week by analyzing its own mistakes.</p>
+  <p>The rigid code does the heavy lifting — scanning 3,500 stocks, computing indicators, detecting bases. The LLM does the judgement — reading context, filtering garbage, and connecting dots across data sources that were never designed to talk to each other.</p>
+</div>
