@@ -695,13 +695,27 @@ def _angel_download_raw(ticker: str,
 
     frames = []
     win_end = end_d
+    empty_streak = 0
+    failed = False
     for _ in range(_MAX_CHUNKS):
         win_start = max(start_d, win_end - datetime.timedelta(days=cap - 1))
-        df = _angel_fetch_window(ticker, win_start, win_end, interval_const, retries)
-        if df is not None and not df.empty:
+        df, ok = _angel_fetch_window_ex(ticker, win_start, win_end,
+                                        interval_const, retries)
+        if not ok:
+            # A failed call says nothing about whether older bars exist. Keep
+            # walking back and flag the result so the cache does not record a
+            # head watermark that would make this truncation permanent.
+            failed = True
+            empty_streak = 0
+        elif df is not None and not df.empty:
             frames.append(df)
-        elif frames:
-            break  # walked past the start of available history
+            empty_streak = 0
+        else:
+            # A genuinely empty window can be a trading suspension, so require
+            # two in a row before concluding history has ended.
+            empty_streak += 1
+            if frames and empty_streak >= 2:
+                break
         if win_start <= start_d:
             break
         win_end = win_start - datetime.timedelta(days=1)
@@ -709,7 +723,10 @@ def _angel_download_raw(ticker: str,
     if not frames:
         return _empty_df()
     out = pd.concat(frames).sort_index()
-    return out[~out.index.duplicated(keep="last")]
+    out = out[~out.index.duplicated(keep="last")]
+    if failed:
+        out.attrs["incomplete"] = True
+    return out
 
 
 def _angel_fetch_window(ticker: str,
@@ -718,12 +735,28 @@ def _angel_fetch_window(ticker: str,
                         interval_const: str,
                         retries: int = 2) -> pd.DataFrame:
     """One getCandleData call for a window already within Angel's span cap."""
+    return _angel_fetch_window_ex(ticker, start, end, interval_const, retries)[0]
+
+
+def _angel_fetch_window_ex(ticker: str,
+                        start,
+                        end,
+                        interval_const: str,
+                        retries: int = 2):
+    """One getCandleData call, as ``(frame, ok)``.
+
+    ``ok`` is True when the vendor answered, even if it answered with no bars.
+    It is False when the call failed (timeout, rate limit, auth, bad response).
+    Callers need that distinction: an empty answer means there is no data for
+    the window, whereas a failure means nothing at all and must not be read as
+    the end of available history.
+    """
     fromdate = _to_date_str(start)
     todate = _to_date_str(end).replace("09:15", "15:30")
 
     exch, tok = _parse_ticker(ticker)
     if not tok:
-        return _empty_df()
+        return _empty_df(), False
 
     historicParam = {
         "exchange":    exch,
@@ -747,20 +780,20 @@ def _angel_fetch_window(ticker: str,
                     if attempt < retries:
                         time.sleep(0.3)
                         continue
-                    return _empty_df()
+                    return _empty_df(), False
             except Exception:
                 if attempt < retries:
                     time.sleep(0.5 * (attempt + 1)
                                + random.uniform(0.0, 0.25))
                     continue
-                return _empty_df()
+                return _empty_df(), False
 
             if resp is None or not isinstance(resp, dict):
                 if attempt < retries:
                     time.sleep(0.5 * (attempt + 1)
                                + random.uniform(0.0, 0.25))
                     continue
-                return _empty_df()
+                return _empty_df(), False
 
             if not resp.get("status"):
                 err_code = str(resp.get("errorcode", "")).upper()
@@ -774,7 +807,7 @@ def _angel_fetch_window(ticker: str,
                         time.sleep((1.5 ** attempt)
                                    + random.uniform(0.0, 0.5))
                         continue
-                    return _empty_df()
+                    return _empty_df(), False
                 # Auth error — refresh token first, then full re-login
                 if (_is_auth_error_msg(err_code + " " + err_msg)
                         and attempt < retries):
@@ -784,22 +817,22 @@ def _angel_fetch_window(ticker: str,
                     time.sleep(0.5 * (attempt + 1)
                                + random.uniform(0.0, 0.25))
                     continue
-                return _empty_df()
+                return _empty_df(), False
 
             data = resp.get("data") or []
             _rate_limiter.report_success()
             if not data:
-                return _empty_df()
+                return _empty_df(), True          # vendor answered: no bars here
             df = pd.DataFrame(
                 data, columns=["Date", "Open", "High", "Low", "Close", "Volume"],
             )
             df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
             df = df.set_index("Date").sort_index()
             df = df[~df.index.duplicated(keep="last")]
-            return df
+            return df, True
         finally:
             _rate_limiter.release()
-    return _empty_df()
+    return _empty_df(), False
 
 
 def angel_download_many(tickers,

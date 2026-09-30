@@ -2,6 +2,10 @@
 ohlcv_cache.py — persistent incremental daily-OHLCV cache for angel_client
 ==========================================================================
 
+v4.1 — Adds ticker normalization: incoming symbols without an exchange suffix
+(.NS or .BO) are automatically mapped to .NS before key generation, preventing
+duplicate cache files for the same underlying stock.
+
 A two-tier cache placed in front of Angel's getCandleData, for DAILY bars only
 ("1d"). Intraday intervals (5m/15m/…) are never cached here — they bypass this
 module entirely so live/intraday behaviour is unchanged.
@@ -158,6 +162,24 @@ def _persist_cutoff() -> datetime.date:
 
 def _safe_name(ticker: str) -> str:
     return "".join(c if (c.isalnum() or c in "._^-") else "_" for c in str(ticker))
+
+
+def _normalize_ticker(ticker: str) -> str:
+    """Ensure ticker has an exchange suffix (.NS or .BO).
+
+    Bare tickers (e.g. 'RELIANCE') are mapped to .NS (NSE) by default since the
+    overwhelming majority of the scanned universe is NSE-listed. Index symbols
+    (^NSEI, ^CRSLDX etc.) and tickers that already carry a suffix are returned
+    unchanged. This prevents duplicate cache files for the same underlying stock.
+    """
+    t = str(ticker).strip()
+    if t.startswith("^"):
+        return t
+    if t.endswith(".NS") or t.endswith(".BO"):
+        return t
+    if "." in t and t.rsplit(".", 1)[-1].isalpha():
+        return t
+    return t + ".NS"
 
 
 def _cache_file(ticker: str, interval: str) -> str:
@@ -396,6 +418,7 @@ def get(ticker: str, start, end, interval: str,
     `fetch_fn` must return a yfinance-shaped DataFrame (same as angel_download):
     DatetimeIndex + columns [Open, High, Low, Close, Volume].
     """
+    ticker = _normalize_ticker(ticker)
     start_d = _as_date(start)
     end_d = _as_date(end)
     start_ts = pd.Timestamp(start_d)
@@ -455,6 +478,12 @@ def get(ticker: str, start, end, interval: str,
                 fresh = None
             if fresh is not None and not fresh.empty:
                 merged = _merge(merged, fresh)
+                # A partially-failed multi-window fetch still returns bars, but
+                # its oldest bar is an artefact of the failure, not the listing
+                # date. Recording a head watermark here would cache the
+                # truncation permanently.
+                if getattr(fresh, "attrs", {}).get("incomplete"):
+                    asked_head = False
             else:
                 # Inconclusive: trust no watermark this call rather than record
                 # one that would suppress future fetches.
